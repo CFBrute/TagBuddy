@@ -4,50 +4,71 @@
              xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
              x:Class="BarcodeBuddy.Pages.ScanPage"
              Title="Scan">
-    <Grid RowDefinitions="*,Auto">
+    <Grid x:Name="Root" RowDefinitions="*,Auto">
 
-        <zxing:CameraBarcodeReaderView x:Name="Camera"
-                                       Grid.Row="0"
-                                       IsDetecting="False"
-                                       BarcodesDetected="OnBarcodesDetected" />
+        <!-- Camera area. The camera view is created when scanning starts and removed when a result is shown,
+             which releases the camera. -->
+        <Grid x:Name="CameraArea" Grid.Row="0">
+            <ContentView x:Name="CameraHost" />
 
-        <Label x:Name="PermissionLabel"
-               Grid.Row="0"
-               Text="Camera permission is needed to scan barcodes."
-               IsVisible="False"
-               HorizontalOptions="Center"
-               VerticalOptions="Center"
-               Padding="30"
-               HorizontalTextAlignment="Center" />
-
-        <Button x:Name="TorchButton"
-                Grid.Row="0"
-                Text="Torch"
-                Clicked="OnTorch"
-                BackgroundColor="#80000000"
-                HorizontalOptions="End"
-                VerticalOptions="Start"
-                Margin="12" />
-
-        <VerticalStackLayout Grid.Row="1" Padding="20" Spacing="10">
-            <Label x:Name="StatusLabel"
-                   Text="Point the camera at a barcode"
-                   TextColor="Gray"
+            <Label x:Name="PermissionLabel"
+                   Text="Camera permission is needed to scan codes."
+                   IsVisible="False"
+                   HorizontalOptions="Center"
+                   VerticalOptions="Center"
+                   Padding="30"
                    HorizontalTextAlignment="Center" />
-            <Label x:Name="ResultLabel"
-                   FontSize="18"
-                   FontFamily="OpenSansSemibold"
-                   HorizontalTextAlignment="Center"
-                   LineBreakMode="WordWrap" />
-            <HorizontalStackLayout x:Name="ResultButtons" Spacing="10" HorizontalOptions="Center" IsVisible="False">
-                <Button Text="Open in generator" Clicked="OnUseInGenerator" />
-                <Button Text="Save" Clicked="OnSave" />
-                <Button Text="Copy" Clicked="OnCopy" BackgroundColor="#6B7280" />
+
+            <HorizontalStackLayout HorizontalOptions="End" VerticalOptions="Start" Margin="12" Spacing="8">
+                <Button Text="From image"
+                        Clicked="OnPickImage"
+                        BackgroundColor="#80000000"
+                        TextColor="White"
+                        ToolTipProperties.Text="Read a code from a picture on the phone" />
+                <Button x:Name="TorchButton"
+                        Text="Torch"
+                        Clicked="OnTorch"
+                        BackgroundColor="#80000000"
+                        TextColor="White" />
             </HorizontalStackLayout>
-            <Button x:Name="ScanAgainButton"
-                    Text="Scan again"
-                    Clicked="OnScanAgain"
-                    IsVisible="False" />
-        </VerticalStackLayout>
+        </Grid>
+
+        <ScrollView x:Name="ResultScroll" Grid.Row="1" MaximumHeightRequest="160">
+            <VerticalStackLayout Padding="20" Spacing="12">
+
+                <!-- Shown once a result exists: camera is off, these bring it back or read another picture -->
+                <Grid x:Name="ResultTopBar" ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="False">
+                    <Button Grid.Column="0" Text="Scan again" Clicked="OnScanAgain" />
+                    <Button Grid.Column="1" Text="From image" Clicked="OnPickImage" BackgroundColor="#6B7280" TextColor="White" />
+                </Grid>
+
+                <Label x:Name="StatusLabel"
+                       Text="Point the camera at a barcode or QR code"
+                       TextColor="Gray"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="ResultLabel"
+                       FontSize="18"
+                       FontFamily="OpenSansSemibold"
+                       HorizontalTextAlignment="Center"
+                       LineBreakMode="WordWrap" />
+
+                <VerticalStackLayout x:Name="ResultButtons" Spacing="12" IsVisible="False">
+                    <HorizontalStackLayout HorizontalOptions="Center">
+                        <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                                Clicked="OnSave" SemanticProperties.Description="Add to favorites" ToolTipProperties.Text="Add to favorites" />
+                        <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
+                                Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
+                        <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                                Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
+                    </HorizontalStackLayout>
+                    <Button Text="Open in generator" Clicked="OnUseInGenerator" HorizontalOptions="Center" />
+                </VerticalStackLayout>
+
+                <!-- Details about the scanned code (format, content kind, error correction, ...) -->
+                <VerticalStackLayout x:Name="Details" Spacing="4" IsVisible="False"
+                                     Padding="12"
+                                     BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+            </VerticalStackLayout>
+        </ScrollView>
     </Grid>
 </ContentPage>

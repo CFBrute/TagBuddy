@@ -21,6 +21,7 @@ public static class MauiProgram
 
         builder.Services.AddSingleton<FavoritesService>();
         builder.Services.AddTransient<GeneratePage>();
+        builder.Services.AddTransient<QrPage>();
         builder.Services.AddTransient<FavoritesPage>();
         builder.Services.AddTransient<ScanPage>();
         builder.Services.AddTransient<ShowBarcodePage>();

@@ -1,10 +1,13 @@
 using BarcodeBuddy.Models;
+using BarcodeBuddy.Services;
 
 namespace BarcodeBuddy.Pages;
 
 public partial class ShowBarcodePage : ContentPage, IQueryAttributable
 {
     public const string Route = "show";
+
+    private BarcodeItem? _item;
 
     public ShowBarcodePage()
     {
@@ -18,14 +21,26 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
     {
         if (query.TryGetValue("item", out var obj) && obj is BarcodeItem item)
         {
+            _item = item;
             var format = BarcodeTypes.Get(item.Format);
-            Generator.Format = format.ZxingFormat;
-            Generator.HeightRequest = format.IsLinear ? 220 : 340;
-            Generator.WidthRequest = format.IsLinear ? -1 : 340;
-            Generator.HorizontalOptions = format.IsLinear ? LayoutOptions.Fill : LayoutOptions.Center;
-            Generator.Value = item.Value;
+            Barcode.Matrix = BarcodeRenderer.TryEncode(item, out _);
+            if (format.IsLinear)
+            {
+                Barcode.HeightRequest = 220;
+                Barcode.WidthRequest = -1;
+                Barcode.HorizontalOptions = LayoutOptions.Fill;
+            }
+            else
+            {
+                Barcode.HeightRequest = 340;
+                Barcode.WidthRequest = 340;
+                Barcode.HorizontalOptions = LayoutOptions.Center;
+            }
             ValueLabel.Text = item.Value;
             NameLabel.Text = string.IsNullOrWhiteSpace(item.Name) ? format.Label : $"{item.Name}  -  {format.Label}";
+
+            OpenLinkButton.IsVisible = Links.TryGetOpenable(item.Value, out var uri);
+            if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
         }
     }
 
@@ -45,9 +60,24 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
 
     private async void OnTapped(object? sender, TappedEventArgs e) =>
         await Shell.Current.GoToAsync("..");
+
+    private async void OnShare(object? sender, EventArgs e)
+    {
+        if (_item is not null) await CodeActions.ShareImageAsync(this, _item);
+    }
+
+    private async void OnSaveImage(object? sender, EventArgs e)
+    {
+        if (_item is not null) await CodeActions.SaveImageAsync(this, _item);
+    }
+
+    private async void OnOpenLink(object? sender, EventArgs e)
+    {
+        if (_item is not null) await CodeActions.OpenLinkAsync(this, _item.Value);
+    }
 }
 
-/// <summary>Pushes the screen to full brightness so scanners can read the barcode reliably.</summary>
+/// <summary>Pushes the screen to full brightness so scanners can read the code reliably.</summary>
 static class ScreenBrightness
 {
     public static void SetMax() => Set(1f);

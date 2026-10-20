@@ -1,27 +1,41 @@
 using System.Text.RegularExpressions;
 using ZXing.Net.Maui;
+using Core = ZXing;
 
 namespace BarcodeBuddy.Models;
 
-public record FormatInfo(string Key, string Label, BarcodeFormat ZxingFormat, bool IsLinear, string Hint);
+public record FormatInfo(
+    string Key,
+    string Label,
+    BarcodeFormat ZxingFormat,
+    Core.BarcodeFormat CoreFormat,
+    bool IsLinear,
+    string Hint);
 
 public static class BarcodeTypes
 {
-    public static readonly IReadOnlyList<FormatInfo> All =
+    public static readonly FormatInfo QrCode =
+        new("QrCode", "QR Code", BarcodeFormat.QrCode, Core.BarcodeFormat.QR_CODE, false,
+            "Any text: a link, Wi-Fi details, a phone number, a note");
+
+    /// <summary>Linear (1D) formats offered on the Barcode tab.</summary>
+    public static readonly IReadOnlyList<FormatInfo> Linear =
     [
-        new("Code128", "Code 128", BarcodeFormat.Code128, true, "Any ASCII text (letters, digits, symbols)"),
-        new("QrCode", "QR Code", BarcodeFormat.QrCode, false, "Any text: a link, Wi-Fi details, a phone number, a note"),
-        new("Code39", "Code 39", BarcodeFormat.Code39, true, "Uppercase A-Z, digits, space and - . $ / + %"),
-        new("Code93", "Code 93", BarcodeFormat.Code93, true, "Uppercase A-Z, digits, space and - . $ / + %"),
-        new("Ean13", "EAN-13", BarcodeFormat.Ean13, true, "12 digits (check digit added) or 13 digits"),
-        new("Ean8", "EAN-8", BarcodeFormat.Ean8, true, "7 digits (check digit added) or 8 digits"),
-        new("UpcA", "UPC-A", BarcodeFormat.UpcA, true, "11 digits (check digit added) or 12 digits"),
-        new("Itf", "ITF (Interleaved 2 of 5)", BarcodeFormat.Itf, true, "An even number of digits"),
-        new("Codabar", "Codabar", BarcodeFormat.Codabar, true, "Digits and - $ : / . +"),
+        new("Code128", "Code 128", BarcodeFormat.Code128, Core.BarcodeFormat.CODE_128, true, "Any ASCII text (letters, digits, symbols)"),
+        new("Code39", "Code 39", BarcodeFormat.Code39, Core.BarcodeFormat.CODE_39, true, "Uppercase A-Z, digits, space and - . $ / + %"),
+        new("Code93", "Code 93", BarcodeFormat.Code93, Core.BarcodeFormat.CODE_93, true, "Uppercase A-Z, digits, space and - . $ / + %"),
+        new("Ean13", "EAN-13", BarcodeFormat.Ean13, Core.BarcodeFormat.EAN_13, true, "12 digits (check digit added) or 13 digits"),
+        new("Ean8", "EAN-8", BarcodeFormat.Ean8, Core.BarcodeFormat.EAN_8, true, "7 digits (check digit added) or 8 digits"),
+        new("UpcA", "UPC-A", BarcodeFormat.UpcA, Core.BarcodeFormat.UPC_A, true, "11 digits (check digit added) or 12 digits"),
+        new("Itf", "ITF (Interleaved 2 of 5)", BarcodeFormat.Itf, Core.BarcodeFormat.ITF, true, "An even number of digits"),
+        new("Codabar", "Codabar", BarcodeFormat.Codabar, Core.BarcodeFormat.CODABAR, true, "Digits and - $ : / . +"),
     ];
 
+    /// <summary>Every format the app can generate (used for favorites and scan results).</summary>
+    public static readonly IReadOnlyList<FormatInfo> All = [.. Linear, QrCode];
+
     public static FormatInfo Get(string key) =>
-        All.FirstOrDefault(f => f.Key == key) ?? All[0];
+        All.FirstOrDefault(f => f.Key == key) ?? Linear[0];
 
     public static string LabelFor(string key) => Get(key).Label;
 
@@ -32,7 +46,7 @@ public static class BarcodeTypes
     public static string? Validate(string key, string value)
     {
         if (string.IsNullOrEmpty(value))
-            return "Enter some text to generate a barcode.";
+            return "Enter some text to generate a code.";
 
         switch (key)
         {

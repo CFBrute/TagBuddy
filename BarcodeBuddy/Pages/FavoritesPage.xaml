@@ -11,7 +11,7 @@
             <CollectionView.EmptyView>
                 <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="8" Padding="30">
                     <Label Text="No favorites yet" FontSize="18" HorizontalTextAlignment="Center" />
-                    <Label Text="Generate a barcode and press Add to favorites to keep it here."
+                    <Label Text="Generate a code and press Add to favorites to keep it here."
                            TextColor="Gray" HorizontalTextAlignment="Center" />
                 </VerticalStackLayout>
             </CollectionView.EmptyView>
@@ -27,7 +27,7 @@
                             </SwipeItems>
                         </SwipeView.RightItems>
                         <Border Margin="0,0,0,10"
-                                Padding="14"
+                                Padding="14,10,6,10"
                                 Stroke="#D1D5DB"
                                 StrokeThickness="1"
                                 BackgroundColor="{AppThemeBinding Light=White, Dark=#1F2937}">
@@ -37,7 +37,7 @@
                             <Border.GestureRecognizers>
                                 <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
                             </Border.GestureRecognizers>
-                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8">
                                 <Label Grid.Row="0" Grid.Column="0"
                                        Text="{Binding DisplayName}"
                                        FontFamily="OpenSansSemibold"
@@ -52,8 +52,16 @@
                                        Text="{Binding FormatLabel}"
                                        FontSize="11"
                                        TextColor="#C7780B"
-                                       VerticalOptions="Center"
-                                       Margin="10,0,0,0" />
+                                       VerticalOptions="Center" />
+                                <Button Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
+                                        Text="⋮"
+                                        FontSize="22"
+                                        Padding="8,0"
+                                        BackgroundColor="Transparent"
+                                        TextColor="{AppThemeBinding Light=#374151, Dark=#D1D5DB}"
+                                        VerticalOptions="Center"
+                                        Clicked="OnMenuClicked"
+                                        CommandParameter="{Binding .}" />
                             </Grid>
                         </Border>
                     </SwipeView>

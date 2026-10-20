@@ -7,10 +7,17 @@
     Title="Barcode Buddy">
 
     <TabBar>
-        <ShellContent Title="Generate"
-                      Icon="tab_generate.png"
-                      Route="generate"
-                      ContentTemplate="{DataTemplate pages:GeneratePage}" />
+        <!-- Generate has two top tabs: linear barcodes and QR codes -->
+        <Tab Title="Generate"
+             Icon="tab_generate.png"
+             Route="generate">
+            <ShellContent Title="Barcode"
+                          Route="barcode"
+                          ContentTemplate="{DataTemplate pages:GeneratePage}" />
+            <ShellContent Title="QR Code"
+                          Route="qr"
+                          ContentTemplate="{DataTemplate pages:QrPage}" />
+        </Tab>
         <ShellContent Title="Favorites"
                       Icon="tab_favorites.png"
                       Route="favorites"

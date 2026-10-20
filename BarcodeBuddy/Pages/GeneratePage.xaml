@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             xmlns:controls="clr-namespace:BarcodeBuddy.Controls"
              x:Class="BarcodeBuddy.Pages.GeneratePage"
              Title="Generate">
     <ScrollView>
@@ -37,13 +37,10 @@
                     <TapGestureRecognizer Tapped="OnBarcodeTapped" />
                 </Border.GestureRecognizers>
                 <VerticalStackLayout Spacing="8">
-                    <zxing:BarcodeGeneratorView x:Name="Generator"
-                                                Format="Code128"
-                                                ForegroundColor="Black"
-                                                BackgroundColor="White"
-                                                BarcodeMargin="2"
-                                                HeightRequest="140"
-                                                HorizontalOptions="Fill" />
+                    <controls:BarcodeView x:Name="Barcode"
+                                          HeightRequest="140"
+                                          HorizontalOptions="Fill"
+                                          InputTransparent="True" />
                     <Label x:Name="ValueLabel"
                            HorizontalTextAlignment="Center"
                            TextColor="Black"
@@ -55,14 +52,15 @@
                 </VerticalStackLayout>
             </Border>
 
-            <HorizontalStackLayout Spacing="10" HorizontalOptions="Center">
-                <Button x:Name="FavoriteButton"
-                        Text="Add to favorites"
-                        Clicked="OnAddFavorite"
-                        IsEnabled="False" />
-                <Button Text="Copy text"
-                        Clicked="OnCopy"
-                        BackgroundColor="#6B7280" />
+            <HorizontalStackLayout x:Name="Actions" HorizontalOptions="Center" IsVisible="False">
+                <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                        Clicked="OnAddFavorite" SemanticProperties.Description="Add to favorites" ToolTipProperties.Text="Add to favorites" />
+                <Button Style="{StaticResource IconButton}" ImageSource="ic_share.png"
+                        Clicked="OnShare" SemanticProperties.Description="Share image" ToolTipProperties.Text="Share image" />
+                <Button Style="{StaticResource IconButton}" ImageSource="ic_save.png"
+                        Clicked="OnSaveImage" SemanticProperties.Description="Save image to gallery" ToolTipProperties.Text="Save image to gallery" />
+                <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                        Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
             </HorizontalStackLayout>
 
         </VerticalStackLayout>

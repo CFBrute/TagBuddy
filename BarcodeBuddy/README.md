@@ -4,23 +4,46 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes.
 
 ## Features
 
-- **Generate** tab: pick a barcode type, type text, and the barcode renders live.
-  Supported types: Code 128, Code 39, Code 93, EAN-13, EAN-8, UPC-A, ITF, Codabar, QR Code.
-  Input is validated per type (e.g. EAN-13 needs 12 or 13 digits) with a hint shown under the picker.
-  Tap the barcode to open it full screen at maximum brightness for scanning.
-- **Favorites** tab: save generated or scanned barcodes with an optional name.
-  Tap to show full screen, swipe left to delete. Stored as JSON in the app's private data folder.
-- **Scan** tab: camera scanner (ZXing). A scanned code can be copied, saved to favorites, or opened in the generator.
+- **Generate / Barcode** tab: pick a linear type, type text, and the barcode renders live.
+  Types: Code 128, Code 39, Code 93, EAN-13, EAN-8, UPC-A, ITF, Codabar. Input is validated per type.
+  Tap the code to open it full screen at maximum brightness for scanning.
+- **Everywhere a code is shown** (both Generate tabs, full screen, Favorites menu): icon buttons (long-press for a label): share sends a PNG
+  of the code through the Android share sheet, save stores it under Pictures/Barcode Buddy in the
+  gallery, and an open-link button appears when the value is a web link, mail address, phone number, SMS or
+  map location.
+- **Generate / QR Code** tab: multi-line content, live QR with a readout of version, size and byte count.
+  "Advanced options" exposes the error-correction level (L/M/Q/H) and the quiet-zone margin.
+- **Favorites** tab: saved codes with their options. Tap to show full screen; the menu on each row offers
+  Open link (for links), Share image, Save image, "Use text in Barcode generator", "Use text in QR generator",
+  "Copy text" and "Delete". Stored as JSON in the
+  app's private data folder.
+- **Scan** tab: camera scanner (ZXing), plus "From image" to decode a code from a picture on the phone.
+  Shows what the code contains (web link, Wi-Fi, contact card, ...),
+  its length, and decoder details such as the QR error-correction level, structured-append parts and byte
+  segments. Wi-Fi and vCard payloads are broken into fields. A scanned code can be copied, saved, or opened in
+  the matching generator.
+
+Codes are rendered by the app itself (`Controls/BarcodeView.cs` draws the module matrix produced by the ZXing
+encoder in `Services/BarcodeRenderer.cs`), which is what makes the QR options possible.
 
 ## Project layout
 
-- `Models/BarcodeTypes.cs` – list of supported formats, hints, and per-format validation.
-- `Models/BarcodeItem.cs` – a saved barcode (name, value, format).
-- `Services/FavoritesService.cs` – loads/saves favorites to `favorites.json`.
-- `Pages/GeneratePage` – text entry + live barcode.
-- `Pages/ShowBarcodePage` – full-screen barcode display.
-- `Pages/FavoritesPage` – saved list.
-- `Pages/ScanPage` – camera scanner.
+- `Models/BarcodeTypes.cs` - supported formats, hints and per-format validation.
+- `Models/BarcodeItem.cs` - a saved code (name, value, format, QR options).
+- `Services/BarcodeRenderer.cs` - text to module matrix via the ZXing encoder.
+- `Services/ScanDetails.cs` - explains scanned content and decoder metadata.
+- `Services/ScanResult.cs` - one result type for camera scans and picture decodes.
+- `Services/ImageDecoder.cs` - finds a code inside a picked photo.
+- `Services/BarcodeImage.cs` - renders a code to PNG, shares it, saves it to the gallery.
+- `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
+- `Services/CodeActions.cs` - the shared share / save / open / copy actions.
+- `Services/FavoritesService.cs` - loads/saves favorites to `favorites.json`.
+- `Controls/BarcodeView.cs` - draws a module matrix as bars or squares.
+- `Pages/GeneratePage` - linear barcode tab.
+- `Pages/QrPage` - QR tab with advanced options.
+- `Pages/ShowBarcodePage` - full-screen display.
+- `Pages/FavoritesPage` - saved list with per-item actions.
+- `Pages/ScanPage` - camera scanner with details.
 
 ## Building
 

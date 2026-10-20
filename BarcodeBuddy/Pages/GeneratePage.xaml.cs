@@ -18,7 +18,7 @@ public partial class GeneratePage : ContentPage
         InitializeComponent();
         _favorites = favorites;
 
-        FormatPicker.ItemsSource = BarcodeTypes.All.Select(f => f.Label).ToList();
+        FormatPicker.ItemsSource = BarcodeTypes.Linear.Select(f => f.Label).ToList();
         FormatPicker.SelectedIndex = 0;
     }
 
@@ -28,14 +28,21 @@ public partial class GeneratePage : ContentPage
         if (IncomingValue is null) return;
 
         var format = BarcodeTypes.Get(IncomingFormat ?? "Code128");
-        FormatPicker.SelectedIndex = BarcodeTypes.All.ToList().IndexOf(format);
+        var index = BarcodeTypes.Linear.ToList().IndexOf(format);
+        FormatPicker.SelectedIndex = index < 0 ? 0 : index;
         ValueEntry.Text = IncomingValue;
         IncomingValue = null;
         IncomingFormat = null;
     }
 
     private FormatInfo CurrentFormat =>
-        BarcodeTypes.All[Math.Max(0, FormatPicker.SelectedIndex)];
+        BarcodeTypes.Linear[Math.Max(0, FormatPicker.SelectedIndex)];
+
+    private BarcodeItem CurrentItem() => new()
+    {
+        Value = ValueEntry.Text,
+        Format = CurrentFormat.Key,
+    };
 
     private void OnFormatChanged(object? sender, EventArgs e)
     {
@@ -51,63 +58,60 @@ public partial class GeneratePage : ContentPage
         var format = CurrentFormat;
         var error = BarcodeTypes.Validate(format.Key, value);
 
-        _valid = error is null;
+        var matrix = error is null ? BarcodeRenderer.TryEncode(format, value, null, out error) : null;
+
+        _valid = matrix is not null;
         ErrorLabel.Text = error ?? string.Empty;
         ErrorLabel.IsVisible = error is not null && value.Length > 0;
-        FavoriteButton.IsEnabled = _valid;
         BarcodeCard.IsVisible = _valid;
+        Actions.IsVisible = _valid;
+        var isLink = Links.TryGetOpenable(value, out var uri);
+        OpenLinkButton.IsVisible = _valid && isLink;
+        if (isLink) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
 
         if (!_valid) return;
 
-        Generator.Format = format.ZxingFormat;
-        // Linear codes get a wide strip; 2D codes such as QR get a square.
-        Generator.HeightRequest = format.IsLinear ? 140 : 260;
-        Generator.WidthRequest = format.IsLinear ? -1 : 260;
-        Generator.HorizontalOptions = format.IsLinear ? LayoutOptions.Fill : LayoutOptions.Center;
-        Generator.Value = value;
+        Barcode.Matrix = matrix;
         ValueLabel.Text = value;
     }
 
     private async void OnBarcodeTapped(object? sender, TappedEventArgs e)
     {
-        if (!_valid) return;
-        await ShowBarcodePage.ShowAsync(new BarcodeItem
-        {
-            Value = ValueEntry.Text,
-            Format = CurrentFormat.Key,
-        });
+        if (_valid) await ShowBarcodePage.ShowAsync(CurrentItem());
+    }
+
+    private async void OnShare(object? sender, EventArgs e)
+    {
+        if (_valid) await CodeActions.ShareImageAsync(this, CurrentItem());
+    }
+
+    private async void OnSaveImage(object? sender, EventArgs e)
+    {
+        if (_valid) await CodeActions.SaveImageAsync(this, CurrentItem());
+    }
+
+    private async void OnOpenLink(object? sender, EventArgs e)
+    {
+        if (_valid) await CodeActions.OpenLinkAsync(this, ValueEntry.Text);
     }
 
     private async void OnAddFavorite(object? sender, EventArgs e)
     {
         if (!_valid) return;
-        var value = ValueEntry.Text;
-        var format = CurrentFormat;
+        var item = CurrentItem();
 
-        if (_favorites.Contains(value, format.Key))
+        if (_favorites.Contains(item.Value, item.Format))
         {
             await DisplayAlertAsync("Already saved", "This barcode is already in your favorites.", "OK");
             return;
         }
 
         var name = await DisplayPromptAsync("Add to favorites", "Give it a name (optional):",
-            accept: "Save", cancel: "Cancel", placeholder: value, maxLength: 60);
+            accept: "Save", cancel: "Cancel", placeholder: item.Value, maxLength: 60);
         if (name is null) return;
 
-        await _favorites.AddAsync(new BarcodeItem
-        {
-            Name = name.Trim(),
-            Value = value,
-            Format = format.Key,
-        });
-
+        item.Name = name.Trim();
+        await _favorites.AddAsync(item);
         await DisplayAlertAsync("Saved to favorites", null, "OK");
-    }
-
-    private async void OnCopy(object? sender, EventArgs e)
-    {
-        if (string.IsNullOrEmpty(ValueEntry.Text)) return;
-        await Clipboard.Default.SetTextAsync(ValueEntry.Text);
-        await DisplayAlertAsync("Copied", null, "OK");
     }
 }

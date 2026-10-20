@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:BarcodeBuddy.Controls"
+             x:Class="BarcodeBuddy.Pages.QrPage"
+             Title="Generate">
+    <ScrollView x:Name="Scroller">
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <Label Text="Content" FontAttributes="Bold" />
+            <Editor x:Name="ValueEditor"
+                    Placeholder="Type a link, Wi-Fi details, a note..."
+                    AutoSize="TextChanges"
+                    MinimumHeightRequest="60"
+                    TextChanged="OnValueChanged" />
+
+            <Label x:Name="ErrorLabel"
+                   TextColor="#DC2626"
+                   FontSize="13"
+                   IsVisible="False" />
+
+            <!-- Options sit above the result so changing them never scrolls the result out of view -->
+            <Button x:Name="AdvancedButton"
+                    Text="Advanced options  ▸"
+                    Clicked="OnToggleAdvanced"
+                    BackgroundColor="Transparent"
+                    TextColor="{AppThemeBinding Light={StaticResource Tertiary}, Dark={StaticResource Primary}}"
+                    HorizontalOptions="Start"
+                    Padding="0"
+                    FontSize="14" />
+
+            <VerticalStackLayout x:Name="AdvancedPanel" Spacing="12" IsVisible="False"
+                                 Padding="12"
+                                 BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+
+                <Label Text="Error correction" FontAttributes="Bold" />
+                <Label Text="More correction lets a damaged or partly covered code still scan, at the cost of a denser code. Pick H if you plan to print a logo over the middle."
+                       FontSize="12" TextColor="Gray" />
+                <Picker x:Name="EccPicker" SelectedIndexChanged="OnOptionsChanged" />
+
+                <Label Text="Quiet zone" FontAttributes="Bold" />
+                <Label Text="White margin around the code, in modules. The QR standard asks for 4; 2 is enough on a bright screen."
+                       FontSize="12" TextColor="Gray" />
+                <HorizontalStackLayout Spacing="12">
+                    <Stepper x:Name="MarginStepper" Minimum="0" Maximum="4" Increment="1" Value="2"
+                             ValueChanged="OnMarginChanged" />
+                    <Label x:Name="MarginLabel" Text="2 modules" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+
+                <Label Text="Encoding" FontAttributes="Bold" />
+                <Label Text="Text is stored as UTF-8. Digits-only or uppercase-only content is packed more tightly automatically."
+                       FontSize="12" TextColor="Gray" />
+            </VerticalStackLayout>
+
+            <Border x:Name="QrCard"
+                    BackgroundColor="White"
+                    Stroke="#D1D5DB"
+                    StrokeThickness="1"
+                    Padding="12"
+                    IsVisible="False">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="10" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnQrTapped" />
+                </Border.GestureRecognizers>
+                <VerticalStackLayout Spacing="8">
+                    <controls:BarcodeView x:Name="Qr"
+                                          WidthRequest="260"
+                                          HeightRequest="260"
+                                          HorizontalOptions="Center"
+                                          InputTransparent="True" />
+                    <Label x:Name="InfoLabel"
+                           HorizontalTextAlignment="Center"
+                           FontSize="12"
+                           TextColor="Gray" />
+                    <Label Text="Tap to show full screen"
+                           HorizontalTextAlignment="Center"
+                           FontSize="11"
+                           TextColor="Gray" />
+                </VerticalStackLayout>
+            </Border>
+
+            <HorizontalStackLayout x:Name="Actions" HorizontalOptions="Center" IsVisible="False">
+                <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                        Clicked="OnAddFavorite" SemanticProperties.Description="Add to favorites" ToolTipProperties.Text="Add to favorites" />
+                <Button Style="{StaticResource IconButton}" ImageSource="ic_share.png"
+                        Clicked="OnShare" SemanticProperties.Description="Share image" ToolTipProperties.Text="Share image" />
+                <Button Style="{StaticResource IconButton}" ImageSource="ic_save.png"
+                        Clicked="OnSaveImage" SemanticProperties.Description="Save image to gallery" ToolTipProperties.Text="Save image to gallery" />
+                <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                        Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
