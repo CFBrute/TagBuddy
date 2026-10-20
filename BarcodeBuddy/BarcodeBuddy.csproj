@@ -10,7 +10,7 @@
 		<Nullable>enable</Nullable>
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
-		<ApplicationTitle>Barcode Buddy</ApplicationTitle>
+		<ApplicationTitle>Tag Buddy</ApplicationTitle>
 		<ApplicationId>com.barcodebuddy.app</ApplicationId>
 		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>

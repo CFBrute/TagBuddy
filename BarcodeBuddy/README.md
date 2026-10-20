@@ -1,4 +1,4 @@
-# Barcode Buddy
+# Tag Buddy
 
 Android-only .NET MAUI app (C#) that generates and scans barcodes.
 
@@ -8,7 +8,7 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes.
   Types: Code 128, Code 39, Code 93, EAN-13, EAN-8, UPC-A, ITF, Codabar. Input is validated per type.
   Tap the code to open it full screen at maximum brightness for scanning.
 - **Everywhere a code is shown** (both Generate tabs, full screen, Favorites menu): icon buttons (long-press for a label): share sends a PNG
-  of the code through the Android share sheet, save stores it under Pictures/Barcode Buddy in the
+  of the code through the Android share sheet, save stores it under Pictures/Tag Buddy in the
   gallery, and an open-link button appears when the value is a web link, mail address, phone number, SMS or
   map location.
 - **Generate / QR Code** tab: multi-line content, live QR with a readout of version, size and byte count.

@@ -26,7 +26,7 @@ public static class BarcodeImage
         });
     }
 
-    /// <summary>Saves the image under Pictures/Barcode Buddy. Returns the display path, or null when unsupported.</summary>
+    /// <summary>Saves the image under Pictures/Tag Buddy. Returns the display path, or null when unsupported.</summary>
     public static async Task<string?> SaveToGalleryAsync(BarcodeItem item)
     {
         var png = RenderPng(item);
@@ -38,14 +38,14 @@ public static class BarcodeImage
         var values = new Android.Content.ContentValues();
         values.Put(Android.Provider.MediaStore.IMediaColumns.DisplayName, name);
         values.Put(Android.Provider.MediaStore.IMediaColumns.MimeType, "image/png");
-        values.Put(Android.Provider.MediaStore.IMediaColumns.RelativePath, "Pictures/Barcode Buddy");
+        values.Put(Android.Provider.MediaStore.IMediaColumns.RelativePath, "Pictures/Tag Buddy");
 
         var uri = resolver.Insert(Android.Provider.MediaStore.Images.Media.ExternalContentUri!, values)
             ?? throw new InvalidOperationException("The gallery refused the image.");
         using (var stream = resolver.OpenOutputStream(uri)!)
             await stream.WriteAsync(png);
 
-        return "Pictures/Barcode Buddy/" + name;
+        return "Pictures/Tag Buddy/" + name;
 #else
         return null;
 #endif
