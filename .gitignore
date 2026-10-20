@@ -13,3 +13,6 @@ obj/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local signing secrets (keystore passwords)
+*.local.props

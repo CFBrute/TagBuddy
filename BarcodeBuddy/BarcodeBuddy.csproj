@@ -21,6 +21,14 @@
 		<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
 	</PropertyGroup>
 
+	<!-- Release: produce a single APK for sideloading. Signing comes from Signing.local.props (git-ignored):
+	     AndroidKeyStore, AndroidSigningKeyStore, AndroidSigningKeyAlias, AndroidSigningKeyPass, AndroidSigningStorePass. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<AndroidPackageFormats>apk</AndroidPackageFormats>
+		<AndroidUseAapt2>true</AndroidUseAapt2>
+	</PropertyGroup>
+	<Import Project="Signing.local.props" Condition="Exists('Signing.local.props')" />
+
 	<ItemGroup>
 		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" ForegroundScale="1.0" Color="#FFFFFF" />
 		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#121212" BaseSize="288,288" />

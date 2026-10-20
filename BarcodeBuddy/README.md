@@ -48,6 +48,28 @@ Keep the project somewhere short such as `C:\dotnet\BarcodeBuddy`, or redirect t
 dotnet build -c Debug -p:BaseIntermediateOutputPath=C:/tmp/bb/obj/ -p:BaseOutputPath=C:/tmp/bb/bin/
 ```
 
+## Release build (signed, for sideloading)
+
+Release builds are signed with a self-signed keystore that lives outside the repo. The project imports
+`Signing.local.props` (git-ignored) when it exists; it sets `AndroidKeyStore`, `AndroidSigningKeyStore`,
+`AndroidSigningKeyAlias`, `AndroidSigningKeyPass` and `AndroidSigningStorePass`.
+
+```bash
+dotnet publish -c Release -f net10.0-android
+```
+
+The signed APK lands in `bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
+A Release APK and a Debug APK use different signing keys, so switching between them on a phone needs an
+uninstall first (`adb uninstall com.barcodebuddy.app`).
+
+To create a new keystore (keytool ships with the JDK installed by the Android workload):
+
+```bash
+keytool -genkeypair -v -keystore barcodebuddy.keystore -alias barcodebuddy -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Keep the keystore and its password safe: the same key must sign every future update, including a Play Store release.
+
 ## Dependencies
 
 - [ZXing.Net.Maui.Controls](https://github.com/Redth/ZXing.Net.Maui) 0.4.0 – barcode generation view and camera reader view.
