@@ -6,53 +6,119 @@
     <ScrollView>
         <VerticalStackLayout Padding="20" Spacing="12">
 
-            <!-- Waiting state -->
-            <VerticalStackLayout x:Name="WaitingPanel" Spacing="12" Padding="0,40,0,20">
-                <Image Source="tab_nfc.png" WidthRequest="72" HeightRequest="72" HorizontalOptions="Center" Opacity="0.6" />
-                <Label x:Name="StatusLabel"
-                       Text="Hold a tag or card against the back of the phone"
-                       FontSize="16"
-                       HorizontalTextAlignment="Center" />
-                <Label x:Name="HintLabel"
-                       Text="Works with NFC stickers, access cards, transit and bank cards and ID documents. Content shows when the tag carries a link or text; protected cards show only their type and serial number."
-                       FontSize="12" TextColor="Gray"
-                       HorizontalTextAlignment="Center" />
-                <Button x:Name="SettingsButton"
-                        Text="Turn on NFC"
-                        Clicked="OnOpenSettings"
-                        HorizontalOptions="Center"
-                        IsVisible="False" />
-            </VerticalStackLayout>
+            <!-- Read / Write mode switch -->
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                <Button x:Name="ReadModeButton" Grid.Column="0" Text="Read a tag" Clicked="OnReadMode" />
+                <Button x:Name="WriteModeButton" Grid.Column="1" Text="Write a tag" Clicked="OnWriteMode"
+                        BackgroundColor="#6B7280" TextColor="White" />
+            </Grid>
 
-            <!-- Result -->
-            <VerticalStackLayout x:Name="ResultPanel" Spacing="12" IsVisible="False">
-                <Label x:Name="TagTitle"
-                       FontSize="13"
-                       TextColor="Gray"
-                       HorizontalTextAlignment="Center" />
-                <Label x:Name="ContentLabel"
-                       FontSize="18"
-                       FontFamily="OpenSansSemibold"
-                       HorizontalTextAlignment="Center"
-                       LineBreakMode="WordWrap" />
+            <!-- ===================== READ ===================== -->
+            <VerticalStackLayout x:Name="ReadSection" Spacing="12">
 
-                <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
-                    <HorizontalStackLayout HorizontalOptions="Center">
-                        <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
-                                Clicked="OnSave" SemanticProperties.Description="Add to favorites as QR code" ToolTipProperties.Text="Add to favorites as QR code" />
-                        <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
-                                Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
-                        <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
-                                Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
-                    </HorizontalStackLayout>
-                    <Button Text="Open in QR generator" Clicked="OnUseInGenerator" HorizontalOptions="Center" />
+                <!-- Waiting state -->
+                <VerticalStackLayout x:Name="WaitingPanel" Spacing="12" Padding="0,30,0,20">
+                    <Image Source="tab_nfc.png" WidthRequest="72" HeightRequest="72" HorizontalOptions="Center" Opacity="0.6" />
+                    <Label x:Name="StatusLabel"
+                           Text="Hold a tag or card against the back of the phone"
+                           FontSize="16"
+                           HorizontalTextAlignment="Center" />
+                    <Label x:Name="HintLabel"
+                           Text="Works with NFC stickers, access cards, transit and bank cards and ID documents. Content shows when the tag carries a link or text; protected cards show only their type and serial number."
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                    <Button x:Name="SettingsButton"
+                            Text="Turn on NFC"
+                            Clicked="OnOpenSettings"
+                            HorizontalOptions="Center"
+                            IsVisible="False" />
                 </VerticalStackLayout>
 
-                <VerticalStackLayout x:Name="Details" Spacing="4"
-                                     Padding="12"
-                                     BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+                <!-- Result -->
+                <VerticalStackLayout x:Name="ResultPanel" Spacing="12" IsVisible="False">
+                    <Label x:Name="TagTitle"
+                           FontSize="13"
+                           TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                    <Label x:Name="ContentLabel"
+                           FontSize="18"
+                           FontFamily="OpenSansSemibold"
+                           HorizontalTextAlignment="Center"
+                           LineBreakMode="WordWrap" />
 
-                <Label Text="Hold another tag to read it"
+                    <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
+                        <HorizontalStackLayout HorizontalOptions="Center">
+                            <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                                    Clicked="OnSave" SemanticProperties.Description="Add to favorites as QR code" ToolTipProperties.Text="Add to favorites as QR code" />
+                            <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
+                                    Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
+                            <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                                    Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
+                        </HorizontalStackLayout>
+                        <Button Text="Open in QR generator" Clicked="OnUseInGenerator" HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout x:Name="Details" Spacing="4"
+                                         Padding="12"
+                                         BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+
+                    <!-- Full readable memory of a Type 2 tag (NTAG/Ultralight) -->
+                    <VerticalStackLayout x:Name="MemoryPanel" Spacing="8" IsVisible="False">
+                        <Label Text="Readable memory"
+                               FontAttributes="Bold"
+                               HorizontalTextAlignment="Center" />
+                        <Label Text="Every page of this tag's user memory. These pages carry no keys, so they are openly readable."
+                               FontSize="12" TextColor="Gray"
+                               HorizontalTextAlignment="Center" />
+                        <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="10"
+                                BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Label x:Name="MemoryLabel"
+                                   FontFamily="monospace"
+                                   FontSize="12"
+                                   LineBreakMode="NoWrap" />
+                        </Border>
+                        <Button Text="Copy memory dump" Clicked="OnCopyMemory"
+                                BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+
+                    <Label Text="Hold another tag to read it"
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- ===================== WRITE ===================== -->
+            <VerticalStackLayout x:Name="WriteSection" Spacing="12" IsVisible="False">
+
+                <Label Text="What to write" FontAttributes="Bold" />
+                <Picker x:Name="WriteTypePicker" SelectedIndexChanged="OnWriteTypeChanged">
+                    <Picker.Items>
+                        <x:String>Auto (link or text)</x:String>
+                        <x:String>Link</x:String>
+                        <x:String>Plain text</x:String>
+                        <x:String>Contact (vCard)</x:String>
+                    </Picker.Items>
+                </Picker>
+
+                <Editor x:Name="WriteEditor"
+                        Placeholder="Type a link, text, or paste a vCard; or load a favorite"
+                        AutoSize="TextChanges"
+                        MinimumHeightRequest="80"
+                        TextChanged="OnWriteTextChanged" />
+
+                <Button Text="Load from favorites" Clicked="OnLoadFavorite"
+                        BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start" />
+
+                <Label x:Name="WriteStatus"
+                       Text="Enter content, then hold a writable tag to the back of the phone"
+                       FontSize="14"
+                       HorizontalTextAlignment="Center"
+                       Margin="0,10,0,0" />
+
+                <Label Text="Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written."
                        FontSize="12" TextColor="Gray"
                        HorizontalTextAlignment="Center" />
             </VerticalStackLayout>

@@ -1,4 +1,5 @@
 using System.Text;
+using Android.Nfc;
 using BarcodeBuddy.Models;
 using BarcodeBuddy.Services;
 
@@ -9,11 +10,14 @@ public partial class NfcPage : ContentPage
     private readonly FavoritesService _favorites;
     private readonly NfcReader _nfc = NfcReader.Instance;
     private NfcTagInfo? _last;
+    private bool _writeMode;
 
     public NfcPage(FavoritesService favorites)
     {
         InitializeComponent();
         _favorites = favorites;
+        WriteTypePicker.SelectedIndex = 0;
+        SetMode(write: false);
     }
 
     protected override void OnAppearing()
@@ -36,17 +40,43 @@ public partial class NfcPage : ContentPage
         StatusLabel.Text = "Hold a tag or card against the back of the phone";
         SettingsButton.IsVisible = false;
         _nfc.TagRead += OnTagRead;
+        _nfc.TagWritten += OnTagWritten;
         _nfc.Start();
+        if (_writeMode) ArmWrite();
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
         _nfc.TagRead -= OnTagRead;
+        _nfc.TagWritten -= OnTagWritten;
+        _nfc.ArmWrite(null);
         _nfc.Stop();
     }
 
     private void OnOpenSettings(object? sender, EventArgs e) => _nfc.OpenSettings();
+
+    // ---------------------------------------------------------------- mode switch
+
+    private void OnReadMode(object? sender, EventArgs e) => SetMode(write: false);
+    private void OnWriteMode(object? sender, EventArgs e) => SetMode(write: true);
+
+    private void SetMode(bool write)
+    {
+        _writeMode = write;
+        ReadSection.IsVisible = !write;
+        WriteSection.IsVisible = write;
+
+        var accent = (Color)Application.Current!.Resources["Primary"];
+        var grey = Color.FromArgb("#6B7280");
+        ReadModeButton.BackgroundColor = write ? grey : accent;
+        ReadModeButton.TextColor = write ? Colors.White : (Color)Application.Current!.Resources["PrimaryDarkText"];
+        WriteModeButton.BackgroundColor = write ? accent : grey;
+        WriteModeButton.TextColor = write ? (Color)Application.Current!.Resources["PrimaryDarkText"] : Colors.White;
+
+        if (write) ArmWrite();
+        else _nfc.ArmWrite(null);
+    }
 
     private void OnTagRead(NfcTagInfo tag)
     {
@@ -86,6 +116,18 @@ public partial class NfcPage : ContentPage
             AddDetail("Length", $"{tag.Content!.Length} characters, {Encoding.UTF8.GetByteCount(tag.Content)} bytes");
             foreach (var (label, value) in ScanDetails.DescribeStructuredContent(tag.Content))
                 AddDetail(label, value);
+        }
+
+        MemoryPanel.IsVisible = tag.HasMemoryDump;
+        MemoryLabel.Text = tag.HasMemoryDump ? string.Join("\n", tag.MemoryDump!) : string.Empty;
+    }
+
+    private async void OnCopyMemory(object? sender, EventArgs e)
+    {
+        if (_last?.MemoryDump is { Count: > 0 } dump)
+        {
+            await Clipboard.Default.SetTextAsync(string.Join("\n", dump));
+            await DisplayAlertAsync("Copied", $"{dump.Count} pages copied to the clipboard.", "OK");
         }
     }
 
@@ -131,5 +173,88 @@ public partial class NfcPage : ContentPage
     {
         if (_last?.Content is not { } content) return;
         await Shell.Current.GoToAsync("//generate/qr", new Dictionary<string, object> { ["value"] = content });
+    }
+
+    // ---------------------------------------------------------------- write
+
+    private void OnWriteTextChanged(object? sender, TextChangedEventArgs e) => ArmWrite();
+    private void OnWriteTypeChanged(object? sender, EventArgs e) => ArmWrite();
+
+    /// <summary>Builds the NDEF message from the current content and arms the reader to write the next tag.</summary>
+    private void ArmWrite()
+    {
+        var text = WriteEditor.Text?.Trim() ?? string.Empty;
+        if (text.Length == 0)
+        {
+            _nfc.ArmWrite(null);
+            WriteStatus.Text = "Enter content, then hold a writable tag to the back of the phone";
+            WriteStatus.TextColor = Colors.Gray;
+            return;
+        }
+
+        try
+        {
+            var message = BuildMessage(text);
+            _nfc.ArmWrite(message);
+            WriteStatus.Text = "Ready. Hold a writable tag against the back of the phone";
+            WriteStatus.TextColor = (Color)Application.Current!.Resources["Primary"];
+        }
+        catch (Exception ex)
+        {
+            _nfc.ArmWrite(null);
+            WriteStatus.Text = ex.Message;
+            WriteStatus.TextColor = Color.FromArgb("#DC2626");
+        }
+    }
+
+    private NdefMessage BuildMessage(string text)
+    {
+        // 0 Auto, 1 Link, 2 Text, 3 Contact
+        return WriteTypePicker.SelectedIndex switch
+        {
+            1 => NfcReader.BuildUri(Links.TryGetOpenable(text, out var u) ? u.ToString() : text),
+            2 => NfcReader.BuildText(text),
+            3 => text.StartsWith("BEGIN:VCARD", StringComparison.OrdinalIgnoreCase)
+                    ? NfcReader.BuildVCard(text)
+                    : throw new InvalidOperationException("A contact must be a vCard starting with BEGIN:VCARD."),
+            _ => Links.TryGetOpenable(text, out var uri)
+                    ? NfcReader.BuildUri(uri.ToString())
+                    : NfcReader.BuildText(text),
+        };
+    }
+
+    private void OnTagWritten(bool ok, string note)
+    {
+        try { Vibration.Default.Vibrate(ok ? 60 : 200); } catch { /* not supported on every device */ }
+
+        // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
+        WriteStatus.Text = ok ? $"{note}  Hold another tag to write again." : note;
+        WriteStatus.TextColor = ok ? (Color)Application.Current!.Resources["Primary"] : Color.FromArgb("#DC2626");
+
+        if (!_writeMode) return;
+        var text = WriteEditor.Text?.Trim() ?? string.Empty;
+        if (text.Length == 0) return;
+        try { _nfc.ArmWrite(BuildMessage(text)); } catch { /* keep the error message shown above */ }
+    }
+
+    private async void OnLoadFavorite(object? sender, EventArgs e)
+    {
+        await _favorites.LoadAsync();
+        if (_favorites.Items.Count == 0)
+        {
+            await DisplayAlertAsync("No favorites", "You have no saved codes to load.", "OK");
+            return;
+        }
+
+        var labels = _favorites.Items.Select(i => i.DisplayName).ToArray();
+        var choice = await DisplayActionSheetAsync("Load from favorites", "Cancel", null, labels);
+        if (choice is null || choice == "Cancel") return;
+
+        var item = _favorites.Items.FirstOrDefault(i => i.DisplayName == choice);
+        if (item is not null)
+        {
+            WriteEditor.Text = item.Value;
+            ArmWrite();
+        }
     }
 }

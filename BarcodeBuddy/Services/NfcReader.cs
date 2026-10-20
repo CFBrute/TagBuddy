@@ -14,8 +14,17 @@ public sealed class NfcReader
 
     public event Action<NfcTagInfo>? TagRead;
 
+    /// <summary>Success flag and a message, raised after an attempt to write a tag held to the phone.</summary>
+    public event Action<bool, string>? TagWritten;
+
 #if ANDROID
     private ReaderCallback? _callback;
+
+    /// <summary>When set, the next tag held to the phone is written with this message instead of being read.</summary>
+    private NdefMessage? _pendingWrite;
+
+    public void ArmWrite(NdefMessage? message) => _pendingWrite = message;
+    public bool IsArmedToWrite => _pendingWrite is not null;
 
     private static NfcAdapter? Adapter =>
         NfcAdapter.GetDefaultAdapter(Platform.AppContext);
@@ -59,6 +68,14 @@ public sealed class NfcReader
 
     private void OnTag(Tag tag)
     {
+        if (_pendingWrite is { } message)
+        {
+            _pendingWrite = null;
+            var (ok, note) = WriteTag(tag, message);
+            MainThread.BeginInvokeOnMainThread(() => TagWritten?.Invoke(ok, note));
+            return;
+        }
+
         NfcTagInfo info;
         try
         {
@@ -72,6 +89,62 @@ public sealed class NfcReader
         MainThread.BeginInvokeOnMainThread(() => TagRead?.Invoke(info));
     }
 
+    /// <summary>Writes an NDEF message to a writable tag, or formats a blank one first. Nothing else about the
+    /// tag is changed: its serial number is fixed and is never touched.</summary>
+    private static (bool Ok, string Note) WriteTag(Tag tag, NdefMessage message)
+    {
+        int size = message.ToByteArray().Length;
+        try
+        {
+            using var ndef = Ndef.Get(tag);
+            if (ndef is not null)
+            {
+                ndef.Connect();
+                try
+                {
+                    if (!ndef.IsWritable)
+                        return (false, "This tag is read-only and cannot be changed.");
+                    if (ndef.MaxSize < size)
+                        return (false, $"The content needs {size} bytes but this tag holds only {ndef.MaxSize}.");
+                    ndef.WriteNdefMessage(message);
+                    return (true, $"Written to the tag ({size} bytes).");
+                }
+                finally { try { ndef.Close(); } catch { } }
+            }
+
+            using var formatable = NdefFormatable.Get(tag);
+            if (formatable is not null)
+            {
+                formatable.Connect();
+                try
+                {
+                    formatable.Format(message);
+                    return (true, $"Blank tag formatted and written ({size} bytes).");
+                }
+                finally { try { formatable.Close(); } catch { } }
+            }
+
+            return (false, "This tag cannot hold NDEF content (it may be a locked card).");
+        }
+        catch (Exception ex)
+        {
+            return (false, "Write failed, hold the tag still and try again. (" + ex.Message + ")");
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Building NDEF messages to write
+    // ------------------------------------------------------------------------------------------------
+
+    public static NdefMessage BuildUri(string uri) =>
+        new([NdefRecord.CreateUri(uri)]);
+
+    public static NdefMessage BuildText(string text, string language = "en") =>
+        new([NdefRecord.CreateTextRecord(language, text)]);
+
+    public static NdefMessage BuildVCard(string vcard) =>
+        new([NdefRecord.CreateMime("text/vcard", Encoding.UTF8.GetBytes(vcard))]);
+
     // ------------------------------------------------------------------------------------------------
     // Tag description
     // ------------------------------------------------------------------------------------------------
@@ -84,6 +157,7 @@ public sealed class NfcReader
 
         var details = new List<(string, string)>();
         var records = new List<NfcRecordInfo>();
+        List<string>? memory = null;
         byte[]? ndefBytes = null;
 
         using (var nfcA = NfcA.Get(tag))
@@ -151,6 +225,7 @@ public sealed class NfcReader
                 {
                     nfcA.Connect();
                     ndefBytes = ReadType2Ndef(nfcA, details);
+                    memory = DumpType2Memory(nfcA);
                 }
                 catch (Exception ex)
                 {
@@ -186,8 +261,43 @@ public sealed class NfcReader
         if (records.Count == 0 && !details.Any(d => d.Item1 is "Access" or "Card"))
             details.Add(("Content", "No NDEF content found on this tag"));
 
-        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records);
+        if (memory is { Count: > 0 })
+            details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
+
+        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory);
     }
+
+    /// <summary>Dumps every readable page of a Type 2 tag as "page: hex  ascii". These pages carry no keys,
+    /// so this is the full openly-readable memory of the tag.</summary>
+    private static List<string>? DumpType2Memory(NfcA nfcA)
+    {
+        var lines = new List<string>();
+        int page = 0;
+        byte[]? previous = null;
+
+        while (page < 256)
+        {
+            byte[] chunk;
+            try { chunk = nfcA.Transceive([0x30, (byte)page]); }
+            catch { break; }                              // past the end of memory: the tag NAKs the READ
+            if (chunk is null || chunk.Length < 16) break;
+
+            // READ returns 4 pages at a time and wraps around at the end; stop once it repeats.
+            if (previous is not null && chunk.AsSpan(0, 16).SequenceEqual(previous)) break;
+            previous = chunk[..16];
+
+            for (int i = 0; i < 4; i++)
+            {
+                var row = chunk[(i * 4)..(i * 4 + 4)];
+                lines.Add($"{page + i:D3}: {ToHex(row)}  {Ascii(row)}");
+            }
+            page += 4;
+        }
+        return lines.Count > 0 ? lines : null;
+    }
+
+    private static string Ascii(byte[] bytes) =>
+        new(bytes.Select(b => b >= 0x20 && b < 0x7F ? (char)b : '.').ToArray());
 
     // ------------------------------------------------------------------------------------------------
     // ISO-DEP: identify card family from its public application directory, then try NDEF Type 4.

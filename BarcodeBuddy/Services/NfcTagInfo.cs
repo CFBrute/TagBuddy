@@ -8,7 +8,8 @@ public sealed record NfcTagInfo(
     string Id,
     IReadOnlyList<string> Technologies,
     IReadOnlyList<(string Label, string Value)> Details,
-    IReadOnlyList<NfcRecordInfo> Records)
+    IReadOnlyList<NfcRecordInfo> Records,
+    IReadOnlyList<string>? MemoryDump = null)
 {
     /// <summary>The first link or text record: what a QR code with the same purpose would contain.</summary>
     public string? Content =>
@@ -17,4 +18,6 @@ public sealed record NfcTagInfo(
         ?? Records.FirstOrDefault(r => r.Text.Length > 0)?.Text;
 
     public bool HasContent => !string.IsNullOrWhiteSpace(Content);
+
+    public bool HasMemoryDump => MemoryDump is { Count: > 0 };
 }
