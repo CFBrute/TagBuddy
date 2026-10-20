@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             x:Class="BarcodeBuddy.Pages.GeneratePage"
+             Title="Generate">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <Label Text="Barcode type" FontAttributes="Bold" />
+            <Picker x:Name="FormatPicker"
+                    Title="Select a barcode type"
+                    SelectedIndexChanged="OnFormatChanged" />
+            <Label x:Name="HintLabel" FontSize="12" TextColor="Gray" />
+
+            <Label Text="Text" FontAttributes="Bold" />
+            <Entry x:Name="ValueEntry"
+                   Placeholder="Type the text to encode"
+                   ClearButtonVisibility="WhileEditing"
+                   TextChanged="OnValueChanged" />
+
+            <Label x:Name="ErrorLabel"
+                   TextColor="#DC2626"
+                   FontSize="13"
+                   IsVisible="False" />
+
+            <Border x:Name="BarcodeCard"
+                    BackgroundColor="White"
+                    Stroke="#D1D5DB"
+                    StrokeThickness="1"
+                    Padding="12"
+                    IsVisible="False">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="10" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnBarcodeTapped" />
+                </Border.GestureRecognizers>
+                <VerticalStackLayout Spacing="8">
+                    <zxing:BarcodeGeneratorView x:Name="Generator"
+                                                Format="Code128"
+                                                ForegroundColor="Black"
+                                                BackgroundColor="White"
+                                                BarcodeMargin="2"
+                                                HeightRequest="140"
+                                                HorizontalOptions="Fill" />
+                    <Label x:Name="ValueLabel"
+                           HorizontalTextAlignment="Center"
+                           TextColor="Black"
+                           FontFamily="OpenSansSemibold" />
+                    <Label Text="Tap to show full screen"
+                           HorizontalTextAlignment="Center"
+                           FontSize="11"
+                           TextColor="Gray" />
+                </VerticalStackLayout>
+            </Border>
+
+            <HorizontalStackLayout Spacing="10" HorizontalOptions="Center">
+                <Button x:Name="FavoriteButton"
+                        Text="Add to favorites"
+                        Clicked="OnAddFavorite"
+                        IsEnabled="False" />
+                <Button Text="Copy text"
+                        Clicked="OnCopy"
+                        BackgroundColor="#6B7280" />
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash mark: white Code 128 bars and a QR finder ring with the orange centre square.
+     Same geometry as Resources/AppIcon/appiconfg.svg, kept inside the inner 2/3 of the canvas
+     so Android's circular splash-icon mask never clips it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:scaleX="0.8"
+        android:scaleY="0.8"
+        android:pivotX="512"
+        android:pivotY="512">
+        <!-- bars -->
+        <path android:fillColor="#FFFFFF" android:pathData="M184,372h34v280h-34z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M232,372h14v280h-14z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M260,372h22v280h-22z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M296,372h14v280h-14z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M324,372h42v280h-42z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M380,372h14v280h-14z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M408,372h22v280h-22z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M444,372h30v280h-30z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M488,372h14v280h-14z"/>
+        <path android:fillColor="#FFFFFF" android:pathData="M516,372h26v280h-26z"/>
+        <!-- finder ring: outer square minus inner square (even-odd) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M560,372h280v280h-280z M600,412h200v200h-200z"/>
+        <!-- orange centre -->
+        <path android:fillColor="#F5A623" android:pathData="M648,460h104v104h-104z"/>
+    </group>
+</vector>

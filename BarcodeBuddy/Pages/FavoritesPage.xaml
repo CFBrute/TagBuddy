@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:BarcodeBuddy.Models"
+             x:Class="BarcodeBuddy.Pages.FavoritesPage"
+             Title="Favorites">
+    <Grid>
+        <CollectionView x:Name="List"
+                        SelectionMode="None"
+                        Margin="12">
+            <CollectionView.EmptyView>
+                <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="8" Padding="30">
+                    <Label Text="No favorites yet" FontSize="18" HorizontalTextAlignment="Center" />
+                    <Label Text="Generate a barcode and press Add to favorites to keep it here."
+                           TextColor="Gray" HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:BarcodeItem">
+                    <SwipeView>
+                        <SwipeView.RightItems>
+                            <SwipeItems>
+                                <SwipeItem Text="Delete"
+                                           BackgroundColor="#DC2626"
+                                           Invoked="OnDeleteInvoked"
+                                           CommandParameter="{Binding .}" />
+                            </SwipeItems>
+                        </SwipeView.RightItems>
+                        <Border Margin="0,0,0,10"
+                                Padding="14"
+                                Stroke="#D1D5DB"
+                                StrokeThickness="1"
+                                BackgroundColor="{AppThemeBinding Light=White, Dark=#1F2937}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="10" />
+                            </Border.StrokeShape>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
+                            </Border.GestureRecognizers>
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                <Label Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding DisplayName}"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="16"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Grid.Row="1" Grid.Column="0"
+                                       Text="{Binding Value}"
+                                       TextColor="Gray"
+                                       FontSize="13"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Grid.Row="0" Grid.Column="1" Grid.RowSpan="2"
+                                       Text="{Binding FormatLabel}"
+                                       FontSize="11"
+                                       TextColor="#C7780B"
+                                       VerticalOptions="Center"
+                                       Margin="10,0,0,0" />
+                            </Grid>
+                        </Border>
+                    </SwipeView>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>

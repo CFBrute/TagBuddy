@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Window-background splash (shown on Android 11 and older, and briefly during the
+     hand-over from the system splash on newer versions). Dark background, the mark centred,
+     an orange stripe below it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item
+        android:drawable="@drawable/splash_icon"
+        android:gravity="center"
+        android:width="220dp"
+        android:height="220dp" />
+    <item
+        android:drawable="@drawable/splash_stripe"
+        android:gravity="center_horizontal|bottom"
+        android:bottom="120dp"
+        android:width="200dp"
+        android:height="6dp" />
+</layer-list>

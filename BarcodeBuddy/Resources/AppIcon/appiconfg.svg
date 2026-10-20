@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Foreground layer of the adaptive icon. Artwork sits inside the 66% safe zone of the 1024 canvas. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(512 512) scale(0.9) translate(-512 -512)">
+    <!-- Code 128 style bars: uneven widths, slightly rounded caps -->
+    <g fill="#111111">
+      <rect x="184" y="372" width="34" height="280" rx="7"/>
+      <rect x="232" y="372" width="14" height="280" rx="7"/>
+      <rect x="260" y="372" width="22" height="280" rx="7"/>
+      <rect x="296" y="372" width="14" height="280" rx="7"/>
+      <rect x="324" y="372" width="42" height="280" rx="7"/>
+      <rect x="380" y="372" width="14" height="280" rx="7"/>
+      <rect x="408" y="372" width="22" height="280" rx="7"/>
+      <rect x="444" y="372" width="30" height="280" rx="7"/>
+      <rect x="488" y="372" width="14" height="280" rx="7"/>
+      <rect x="516" y="372" width="26" height="280" rx="7"/>
+    </g>
+    <!-- QR finder pattern: black ring with a blue centre square as the single accent -->
+    <rect x="580" y="392" width="240" height="240" rx="28" fill="none" stroke="#111111" stroke-width="40"/>
+    <rect x="648" y="460" width="104" height="104" rx="12" fill="#F5A623"/>
+  </g>
+</svg>

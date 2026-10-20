@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thin orange stripe. Used as the splash "branding image" on Android 12+ (drawn near the bottom)
+     and inside the window-background splash. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="200dp"
+        android:height="6dp"
+        android:gravity="center">
+        <shape android:shape="rectangle">
+            <solid android:color="#F5A623" />
+            <corners android:radius="3dp" />
+        </shape>
+    </item>
+</layer-list>

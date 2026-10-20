@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             x:Class="BarcodeBuddy.Pages.ShowBarcodePage"
+             BackgroundColor="White"
+             Shell.NavBarIsVisible="False"
+             Shell.TabBarIsVisible="False">
+    <Grid RowDefinitions="*,Auto,Auto,Auto" Padding="16">
+        <Grid.GestureRecognizers>
+            <TapGestureRecognizer Tapped="OnTapped" />
+        </Grid.GestureRecognizers>
+
+        <zxing:BarcodeGeneratorView x:Name="Generator"
+                                    Grid.Row="0"
+                                    ForegroundColor="Black"
+                                    BackgroundColor="White"
+                                    BarcodeMargin="4"
+                                    VerticalOptions="Center"
+                                    HorizontalOptions="Fill" />
+
+        <Label x:Name="ValueLabel"
+               Grid.Row="1"
+               FontSize="22"
+               FontFamily="OpenSansSemibold"
+               TextColor="Black"
+               HorizontalTextAlignment="Center" />
+
+        <Label x:Name="NameLabel"
+               Grid.Row="2"
+               FontSize="14"
+               TextColor="Gray"
+               HorizontalTextAlignment="Center" />
+
+        <Label Grid.Row="3"
+               Text="Tap anywhere to close"
+               FontSize="12"
+               TextColor="Gray"
+               Margin="0,24,0,0"
+               HorizontalTextAlignment="Center" />
+    </Grid>
+</ContentPage>

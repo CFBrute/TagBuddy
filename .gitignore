@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+*.apk
+*.aab
+
+# IDE
+.vs/
+*.user
+*.suo
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
