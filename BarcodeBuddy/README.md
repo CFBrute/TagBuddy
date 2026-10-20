@@ -13,6 +13,11 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes.
   map location.
 - **Generate / QR Code** tab: multi-line content, live QR with a readout of version, size and byte count.
   "Advanced options" exposes the error-correction level (L/M/Q/H) and the quiet-zone margin.
+- **NFC** tab: hold a tag or card to the phone. Shows its serial number, radio/chip type and NDEF capacity, decodes
+  NDEF records (text, links, MIME, external) and offers the same actions as a scanned code for the content.
+  Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
+  passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
+  secure items; no cardholder data is requested.
 - **Favorites** tab: saved codes with their options. Tap to show full screen; the menu on each row offers
   Open link (for links), Share image, Save image, "Use text in Barcode generator", "Use text in QR generator",
   "Copy text" and "Delete". Stored as JSON in the
@@ -34,6 +39,8 @@ encoder in `Services/BarcodeRenderer.cs`), which is what makes the QR options po
 - `Services/ScanDetails.cs` - explains scanned content and decoder metadata.
 - `Services/ScanResult.cs` - one result type for camera scans and picture decodes.
 - `Services/ImageDecoder.cs` - finds a code inside a picked photo.
+- `Services/NfcReader.cs` - NFC reader mode and NDEF decoding (Android).
+- `Pages/NfcPage` - NFC tab.
 - `Services/BarcodeImage.cs` - renders a code to PNG, shares it, saves it to the gallery.
 - `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
 - `Services/CodeActions.cs` - the shared share / save / open / copy actions.

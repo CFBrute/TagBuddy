@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BarcodeBuddy.Pages.NfcPage"
+             Title="NFC">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+
+            <!-- Waiting state -->
+            <VerticalStackLayout x:Name="WaitingPanel" Spacing="12" Padding="0,40,0,20">
+                <Image Source="tab_nfc.png" WidthRequest="72" HeightRequest="72" HorizontalOptions="Center" Opacity="0.6" />
+                <Label x:Name="StatusLabel"
+                       Text="Hold a tag or card against the back of the phone"
+                       FontSize="16"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="HintLabel"
+                       Text="Works with NFC stickers, access cards, transit and bank cards and ID documents. Content shows when the tag carries a link or text; protected cards show only their type and serial number."
+                       FontSize="12" TextColor="Gray"
+                       HorizontalTextAlignment="Center" />
+                <Button x:Name="SettingsButton"
+                        Text="Turn on NFC"
+                        Clicked="OnOpenSettings"
+                        HorizontalOptions="Center"
+                        IsVisible="False" />
+            </VerticalStackLayout>
+
+            <!-- Result -->
+            <VerticalStackLayout x:Name="ResultPanel" Spacing="12" IsVisible="False">
+                <Label x:Name="TagTitle"
+                       FontSize="13"
+                       TextColor="Gray"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="ContentLabel"
+                       FontSize="18"
+                       FontFamily="OpenSansSemibold"
+                       HorizontalTextAlignment="Center"
+                       LineBreakMode="WordWrap" />
+
+                <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
+                    <HorizontalStackLayout HorizontalOptions="Center">
+                        <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                                Clicked="OnSave" SemanticProperties.Description="Add to favorites as QR code" ToolTipProperties.Text="Add to favorites as QR code" />
+                        <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
+                                Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
+                        <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                                Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
+                    </HorizontalStackLayout>
+                    <Button Text="Open in QR generator" Clicked="OnUseInGenerator" HorizontalOptions="Center" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout x:Name="Details" Spacing="4"
+                                     Padding="12"
+                                     BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+
+                <Label Text="Hold another tag to read it"
+                       FontSize="12" TextColor="Gray"
+                       HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

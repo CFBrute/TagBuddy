@@ -24,6 +24,7 @@ public static class MauiProgram
         builder.Services.AddTransient<QrPage>();
         builder.Services.AddTransient<FavoritesPage>();
         builder.Services.AddTransient<ScanPage>();
+        builder.Services.AddTransient<NfcPage>();
         builder.Services.AddTransient<ShowBarcodePage>();
 
 #if DEBUG
