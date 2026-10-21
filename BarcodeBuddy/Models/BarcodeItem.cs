@@ -21,31 +21,48 @@ public class BarcodeItem
     /// <summary>Where the image text sits under the code: "Left", "Center" (default) or "Right".</summary>
     public string CaptionAlign { get; set; } = "Center";
 
-    /// <summary>Height of the image text in image pixels (the exported image is about 1000 px wide).</summary>
-    public int CaptionTextSize { get; set; } = DefaultCaptionTextSize;
+    // The three layout settings are ratios of the code itself, so an image looks the same whatever the code's
+    // pixel size: the code is the unit.
 
-    public const int DefaultCaptionTextSize = 44;
-    public const int MinCaptionTextSize = 16;
-    public const int MaxCaptionTextSize = 96;
+    /// <summary>Height of the image text as a fraction of the code's height (the dark part, for a QR code).</summary>
+    public double CaptionTextScale { get; set; } = DefaultCaptionTextScale;
 
-    /// <summary>Distance from the dark edge of the code to the top of the image text, in image pixels
-    /// (the exported image is about 1000 px wide). 1 to <see cref="MaxCaptionDistance"/>.</summary>
-    public int CaptionDistance { get; set; } = DefaultCaptionDistance;
+    public const double DefaultCaptionTextScale = 0.15;
+    public const double MinCaptionTextScale = 0.05;
+    public const double MaxCaptionTextScale = 1.0;
 
-    public const int DefaultCaptionDistance = 40;
-    public const int MaxCaptionDistance = 150;
+    /// <summary>Distance from the dark edge of the code to the top of the text as a fraction of the code's
+    /// height. 0 means the text touches the code.</summary>
+    public double CaptionGapScale { get; set; } = DefaultCaptionGapScale;
+
+    public const double DefaultCaptionGapScale = 0.15;
+    public const double MinCaptionGapScale = 0.0;
+    public const double MaxCaptionGapScale = 1.0;
+
+    /// <summary>How wide a line of text may be, in code widths. The image grows sideways to fit the text up
+    /// to this; a longer line is broken. The code stays centred.</summary>
+    public double CaptionWidthScale { get; set; } = DefaultCaptionWidthScale;
+
+    public const double DefaultCaptionWidthScale = 2.0;
+    public const double MinCaptionWidthScale = 1.0;
+    public const double MaxCaptionWidthScale = 8.0;
 
     public string ImageText => Caption ?? Value;
     public bool CaptionLeft => CaptionAlign == "Left";
     public bool CaptionRight => CaptionAlign == "Right";
 
-    public int CaptionTextPx => Math.Clamp(CaptionTextSize, MinCaptionTextSize, MaxCaptionTextSize);
+    public int CaptionTextPx(int codeHeightPx) =>
+        Math.Max(8, (int)Math.Round(Math.Clamp(CaptionTextScale, MinCaptionTextScale, MaxCaptionTextScale) * codeHeightPx));
 
     /// <summary>Space between the bottom edge of the code matrix and the top of the text, in image pixels.
     /// A QR matrix ends with its white quiet zone, so the distance is measured from the dark modules and the
     /// quiet zone is subtracted; small distances put the text inside the quiet zone. Linear codes have no
     /// quiet zone below the bars.</summary>
-    public int CaptionGapPx(int quietZonePx) => Math.Clamp(CaptionDistance, 1, MaxCaptionDistance) - quietZonePx;
+    public int CaptionGapPx(int codeHeightPx, int quietZonePx) =>
+        (int)Math.Round(Math.Clamp(CaptionGapScale, MinCaptionGapScale, MaxCaptionGapScale) * codeHeightPx) - quietZonePx;
+
+    public int CaptionMaxTextWidthPx(int codeWidthPx) =>
+        (int)Math.Round(Math.Clamp(CaptionWidthScale, MinCaptionWidthScale, MaxCaptionWidthScale) * codeWidthPx);
 
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Value : Name;
     public string FormatLabel => BarcodeTypes.LabelFor(Format);

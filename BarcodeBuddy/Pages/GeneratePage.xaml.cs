@@ -26,7 +26,10 @@ public partial class GeneratePage : ContentPage
         // Before the picker: choosing its index refreshes the page, which already touches the caption controls.
         _caption = new CaptionControls(CaptionEditor,
             [AlignLeftButton, AlignCenterButton, AlignRightButton],
-            SizeSlider, SizeLabel, DistanceSlider, DistanceLabel, RenderPreview);
+            new CaptionControls.Dial(SizeSlider, SizeMinus, SizePlus, SizeLabel),
+            new CaptionControls.Dial(DistanceSlider, DistanceMinus, DistancePlus, DistanceLabel),
+            new CaptionControls.Dial(WidthSlider, WidthMinus, WidthPlus, WidthLabel),
+            WidthNote, RenderPreview);
 
         PreviewImage.SizeChanged += OnPreviewSizeChanged;
         FormatPicker.ItemsSource = BarcodeTypes.Linear.Select(f => f.Label).ToList();
@@ -88,18 +91,25 @@ public partial class GeneratePage : ContentPage
         var item = CurrentItem();
         int generation = ++_previewGeneration;
         byte[] png;
-        try { png = await Task.Run(() => BarcodeImage.RenderPng(item)); }
+        BarcodeImage.CaptionLayout layout;
+        Microsoft.Maui.Graphics.IImage? picture;
+        try
+        {
+            (png, layout) = await Task.Run(() => { var bytes = BarcodeImage.RenderPng(item, out var l); return (bytes, l); });
+            picture = await Task.Run(() => Controls.PreviewView.Decode(png));
+        }
         catch { return; }
-        if (generation != _previewGeneration) return;
+        if (generation != _previewGeneration) { picture?.Dispose(); return; }
+        _caption.ShowWidthUse(layout);
 
         // Fix the height before swapping the picture: while the new one loads the image would otherwise
         // collapse to nothing and the page would jump under the finger dragging a slider.
+        // Fix the height before swapping the picture so the page does not jump while the new one loads.
+        // Before the first layout the image has no width yet; the card is the page width minus its padding.
         var (w, h) = BarcodeImage.PngSize(png);
-        if (w > 0 && PreviewImage.Width > 0)
-        {
-            PreviewImage.HeightRequest = PreviewImage.Width * h / w;
-        }
-        PreviewImage.Source = ImageSource.FromStream(() => new MemoryStream(png));
+        double shownWidth = PreviewImage.Width > 0 ? PreviewImage.Width : Width > 0 ? Width - 42 : 0;
+        if (w > 0 && shownWidth > 0) PreviewImage.HeightRequest = shownWidth * h / w;
+        PreviewImage.Show(picture);
     }
 
     /// <summary>A taller card pushes the controls below it down the page. While those controls are in use,
@@ -137,7 +147,12 @@ public partial class GeneratePage : ContentPage
         _captionOpen = !_captionOpen;
         CaptionPanel.IsVisible = _valid && _captionOpen;
         CaptionToggle.Text = _captionOpen ? "Text under the image  ▾" : "Text under the image  ▸";
+        BottomSpacer.HeightRequest = _captionOpen ? 320 : 0;
+        CaptionInfoButton.IsVisible = _captionOpen;
     }
+
+    /// <summary>The (i) button, shown only while the section is open: shows or hides the explanation.</summary>
+    private void OnToggleCaptionInfo(object? sender, EventArgs e) => CaptionInfo.IsVisible = !CaptionInfo.IsVisible;
 
     /// <summary>Replaces whatever is in the field with the clipboard text and shows the new barcode.</summary>
     private async void OnPaste(object? sender, EventArgs e)
@@ -179,7 +194,7 @@ public partial class GeneratePage : ContentPage
         OpenLinkButton.IsVisible = _valid && isLink;
         if (isLink) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
 
-        if (!_valid) { PreviewImage.Source = null; return; }
+        if (!_valid) { PreviewImage.Clear(); return; }
 
         RenderPreview();
     }

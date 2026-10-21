@@ -3,8 +3,9 @@ using BarcodeBuddy.Models;
 namespace BarcodeBuddy.Pages;
 
 /// <summary>The "text under the image" settings shared by the QR and barcode generators: position chosen with
-/// a row of buttons, text size and distance with sliders. The editor's alignment follows the position so the
-/// field being typed in reads like the image; the page re-renders its preview whenever a setting changes.</summary>
+/// a row of buttons; text size, distance and max width with sliders, all as ratios of the code. The editor's
+/// alignment follows the position so the field being typed in reads like the image; the page re-renders its
+/// preview whenever a setting changes.</summary>
 internal sealed class CaptionControls
 {
     private static readonly Color Active = Color.FromArgb("#F5A623");
@@ -13,22 +14,29 @@ internal sealed class CaptionControls
 
     private static readonly string[] Aligns = ["Left", "Center", "Right"];
 
+    /// <summary>One slider with its minus and plus buttons and value label.</summary>
+    public sealed record Dial(Slider Slider, Button Minus, Button Plus, Label Label);
+
     private readonly Editor _editor;
     private readonly Button[] _alignButtons;
-    private readonly Label _sizeLabel, _distanceLabel;
+    private readonly Dial _size, _distance, _width;
+    private readonly Label _widthNote;
     private readonly Action _changed;
+    private bool _updating;
 
     public string Align { get; private set; } = "Center";
-    public int TextSize { get; private set; } = BarcodeItem.DefaultCaptionTextSize;
-    public int Distance { get; private set; } = BarcodeItem.DefaultCaptionDistance;
+    public double TextScale { get; private set; } = BarcodeItem.DefaultCaptionTextScale;
+    public double GapScale { get; private set; } = BarcodeItem.DefaultCaptionGapScale;
+    public double WidthScale { get; private set; } = BarcodeItem.DefaultCaptionWidthScale;
 
-    public CaptionControls(Editor editor, Button[] alignButtons,
-        Slider size, Label sizeLabel, Slider distance, Label distanceLabel, Action changed)
+    public CaptionControls(Editor editor, Button[] alignButtons, Dial size, Dial distance, Dial width, Label widthNote, Action changed)
     {
         _editor = editor;
         _alignButtons = alignButtons;
-        _sizeLabel = sizeLabel;
-        _distanceLabel = distanceLabel;
+        _size = size;
+        _distance = distance;
+        _width = width;
+        _widthNote = widthNote;
         _changed = changed;
 
         for (int i = 0; i < alignButtons.Length; i++)
@@ -37,30 +45,76 @@ internal sealed class CaptionControls
             alignButtons[i].Clicked += (_, _) => { Align = value; Apply(); };
         }
 
-        WireSlider(size, BarcodeItem.MinCaptionTextSize, BarcodeItem.MaxCaptionTextSize, TextSize, v => TextSize = v);
-        WireSlider(distance, 1, BarcodeItem.MaxCaptionDistance, Distance, v => Distance = v);
+        Wire(size, BarcodeItem.MinCaptionTextScale, BarcodeItem.MaxCaptionTextScale, 0.01, "0.00", () => TextScale, v => TextScale = v);
+        Wire(distance, BarcodeItem.MinCaptionGapScale, BarcodeItem.MaxCaptionGapScale, 0.01, "0.00", () => GapScale, v => GapScale = v);
+        Wire(width, BarcodeItem.MinCaptionWidthScale, BarcodeItem.MaxCaptionWidthScale, 0.1, "0.0", () => WidthScale, v => WidthScale = v);
         Apply(notify: false);
     }
 
-    private void WireSlider(Slider slider, int min, int max, int initial, Action<int> set)
+    /// <summary>The slider runs 0..1 and is mapped to the value on a curve: the first half of the track covers
+    /// only a quarter of the range, so small values, where the eye notices every step, are easy to hit, and
+    /// the upper end still reaches the maximum. The buttons move by one exact step.</summary>
+    private const double Curve = 2.0;
+
+    private void Wire(Dial dial, double min, double max, double step, string format, Func<double> get, Action<double> set)
     {
-        slider.Minimum = min;
-        slider.Maximum = max;
-        slider.Value = initial;
-        slider.ValueChanged += (_, e) =>
+        double toValue(double t) => min + (max - min) * Math.Pow(Math.Clamp(t, 0, 1), Curve);
+        double toTrack(double v) => Math.Pow(Math.Clamp((v - min) / (max - min), 0, 1), 1 / Curve);
+        double snap(double v) => Math.Clamp(Math.Round(v / step) * step, min, max);
+
+        dial.Slider.Minimum = 0;
+        dial.Slider.Maximum = 1;
+        dial.Slider.Value = toTrack(get());
+        dial.Label.Text = get().ToString(format);
+
+        dial.Slider.ValueChanged += (_, e) =>
         {
-            int value = (int)Math.Round(e.NewValue);
+            if (_updating) return;
+            double value = snap(toValue(e.NewValue));
+            if (value == get()) return;
             set(value);
+            dial.Label.Text = value.ToString(format);
             Apply();
         };
+
+        void nudge(int direction)
+        {
+            double value = snap(get() + direction * step);
+            if (value == get()) return;
+            set(value);
+            dial.Label.Text = value.ToString(format);
+            _updating = true;
+            dial.Slider.Value = toTrack(value);
+            _updating = false;
+            Apply();
+        }
+        dial.Minus.Clicked += (_, _) => nudge(-1);
+        dial.Plus.Clicked += (_, _) => nudge(+1);
+    }
+
+    /// <summary>Explains, after a render, whether the max width is doing anything: the limit only matters once
+    /// a line wants to be wider than it, which is easy to mistake for a dial that does nothing.</summary>
+    public void ShowWidthUse(Services.BarcodeImage.CaptionLayout layout)
+    {
+        if (layout.TextWidthInCodes <= 0)
+        {
+            _widthNote.Text = string.Empty;
+            _widthNote.IsVisible = false;
+            return;
+        }
+        _widthNote.IsVisible = true;
+        _widthNote.Text = layout.LimitReached
+            ? $"The text wants {layout.TextWidthInCodes:0.0} code widths, so the limit of {WidthScale:0.0} breaks it into lines."
+            : $"The text uses {layout.TextWidthInCodes:0.0} code widths, within the limit of {WidthScale:0.0}. Raising the limit changes nothing until a line needs it.";
     }
 
     /// <summary>Copies the settings onto an item about to be previewed, shared, saved or exported.</summary>
     public void CopyTo(BarcodeItem item)
     {
         item.CaptionAlign = Align;
-        item.CaptionTextSize = TextSize;
-        item.CaptionDistance = Distance;
+        item.CaptionTextScale = TextScale;
+        item.CaptionGapScale = GapScale;
+        item.CaptionWidthScale = WidthScale;
     }
 
     private void Apply(bool notify = true)
@@ -71,8 +125,6 @@ internal sealed class CaptionControls
             _alignButtons[i].BackgroundColor = on ? Active : Inactive;
             _alignButtons[i].TextColor = on ? ActiveText : Colors.White;
         }
-        _sizeLabel.Text = $"{TextSize} px";
-        _distanceLabel.Text = $"{Distance} px";
         _editor.HorizontalTextAlignment = Align switch
         {
             "Left" => TextAlignment.Start,

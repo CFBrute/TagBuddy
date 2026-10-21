@@ -6,11 +6,17 @@ namespace BarcodeBuddy.Services;
 /// <summary>Renders a code to a PNG and shares it or saves it to the phone's gallery.</summary>
 public static class BarcodeImage
 {
-    public static byte[] RenderPng(BarcodeItem item)
+    /// <summary>How the caption came out: the widest line's natural width in code widths, and whether the
+    /// max-width limit actually broke a line.</summary>
+    public sealed record CaptionLayout(double TextWidthInCodes, bool LimitReached);
+
+    public static byte[] RenderPng(BarcodeItem item) => RenderPng(item, out _);
+
+    public static byte[] RenderPng(BarcodeItem item, out CaptionLayout layout)
     {
         var matrix = BarcodeRenderer.TryEncode(item, out var error)
             ?? throw new InvalidOperationException(error ?? "Could not encode the value.");
-        return RenderPng(matrix, item, item.ImageText);
+        return RenderPng(matrix, item, item.ImageText, out layout);
     }
 
     /// <summary>Pixel size of a PNG, read from its header without decoding it.</summary>
@@ -72,40 +78,54 @@ public static class BarcodeImage
         return $"{safe}-{item.FormatLabel.Replace(' ', '_')}.png";
     }
 
-    private static byte[] RenderPng(BitMatrix matrix, BarcodeItem item, string text)
+    private static byte[] RenderPng(BitMatrix matrix, BarcodeItem item, string text, out CaptionLayout layout)
     {
 #if ANDROID
         bool linear = matrix.Height == 1;
-        int textSize = item.CaptionTextPx;
         int scale = linear ? Math.Max(4, 1400 / matrix.Width) : Math.Max(6, 1000 / matrix.Width);
         int codeW = matrix.Width * scale;
         int codeH = linear ? 420 : matrix.Height * scale;
         int pad = 48;
-        int lineHeight = (int)(textSize * 1.3);
-        int width = codeW + 2 * pad;
         int quietZone = linear ? 0 : item.QrMargin * scale;   // white rows at the bottom of a QR matrix
-        int gap = item.CaptionGapPx(quietZone);
+
+        // The text settings are fractions of the code as a person sees it: the bars, or the dark square of
+        // a QR code without its quiet zone.
+        int darkH = codeH - 2 * quietZone;
+        int textSize = item.CaptionTextPx(darkH);
+        int lineHeight = (int)(textSize * 1.3);
+        int gap = item.CaptionGapPx(darkH, quietZone);
 
         using var textPaint = new Android.Graphics.Paint { AntiAlias = true, Color = Android.Graphics.Color.Black, TextSize = textSize };
         textPaint.TextAlign = item.CaptionLeft ? Android.Graphics.Paint.Align.Left
             : item.CaptionRight ? Android.Graphics.Paint.Align.Right
             : Android.Graphics.Paint.Align.Center;
-        float textX = item.CaptionLeft ? pad : item.CaptionRight ? width - pad : width / 2f;
 
         // Place the first baseline so the tops of capital letters sit exactly "gap" below the code.
         var capBounds = new Android.Graphics.Rect();
         textPaint.GetTextBounds("H", 0, 1, capBounds);
         int capHeight = capBounds.Height();
-        // Each line the person typed starts a new line in the image; long lines wrap. Up to 8 lines in all.
+
+        // A line is never broken just because it is wider than the code: the image grows sideways instead,
+        // up to the chosen number of code widths. Only a line wider than that is wrapped. Each line the
+        // person typed starts a new line in the image. Up to 8 lines in all.
+        int maxTextWidth = item.CaptionMaxTextWidthPx(codeW);
+        float naturalWidth = 0;   // the widest line as typed, before any breaking
         var lines = new List<string>();
         foreach (var paragraph in text.Replace("\r\n", "\n").Replace('\r', '\n').Trim().Split('\n'))
         {
             if (lines.Count >= 8) break;
             var trimmed = paragraph.Trim();
             if (trimmed.Length == 0) { lines.Add(string.Empty); continue; }
-            lines.AddRange(WrapText(textPaint, trimmed, width - 2 * pad, maxLines: 8 - lines.Count));
+            naturalWidth = Math.Max(naturalWidth, textPaint.MeasureText(trimmed));
+            lines.AddRange(WrapText(textPaint, trimmed, maxTextWidth, maxLines: 8 - lines.Count));
         }
+        layout = new CaptionLayout(naturalWidth / codeW, naturalWidth > maxTextWidth);
         while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+
+        int textWidth = lines.Count == 0 ? 0 : (int)Math.Ceiling(lines.Max(l => textPaint.MeasureText(l)));
+        int width = Math.Max(codeW, textWidth) + 2 * pad;
+        int codeLeft = (width - codeW) / 2;   // the code stays centred when the text is wider than it
+        float textX = item.CaptionLeft ? pad : item.CaptionRight ? width - pad : width / 2f;
 
         // The text block starts "gap" below the code; the bottom margin matches the top one.
         int textTop = pad + codeH + gap;
@@ -126,9 +146,9 @@ public static class BarcodeImage
                 if (!matrix[x, y]) { x++; continue; }
                 int start = x;
                 while (x < matrix.Width && matrix[x, y]) x++;
-                float left = pad + start * scale;
+                float left = codeLeft + start * scale;
                 float top = linear ? pad : pad + y * scale;
-                float right = pad + x * scale;
+                float right = codeLeft + x * scale;
                 float bottom = linear ? pad + codeH : top + scale;
                 canvas.DrawRect(left, top, right, bottom, paint);
             }
