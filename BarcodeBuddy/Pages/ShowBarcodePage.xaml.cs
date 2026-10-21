@@ -41,6 +41,7 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
 
             OpenLinkButton.IsVisible = Links.TryGetOpenable(item.Value, out var uri);
             if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+            Preview.Value = item.Value;
         }
     }
 

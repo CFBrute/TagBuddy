@@ -9,7 +9,9 @@ public sealed record NfcTagInfo(
     IReadOnlyList<string> Technologies,
     IReadOnlyList<(string Label, string Value)> Details,
     IReadOnlyList<NfcRecordInfo> Records,
-    IReadOnlyList<string>? MemoryDump = null)
+    IReadOnlyList<string>? MemoryDump = null,
+    byte[]? RawMemory = null,
+    string? ChipName = null)
 {
     /// <summary>The first link or text record: what a QR code with the same purpose would contain.</summary>
     public string? Content =>
@@ -20,4 +22,10 @@ public sealed record NfcTagInfo(
     public bool HasContent => !string.IsNullOrWhiteSpace(Content);
 
     public bool HasMemoryDump => MemoryDump is { Count: > 0 };
+
+    /// <summary>True when the full page memory was read and can be saved as a binary file.</summary>
+    public bool HasRawMemory => RawMemory is { Length: > 0 };
+
+    /// <summary>Serial number without separators, safe for a file name.</summary>
+    public string SerialForFileName => Id.Replace(":", "");
 }

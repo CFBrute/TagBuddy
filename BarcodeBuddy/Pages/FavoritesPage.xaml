@@ -2,6 +2,7 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:BarcodeBuddy.Models"
+             xmlns:controls="clr-namespace:BarcodeBuddy.Controls"
              x:Class="BarcodeBuddy.Pages.FavoritesPage"
              Title="Favorites">
     <Grid>
@@ -37,23 +38,37 @@
                             <Border.GestureRecognizers>
                                 <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
                             </Border.GestureRecognizers>
-                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8">
-                                <Label Grid.Row="0" Grid.Column="0"
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10">
+                                <!-- Small picture of the code itself, so a row is recognisable at a glance -->
+                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                        WidthRequest="56" HeightRequest="56"
+                                        Padding="3"
+                                        BackgroundColor="White"
+                                        Stroke="#D1D5DB" StrokeThickness="1"
+                                        VerticalOptions="Center">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="6" />
+                                    </Border.StrokeShape>
+                                    <controls:BarcodeView Item="{Binding .}" InputTransparent="True" />
+                                </Border>
+                                <Label Grid.Row="0" Grid.Column="1"
                                        Text="{Binding DisplayName}"
                                        FontFamily="OpenSansSemibold"
                                        FontSize="16"
-                                       LineBreakMode="TailTruncation" />
-                                <Label Grid.Row="1" Grid.Column="0"
+                                       LineBreakMode="TailTruncation"
+                                       VerticalOptions="End" />
+                                <Label Grid.Row="1" Grid.Column="1"
                                        Text="{Binding Value}"
                                        TextColor="Gray"
                                        FontSize="13"
-                                       LineBreakMode="TailTruncation" />
-                                <Label Grid.Row="0" Grid.Column="1" Grid.RowSpan="2"
+                                       LineBreakMode="TailTruncation"
+                                       VerticalOptions="Start" />
+                                <Label Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
                                        Text="{Binding FormatLabel}"
                                        FontSize="11"
                                        TextColor="#C7780B"
                                        VerticalOptions="Center" />
-                                <Button Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
+                                <Button Grid.Row="0" Grid.Column="3" Grid.RowSpan="2"
                                         Text="⋮"
                                         FontSize="22"
                                         Padding="8,0"
@@ -62,6 +77,10 @@
                                         VerticalOptions="Center"
                                         Clicked="OnMenuClicked"
                                         CommandParameter="{Binding .}" />
+                                <controls:LinkPreviewView Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
+                                                          Compact="True"
+                                                          Value="{Binding Value}"
+                                                          Margin="0,8,8,0" />
                             </Grid>
                         </Border>
                     </SwipeView>

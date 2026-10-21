@@ -1,3 +1,5 @@
+using BarcodeBuddy.Models;
+using BarcodeBuddy.Services;
 using ZXing.Common;
 
 namespace BarcodeBuddy.Controls;
@@ -17,10 +19,37 @@ public class BarcodeView : GraphicsView
         nameof(Background), typeof(Color), typeof(BarcodeView), Colors.White,
         propertyChanged: (b, _, _) => ((BarcodeView)b).Invalidate());
 
+    /// <summary>A saved code to draw. Set this from a list template instead of <see cref="Matrix"/>: the item is
+    /// encoded on first use and remembered, so scrolling a list of favorites does not re-encode every row.</summary>
+    public static readonly BindableProperty ItemProperty = BindableProperty.Create(
+        nameof(Item), typeof(BarcodeItem), typeof(BarcodeView), null,
+        propertyChanged: (b, _, v) => ((BarcodeView)b).Matrix = v is BarcodeItem item ? Encode(item) : null);
+
+    private static readonly Dictionary<string, BitMatrix?> _encoded = new();
+
     public BitMatrix? Matrix
     {
         get => (BitMatrix?)GetValue(MatrixProperty);
         set => SetValue(MatrixProperty, value);
+    }
+
+    public BarcodeItem? Item
+    {
+        get => (BarcodeItem?)GetValue(ItemProperty);
+        set => SetValue(ItemProperty, value);
+    }
+
+    private static BitMatrix? Encode(BarcodeItem item)
+    {
+        var key = $"{item.Format}\n{item.QrErrorCorrection}\n{item.QrMargin}\n{item.Value}";
+        lock (_encoded)
+        {
+            if (_encoded.TryGetValue(key, out var cached)) return cached;
+            if (_encoded.Count > 200) _encoded.Clear();
+            var matrix = BarcodeRenderer.TryEncode(item, out _);
+            _encoded[key] = matrix;
+            return matrix;
+        }
     }
 
     public new Color Foreground

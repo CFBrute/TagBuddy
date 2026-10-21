@@ -2,6 +2,7 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             xmlns:controls="clr-namespace:BarcodeBuddy.Controls"
              x:Class="BarcodeBuddy.Pages.ScanPage"
              Title="Scan">
     <Grid x:Name="Root" RowDefinitions="*,Auto">
@@ -11,6 +12,26 @@
         <Grid x:Name="CameraArea" Grid.Row="0">
             <ContentView x:Name="CameraHost" />
 
+            <!-- The picture chosen with "From image", shown while it is analysed and next to its result -->
+            <Image x:Name="PickedImage"
+                   Aspect="AspectFit"
+                   BackgroundColor="Black"
+                   IsVisible="False" />
+
+            <!-- Shown over the picture while the decoder works on it -->
+            <Grid x:Name="AnalysingOverlay" BackgroundColor="#99000000" IsVisible="False">
+                <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center" Spacing="16">
+                    <ActivityIndicator x:Name="AnalysingSpinner"
+                                       Color="{StaticResource Primary}"
+                                       WidthRequest="64" HeightRequest="64" />
+                    <Label Text="Looking for a code in the picture..."
+                           TextColor="White"
+                           FontSize="16"
+                           FontFamily="OpenSansSemibold"
+                           HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </Grid>
+
             <Label x:Name="PermissionLabel"
                    Text="Camera permission is needed to scan codes."
                    IsVisible="False"
@@ -19,7 +40,7 @@
                    Padding="30"
                    HorizontalTextAlignment="Center" />
 
-            <HorizontalStackLayout HorizontalOptions="End" VerticalOptions="Start" Margin="12" Spacing="8">
+            <HorizontalStackLayout x:Name="CameraButtons" HorizontalOptions="End" VerticalOptions="Start" Margin="12" Spacing="8">
                 <Button Text="From image"
                         Clicked="OnPickImage"
                         BackgroundColor="#80000000"
@@ -61,7 +82,12 @@
                         <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
                                 Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
                     </HorizontalStackLayout>
-                    <Button Text="Open in generator" Clicked="OnUseInGenerator" HorizontalOptions="Center" />
+                    <HorizontalStackLayout HorizontalOptions="Center" Spacing="10">
+                        <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False" />
+                        <Button Text="Open in generator" Clicked="OnUseInGenerator"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                    </HorizontalStackLayout>
+                    <controls:LinkPreviewView x:Name="Preview" AutoLoad="False" />
                 </VerticalStackLayout>
 
                 <!-- Details about the scanned code (format, content kind, error correction, ...) -->

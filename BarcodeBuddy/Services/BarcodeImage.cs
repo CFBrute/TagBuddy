@@ -10,7 +10,16 @@ public static class BarcodeImage
     {
         var matrix = BarcodeRenderer.TryEncode(item, out var error)
             ?? throw new InvalidOperationException(error ?? "Could not encode the value.");
-        return RenderPng(matrix, item.Value);
+        return RenderPng(matrix, item, item.ImageText);
+    }
+
+    /// <summary>Pixel size of a PNG, read from its header without decoding it.</summary>
+    public static (int Width, int Height) PngSize(byte[] png)
+    {
+        if (png.Length < 24) return (0, 0);
+        int width = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+        int height = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+        return (width, height);
     }
 
     public static async Task ShareAsync(BarcodeItem item)
@@ -63,23 +72,44 @@ public static class BarcodeImage
         return $"{safe}-{item.FormatLabel.Replace(' ', '_')}.png";
     }
 
-    private static byte[] RenderPng(BitMatrix matrix, string text)
+    private static byte[] RenderPng(BitMatrix matrix, BarcodeItem item, string text)
     {
 #if ANDROID
         bool linear = matrix.Height == 1;
+        int textSize = item.CaptionTextPx;
         int scale = linear ? Math.Max(4, 1400 / matrix.Width) : Math.Max(6, 1000 / matrix.Width);
         int codeW = matrix.Width * scale;
         int codeH = linear ? 420 : matrix.Height * scale;
         int pad = 48;
-        int textSize = 44;
         int lineHeight = (int)(textSize * 1.3);
         int width = codeW + 2 * pad;
+        int quietZone = linear ? 0 : item.QrMargin * scale;   // white rows at the bottom of a QR matrix
+        int gap = item.CaptionGapPx(quietZone);
 
         using var textPaint = new Android.Graphics.Paint { AntiAlias = true, Color = Android.Graphics.Color.Black, TextSize = textSize };
-        textPaint.TextAlign = Android.Graphics.Paint.Align.Center;
-        var lines = WrapText(textPaint, text.Replace('\r', ' ').Replace('\n', ' ').Trim(), width - 2 * pad, maxLines: 4);
+        textPaint.TextAlign = item.CaptionLeft ? Android.Graphics.Paint.Align.Left
+            : item.CaptionRight ? Android.Graphics.Paint.Align.Right
+            : Android.Graphics.Paint.Align.Center;
+        float textX = item.CaptionLeft ? pad : item.CaptionRight ? width - pad : width / 2f;
 
-        int height = codeH + 2 * pad + lineHeight * lines.Count + pad / 2;
+        // Place the first baseline so the tops of capital letters sit exactly "gap" below the code.
+        var capBounds = new Android.Graphics.Rect();
+        textPaint.GetTextBounds("H", 0, 1, capBounds);
+        int capHeight = capBounds.Height();
+        // Each line the person typed starts a new line in the image; long lines wrap. Up to 8 lines in all.
+        var lines = new List<string>();
+        foreach (var paragraph in text.Replace("\r\n", "\n").Replace('\r', '\n').Trim().Split('\n'))
+        {
+            if (lines.Count >= 8) break;
+            var trimmed = paragraph.Trim();
+            if (trimmed.Length == 0) { lines.Add(string.Empty); continue; }
+            lines.AddRange(WrapText(textPaint, trimmed, width - 2 * pad, maxLines: 8 - lines.Count));
+        }
+        while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+
+        // The text block starts "gap" below the code; the bottom margin matches the top one.
+        int textTop = pad + codeH + gap;
+        int height = lines.Count == 0 ? codeH + 2 * pad : textTop + capHeight + lineHeight * (lines.Count - 1) + pad;
 
         using var bitmap = Android.Graphics.Bitmap.CreateBitmap(width, height, Android.Graphics.Bitmap.Config.Argb8888!)!;
         using var canvas = new Android.Graphics.Canvas(bitmap);
@@ -104,10 +134,10 @@ public static class BarcodeImage
             }
         }
 
-        float baseline = codeH + 2 * pad + textSize;
+        float baseline = textTop + capHeight;
         foreach (var line in lines)
         {
-            canvas.DrawText(line, width / 2f, baseline, textPaint);
+            canvas.DrawText(line, textX, baseline, textPaint);
             baseline += lineHeight;
         }
 

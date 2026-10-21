@@ -6,6 +6,7 @@ namespace BarcodeBuddy.Pages;
 public partial class FavoritesPage : ContentPage
 {
     private const string ActionShow = "Show full screen";
+    private const string ActionViewPage = "View page in app";
     private const string ActionShare = "Share image";
     private const string ActionSaveImage = "Save image to gallery";
     private const string ActionBarcode = "Use text in Barcode generator";
@@ -42,6 +43,7 @@ public partial class FavoritesPage : ContentPage
         var isLink = Links.TryGetOpenable(item.Value, out var uri);
         var openLabel = isLink ? Links.OpenLabel(uri) : string.Empty;
         if (isLink) actions.Add(openLabel);
+        if (Links.IsWebLink(item.Value, out _)) actions.Add(ActionViewPage);
         actions.AddRange([ActionShare, ActionSaveImage, ActionBarcode, ActionQr, ActionCopy]);
 
         var choice = await DisplayActionSheetAsync(item.DisplayName, "Cancel", ActionDelete, actions.ToArray());
@@ -56,6 +58,10 @@ public partial class FavoritesPage : ContentPage
         {
             case ActionShow:
                 await ShowBarcodePage.ShowAsync(item);
+                break;
+
+            case ActionViewPage:
+                await WebPage.ShowAsync(item.Value);
                 break;
 
             case ActionShare:

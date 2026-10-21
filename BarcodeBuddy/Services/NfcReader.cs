@@ -20,10 +20,23 @@ public sealed class NfcReader
 #if ANDROID
     private ReaderCallback? _callback;
 
-    /// <summary>When set, the next tag held to the phone is written with this message instead of being read.</summary>
-    private NdefMessage? _pendingWrite;
+    /// <summary>When set, the next tag held to the phone is handed to this operation instead of being read.</summary>
+    private Func<Tag, (bool Ok, string Note)>? _pendingWrite;
 
-    public void ArmWrite(NdefMessage? message) => _pendingWrite = message;
+    /// <summary>Arms writing an NDEF message (link, text, vCard) to the next tag; null disarms.</summary>
+    public void ArmWrite(NdefMessage? message) =>
+        _pendingWrite = message is null ? null : tag => WriteNdef(tag, message);
+
+    /// <summary>Arms writing a raw page dump (Amiibo, NTAG backup) to the next Type 2 tag.
+    /// <paramref name="dumpSerial"/> is the serial the dump was taken from, used only for the result note.</summary>
+    public void ArmRawWrite(byte[] dump, string dumpSerial) =>
+        _pendingWrite = tag => WriteRaw(tag, dump, dumpSerial);
+
+    /// <summary>Arms erasing the next tag: user pages are zeroed, an empty NDEF message is left, and any
+    /// password protection this app can open is removed.</summary>
+    public void ArmErase() => _pendingWrite = EraseTag;
+
+    public void Disarm() => _pendingWrite = null;
     public bool IsArmedToWrite => _pendingWrite is not null;
 
     private static NfcAdapter? Adapter =>
@@ -68,10 +81,17 @@ public sealed class NfcReader
 
     private void OnTag(Tag tag)
     {
-        if (_pendingWrite is { } message)
+        if (_pendingWrite is { } operation)
         {
             _pendingWrite = null;
-            var (ok, note) = WriteTag(tag, message);
+            bool ok;
+            string note;
+            try { (ok, note) = operation(tag); }
+            catch (Exception ex)
+            {
+                ok = false;
+                note = "Write failed, hold the tag still and try again. (" + ex.Message + ")";
+            }
             MainThread.BeginInvokeOnMainThread(() => TagWritten?.Invoke(ok, note));
             return;
         }
@@ -91,9 +111,15 @@ public sealed class NfcReader
 
     /// <summary>Writes an NDEF message to a writable tag, or formats a blank one first. Nothing else about the
     /// tag is changed: its serial number is fixed and is never touched.</summary>
-    private static (bool Ok, string Note) WriteTag(Tag tag, NdefMessage message)
+    private static (bool Ok, string Note) WriteNdef(Tag tag, NdefMessage message)
     {
-        int size = message.ToByteArray().Length;
+        var bytes = message.ToByteArray();
+        int size = bytes.Length;
+
+        // Type 2 tags (NTAG, Ultralight): write the TLV through plain page writes. Android's own Ndef tech is
+        // not offered in the reader mode this app uses, and this path also opens password-protected tags.
+        if (IsType2(tag)) return WriteType2Ndef(tag, bytes);
+
         try
         {
             using var ndef = Ndef.Get(tag);
@@ -145,6 +171,9 @@ public sealed class NfcReader
     public static NdefMessage BuildVCard(string vcard) =>
         new([NdefRecord.CreateMime("text/vcard", Encoding.UTF8.GetBytes(vcard))]);
 
+    public static NdefMessage BuildEmpty() =>
+        new([new NdefRecord(NdefRecord.TnfEmpty, [], [], [])]);
+
     // ------------------------------------------------------------------------------------------------
     // Tag description
     // ------------------------------------------------------------------------------------------------
@@ -158,6 +187,8 @@ public sealed class NfcReader
         var details = new List<(string, string)>();
         var records = new List<NfcRecordInfo>();
         List<string>? memory = null;
+        byte[]? rawMemory = null;
+        string? chipName = null;
         byte[]? ndefBytes = null;
 
         using (var nfcA = NfcA.Get(tag))
@@ -215,23 +246,43 @@ public sealed class NfcReader
             }
         }
 
-        // Type 2 tags (NTAG / Ultralight stickers): read NDEF through plain READ commands.
+        // Type 2 tags (NTAG / Ultralight stickers, Amiibo): read every page through plain READ commands.
         if (ndefBytes is null && !isIsoDep && !isClassic)
         {
-            using var nfcA = NfcA.Get(tag);
-            if (nfcA is not null)
+            using var link = Type2Link.Open(tag);
+            if (link is not null)
             {
                 try
                 {
-                    nfcA.Connect();
-                    ndefBytes = ReadType2Ndef(nfcA, details);
-                    memory = DumpType2Memory(nfcA);
+                    link.Connect();
+                    var chip = GetVersion(link);
+                    if (chip is not null)
+                    {
+                        chipName = chip.Name;
+                        details.Add(("Chip", chip.TotalPages > 0
+                            ? $"{chip.Name}, {chip.TotalPages} pages, {(chip.UserEnd - 4) * 4} bytes user memory"
+                            : chip.Name));
+                    }
+
+                    rawMemory = ReadMemory(link, chip);
+
+                    // Read-protected pages (PROT=1) on an Amiibo-style tag: present the Nintendo key, then read
+                    // again. Other protected tags are left alone: a wrong guess counts against their AUTHLIM.
+                    if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4
+                        && LooksAmiibo(rawMemory) && TryAuthenticate(link, AmiiboPassword(link.Uid)))
+                        rawMemory = ReadMemory(link, chip);
+
+                    if (rawMemory.Length >= 16)
+                    {
+                        ndefBytes = ExtractType2Ndef(rawMemory, details);
+                        DescribeType2Layout(rawMemory, chip, details);
+                    }
+                    memory = FormatDump(rawMemory);
                 }
                 catch (Exception ex)
                 {
                     details.Add(("Note", "Could not read the tag's memory (" + ex.Message + ")"));
                 }
-                finally { try { nfcA.Close(); } catch { } }
             }
         }
 
@@ -258,43 +309,64 @@ public sealed class NfcReader
             }
         }
 
-        if (records.Count == 0 && !details.Any(d => d.Item1 is "Access" or "Card"))
+        if (records.Count == 0 && !details.Any(d => d.Item1 is "Access" or "Card" or "Data"))
             details.Add(("Content", "No NDEF content found on this tag"));
 
         if (memory is { Count: > 0 })
             details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
 
-        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory);
+        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName);
     }
 
-    /// <summary>Dumps every readable page of a Type 2 tag as "page: hex  ascii". These pages carry no keys,
-    /// so this is the full openly-readable memory of the tag.</summary>
-    private static List<string>? DumpType2Memory(NfcA nfcA)
+    /// <summary>Formats page memory as "page: hex  ascii" lines, one per 4-byte page.</summary>
+    private static List<string>? FormatDump(byte[] bytes)
     {
+        if (bytes.Length < 4) return null;
         var lines = new List<string>();
-        int page = 0;
-        byte[]? previous = null;
-
-        while (page < 256)
+        for (int page = 0; page * 4 + 4 <= bytes.Length; page++)
         {
-            byte[] chunk;
-            try { chunk = nfcA.Transceive([0x30, (byte)page]); }
-            catch { break; }                              // past the end of memory: the tag NAKs the READ
-            if (chunk is null || chunk.Length < 16) break;
-
-            // READ returns 4 pages at a time and wraps around at the end; stop once it repeats.
-            if (previous is not null && chunk.AsSpan(0, 16).SequenceEqual(previous)) break;
-            previous = chunk[..16];
-
-            for (int i = 0; i < 4; i++)
-            {
-                var row = chunk[(i * 4)..(i * 4 + 4)];
-                lines.Add($"{page + i:D3}: {ToHex(row)}  {Ascii(row)}");
-            }
-            page += 4;
+            var row = bytes[(page * 4)..(page * 4 + 4)];
+            lines.Add($"{page:D3}: {ToHex(row)}  {Ascii(row)}");
         }
-        return lines.Count > 0 ? lines : null;
+        return lines;
     }
+
+    /// <summary>Adds what the page layout reveals: Amiibo content, lock bits, password protection.</summary>
+    private static void DescribeType2Layout(byte[] bytes, Type2Chip? chip, List<(string, string)> details)
+    {
+        if (IsAmiiboDump(bytes))
+            details.Add(("Data", "Amiibo-style content (NTAG215 layout with the Nintendo capability container)"));
+
+        if (bytes[10] != 0 || bytes[11] != 0)
+            details.Add(("Lock bits", $"Static lock bits set ({ToHex(bytes[10..12])}): some of pages 3-15 are permanently read-only"));
+
+        if (chip is null || chip.ConfigPage < 0) return;
+
+        if (chip.ConfigPage == chip.UserEnd + 1 && bytes.Length >= (chip.UserEnd + 1) * 4)
+        {
+            var dyn = bytes[(chip.UserEnd * 4)..(chip.UserEnd * 4 + 3)];
+            if (dyn.Any(b => b != 0))
+                details.Add(("Lock bits", $"Dynamic lock bits set ({ToHex(dyn)}): some pages from 16 up are permanently read-only"));
+        }
+
+        if (bytes.Length >= (chip.ConfigPage + 2) * 4)
+        {
+            int auth0 = bytes[chip.ConfigPage * 4 + 3];
+            bool readProtected = (bytes[(chip.ConfigPage + 1) * 4] & 0x80) != 0;
+            if (auth0 < chip.TotalPages)
+                details.Add(("Password", $"Pages from {auth0} are {(readProtected ? "read- and write-" : "write-")}protected. " +
+                    "Amiibo-style tags use a key derived from the serial, which this app knows."));
+        }
+    }
+
+    /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
+    public static bool IsAmiiboDump(byte[] bytes) =>
+        bytes.Length >= 520 && LooksAmiibo(bytes);
+
+    /// <summary>The Nintendo capability container in page 3; enough to decide that the Amiibo key may be tried,
+    /// even when the rest of the tag could not be read.</summary>
+    private static bool LooksAmiibo(byte[] bytes) =>
+        bytes.Length >= 16 && bytes[12] == 0xF1 && bytes[13] == 0x10 && bytes[14] == 0xFF && bytes[15] == 0xEE;
 
     private static string Ascii(byte[] bytes) =>
         new(bytes.Select(b => b >= 0x20 && b < 0x7F ? (char)b : '.').ToArray());
@@ -412,40 +484,24 @@ public sealed class NfcReader
     }
 
     // ------------------------------------------------------------------------------------------------
-    // Type 2 (NTAG / Ultralight): READ (0x30) returns 16 bytes = 4 pages of 4 bytes.
+    // Type 2 (NTAG / Ultralight): READ (0x30) returns 16 bytes = 4 pages of 4 bytes, WRITE (0xA2) one page.
     // ------------------------------------------------------------------------------------------------
 
-    private static byte[]? ReadType2Ndef(NfcA nfcA, List<(string, string)> details)
+    private static byte[]? ExtractType2Ndef(byte[] memory, List<(string, string)> details)
     {
-        var first = nfcA.Transceive([0x30, 0x00]);
-        if (first is null || first.Length < 16) return null;
-
         // Capability container lives in page 3
-        if (first[12] != 0xE1)
+        if (memory[12] != 0xE1)
         {
-            details.Add(("Chip", "Type 2 tag without NDEF formatting"));
+            if (!IsAmiiboDump(memory))
+                details.Add(("Chip", "Type 2 tag without NDEF formatting"));
             return null;
         }
-        int dataBytes = first[14] * 8;
-        bool writable = (first[15] & 0x0F) == 0;
+        int dataBytes = memory[14] * 8;
+        bool writable = (memory[15] & 0x0F) == 0;
         details.Add(("NDEF", $"Type 2 tag (NTAG/Ultralight), {dataBytes} bytes capacity, {(writable ? "writable" : "read-only")}"));
 
-        // Read the data area page by page (4 pages per READ) until the NDEF TLV is complete.
-        var buffer = new List<byte>();
-        int page = 4;
-        int lastPage = 4 + dataBytes / 4;
-        while (page < lastPage)
-        {
-            var chunk = nfcA.Transceive([0x30, (byte)page]);
-            if (chunk is null || chunk.Length < 16) break;
-            buffer.AddRange(chunk);
-            page += 4;
-
-            // Stop early once the NDEF TLV is fully present.
-            if (TryExtractNdefTlv(buffer, out var ndef, out var complete) && complete)
-                return ndef;
-        }
-
+        int end = Math.Min(memory.Length, 16 + dataBytes);
+        var buffer = new List<byte>(memory[16..end]);
         TryExtractNdefTlv(buffer, out var result, out _);
         return result;
     }
@@ -482,6 +538,472 @@ public sealed class NfcReader
             i += header + len;                         // skip lock/memory control and proprietary TLVs
         }
         return false;
+    }
+
+    /// <summary>What GET_VERSION tells about a Type 2 chip. UserEnd is the first page after user memory
+    /// (lock and configuration pages follow); ConfigPage is CFG0, where AUTH0 lives, or -1 if none.</summary>
+    private sealed record Type2Chip(string Name, int TotalPages, int UserEnd, bool HasPassword, int ConfigPage);
+
+    private static Type2Chip? GetVersion(Type2Link link)
+    {
+        byte[]? v;
+        try { v = link.Transceive([0x60]); }
+        catch
+        {
+            // Older chips (Ultralight, NTAG203) answer with a NAK, which drops the connection.
+            try { link.Reconnect(); } catch { }
+            return null;
+        }
+        if (v is not { Length: 8 } || v[0] != 0x00) return null;
+
+        string family = v[2] switch { 0x03 => "MIFARE Ultralight EV1", 0x04 => "NTAG", _ => $"Type 2 chip (product {v[2]:X2})" };
+        return (v[2], v[6]) switch
+        {
+            (0x04, 0x0F) => new("NTAG213", 45, 40, true, 41),
+            (0x04, 0x11) => new("NTAG215", 135, 130, true, 131),
+            (0x04, 0x13) => new("NTAG216", 231, 226, true, 227),
+            (_, 0x0B) => new($"{family} (48 bytes)", 20, 16, true, 16),
+            (_, 0x0E) => new($"{family} (128 bytes)", 41, 36, true, 37),
+            _ => new($"{family}, size code {v[6]:X2}", 0, 0, false, -1),
+        };
+    }
+
+    /// <summary>Reads every page the chip reports (or until the tag stops answering for unknown chips).</summary>
+    private static byte[] ReadMemory(Type2Link link, Type2Chip? chip)
+    {
+        var buffer = new List<byte>();
+        int total = chip is { TotalPages: > 0 } ? chip.TotalPages : 256;
+        byte[]? previous = null;
+
+        for (int page = 0; page < total; page += 4)
+        {
+            var chunk = link.Read(page);
+            if (chunk is null) break;                 // past the end, or a protected page: the tag NAKs
+
+            // Unknown size: READ wraps around at the end, so stop once the data repeats.
+            if (chip is not { TotalPages: > 0 })
+            {
+                if (previous is not null && chunk.AsSpan(0, 16).SequenceEqual(previous)) break;
+                previous = chunk[..16];
+            }
+
+            int take = Math.Min(16, (total - page) * 4);
+            buffer.AddRange(chunk.Take(take));
+        }
+
+        // Unknown size: the last READ may already have wrapped to page 0; cut the copied pages off.
+        if (chip is not { TotalPages: > 0 } && buffer.Count >= 32)
+        {
+            var all = buffer.ToArray();
+            for (int page = all.Length / 4 - 4; page < all.Length / 4 - 1; page++)
+            {
+                if (page > 1 && all.AsSpan(page * 4, 8).SequenceEqual(all.AsSpan(0, 8)))
+                    return all[..(page * 4)];
+            }
+            return all;
+        }
+        return buffer.ToArray();
+    }
+
+    /// <summary>The password Nintendo tags derive from their 7-byte serial; the PACK is 80:80.</summary>
+    private static byte[] AmiiboPassword(byte[] uid) =>
+        uid.Length < 7
+            ? [0xFF, 0xFF, 0xFF, 0xFF]
+            : [(byte)(0xAA ^ uid[1] ^ uid[3]), (byte)(0x55 ^ uid[2] ^ uid[4]),
+               (byte)(0xAA ^ uid[3] ^ uid[5]), (byte)(0x55 ^ uid[4] ^ uid[6])];
+
+    /// <summary>PWD_AUTH. True when the tag answered with a PACK; a wrong password drops the connection,
+    /// which is restored here.</summary>
+    private static bool TryAuthenticate(Type2Link link, byte[] pwd)
+    {
+        try
+        {
+            var pack = link.Transceive([0x1B, pwd[0], pwd[1], pwd[2], pwd[3]]);
+            return pack is { Length: >= 2 };
+        }
+        catch
+        {
+            try { link.Reconnect(); } catch { }
+            return false;
+        }
+    }
+
+    /// <summary>AUTH0 from CFG0: the first page that needs the password (0xFF means none), or -1 if unknown.</summary>
+    private static int ReadAuth0(Type2Link link, Type2Chip? chip)
+    {
+        if (chip is null || chip.ConfigPage < 0) return -1;
+        var cfg = link.Read(chip.ConfigPage);
+        return cfg is null ? -1 : cfg[3];
+    }
+
+    private static bool IsType2(Tag tag)
+    {
+        var techs = tag.GetTechList() ?? [];
+        return techs.Contains("android.nfc.tech.NfcA")
+            && !techs.Contains("android.nfc.tech.IsoDep")
+            && !techs.Contains("android.nfc.tech.MifareClassic");
+    }
+
+    private static bool SamePage(byte[] memory, int page, byte[] data) =>
+        memory.Length >= (page + 1) * 4 && memory.AsSpan(page * 4, 4).SequenceEqual(data);
+
+    /// <summary>Writes one page. On a failure the connection is restored and the page read back (some NFC
+    /// stacks report the tag's 4-bit ACK as an error); then, once, the password is tried when one is known.
+    /// <paramref name="pwd"/> is null for tags whose password this app must not guess.</summary>
+    private static bool WritePageWithRetry(Type2Link link, int page, byte[] data, byte[]? pwd, ref bool authed, out string error)
+    {
+        error = "";
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try { link.WritePage(page, data); return true; }
+            catch (Exception ex) { error = ex.Message; }
+
+            try { link.Reconnect(); }
+            catch (Exception ex) { error = "the tag moved away (" + ex.Message + ")"; return false; }
+
+            // A reconnect ends the password session; open it again so later pages still go through.
+            if (authed && pwd is not null && !TryAuthenticate(link, pwd))
+            {
+                error += ", and the password session was lost";
+                return false;
+            }
+
+            var check = link.Read(page);
+            if (check is not null && check.AsSpan(0, 4).SequenceEqual(data)) return true;
+
+            if (authed || pwd is null || !TryAuthenticate(link, pwd)) return false;
+            authed = true;
+        }
+        return false;
+    }
+
+    /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
+    /// Amiibo-style, otherwise none. Guessing on other tags would count against their failed-attempt limit.</summary>
+    private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
+        amiiboDump || LooksAmiibo(tagMemory) ? AmiiboPassword(link.Uid) : null;
+
+    /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
+    /// message when the operation cannot proceed.</summary>
+    private static string? OpenProtection(Type2Link link, Type2Chip? chip, int lastPageTouched, byte[]? pwd, ref bool authed)
+    {
+        int auth0 = ReadAuth0(link, chip);
+        if (auth0 < 0 || auth0 >= lastPageTouched) return null;
+        if (pwd is null)
+            return $"This tag is password-protected from page {auth0} and is not Amiibo-style, so this app will not guess " +
+                   "its password. Nothing was changed.";
+        authed = TryAuthenticate(link, pwd);
+        return authed ? null : "This tag is password-protected and the Amiibo key does not open it. Nothing was changed.";
+    }
+
+    /// <summary>Writes an NDEF TLV into the user pages of a Type 2 tag, formatting a blank one first.</summary>
+    private static (bool Ok, string Note) WriteType2Ndef(Tag tag, byte[] ndef)
+    {
+        using var link = Type2Link.Open(tag);
+        if (link is null) return (false, "This tag cannot be written page by page.");
+
+        // TLV: 03, length (1 or 3 bytes), message, FE terminator, padded to whole pages.
+        var tlv = new List<byte> { 0x03 };
+        if (ndef.Length < 0xFF) tlv.Add((byte)ndef.Length);
+        else tlv.AddRange([0xFF, (byte)(ndef.Length >> 8), (byte)(ndef.Length & 0xFF)]);
+        tlv.AddRange(ndef);
+        tlv.Add(0xFE);
+        while (tlv.Count % 4 != 0) tlv.Add(0x00);
+
+        link.Connect();
+        var chip = GetVersion(link);
+        var before = ReadMemory(link, chip);
+        if (before.Length < 16) return (false, "Could not read the tag. Hold it still and try again.");
+
+        int userEnd = chip is { UserEnd: > 0 } ? chip.UserEnd : before.Length / 4;
+        var pwd = PasswordFor(link, before);
+        bool authed = false;
+        if (OpenProtection(link, chip, userEnd, pwd, ref authed) is { } blocked) return (false, blocked);
+
+        var notes = new List<string>();
+        var cc = before[12..16];
+        if (cc.All(b => b == 0))
+        {
+            // Blank, never formatted: write the capability container (one-time programmable page).
+            byte[] newCc = [0xE1, 0x10, (byte)Math.Min(0xFF, (userEnd - 4) * 4 / 8), 0x00];
+            if (!WritePageWithRetry(link, 3, newCc, pwd, ref authed, out var ccError))
+                return (false, "Could not format the blank tag (" + ccError + ").");
+            cc = newCc;
+            notes.Add("Blank tag formatted for NDEF.");
+        }
+        else if (cc[0] != 0xE1)
+        {
+            return (false, IsAmiiboDump(before)
+                ? "This tag carries Amiibo data and its capability container (page 3) is one-time programmable, so phones " +
+                  "will never read it as a text or link tag. It can still be erased or loaded with another binary dump."
+                : $"This tag is not NDEF-formatted (capability container {ToHex(cc)}) and cannot be formatted, so text and links cannot be written to it.");
+        }
+        else if ((cc[3] & 0x0F) != 0)
+        {
+            return (false, "This tag is marked read-only in its capability container and cannot be changed.");
+        }
+
+        int capacity = Math.Min(cc[2] * 8, (userEnd - 4) * 4);
+        if (tlv.Count > capacity)
+            return (false, $"The content needs {tlv.Count} bytes but this tag holds only {capacity}.");
+
+        int written = 0;
+        var data = tlv.ToArray();
+        for (int i = 0; i < data.Length; i += 4)
+        {
+            int page = 4 + i / 4;
+            var pageData = data[i..(i + 4)];
+            if (SamePage(before, page, pageData)) continue;
+            if (!WritePageWithRetry(link, page, pageData, pwd, ref authed, out var error))
+                return (false, $"Write failed at page {page} ({error}). The tag may be locked, or it moved away.");
+            written++;
+        }
+
+        var after = ReadMemory(link, chip);
+        for (int i = 0; i < data.Length; i += 4)
+            if (!SamePage(after, 4 + i / 4, data[i..(i + 4)]))
+                return (false, "The tag did not keep the new content. It may be locked; hold it still and try again.");
+
+        return (true, $"Written to the tag ({ndef.Length} bytes, {written} pages changed). {string.Join(" ", notes)}".TrimEnd());
+    }
+
+    /// <summary>Writes a page dump back to a Type 2 tag: page 3 and every user page, never the serial
+    /// (pages 0-2) and never the permanent lock bits. An Amiibo dump also gets the Nintendo password set
+    /// so a console can write to it; that password is derived from this tag's serial.</summary>
+    private static (bool Ok, string Note) WriteRaw(Tag tag, byte[] dump, string dumpSerial)
+    {
+        if (dump.Length < 16 || dump.Length % 4 != 0)
+            return (false, $"The dump is {dump.Length} bytes; a tag dump is a whole number of 4-byte pages, at least 16 bytes.");
+
+        using var link = Type2Link.Open(tag);
+        if (link is null) return (false, "Binary dumps can only be written to Type 2 tags (NTAG, Ultralight, Amiibo).");
+
+        link.Connect();
+        var chip = GetVersion(link);
+        if (chip is not { UserEnd: > 0 })
+            return (false, $"This chip could not be identified{(chip is null ? "" : " (" + chip.Name + ")")}, so the app cannot tell " +
+                           "its user pages from its lock and configuration pages. Dumps are written to NTAG213/215/216 and Ultralight EV1 only.");
+
+        // Only the user area is written; a dump may carry more (an Amiibo .bin often ends with a signature).
+        int dumpPages = dump.Length / 4;
+        int endPage = Math.Min(dumpPages, chip.UserEnd);
+        bool amiibo = IsAmiiboDump(dump);
+        if (amiibo && chip.UserEnd < 130)
+            return (false, $"An Amiibo dump needs 130 pages of user memory (NTAG215); this {chip.Name} has {chip.UserEnd - 4}.");
+
+        var before = ReadMemory(link, chip);
+        if (before.Length < 16) return (false, "Could not read the tag. Hold it still and try again.");
+
+        var pwd = PasswordFor(link, before, amiibo);
+        bool authed = false;
+        if (OpenProtection(link, chip, endPage, pwd, ref authed) is { } blocked) return (false, blocked);
+
+        var notes = new List<string>();
+        var oldCc = before[12..16];
+        var newCc = dump[12..16];
+        if (oldCc.Zip(newCc).Any(p => (p.First | p.Second) != p.Second))
+            notes.Add($"Page 3 is one-time programmable and keeps its old bits ({ToHex(oldCc)} cannot become {ToHex(newCc)}).");
+
+        int written = 0, skipped = 0;
+        for (int page = 3; page < endPage; page++)
+        {
+            var data = dump[(page * 4)..(page * 4 + 4)];
+            if (SamePage(before, page, data)) { skipped++; continue; }
+            if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
+                return (false, $"Write failed at page {page} ({error}) after {written} pages. " +
+                    "The page may be permanently locked, or the tag moved away.");
+            written++;
+        }
+
+        if (amiibo && pwd is not null && chip is { HasPassword: true, ConfigPage: > 0 })
+            notes.Add(SetAmiiboPassword(link, chip, pwd, before, ref authed));
+
+        var after = ReadMemory(link, chip);
+        int mismatched = 0;
+        for (int page = 4; page < endPage; page++)
+            if (!SamePage(after, page, dump[(page * 4)..(page * 4 + 4)])) mismatched++;
+
+        var serial = ToHex(link.Uid);
+        if (dumpSerial.Length > 0 && !string.Equals(dumpSerial, serial, StringComparison.OrdinalIgnoreCase))
+            notes.Add($"The dump came from tag {dumpSerial} and this tag is {serial}; Amiibo data is bound to its original serial, so a console may reject it.");
+
+        if (mismatched > 0)
+            return (false, $"{written} pages written, but {mismatched} read back differently (locked pages?). {string.Join(" ", notes)}".TrimEnd());
+
+        return (true, $"Dump written: {written} pages changed, {skipped} already matched. {string.Join(" ", notes)}".TrimEnd());
+    }
+
+    /// <summary>Sets the Nintendo password on an NTAG so a console can authenticate: PWD, PACK 80:80,
+    /// CFG1 with plain access, CFG0 with AUTH0 = 4 (writes need the password, reads stay open).
+    /// The permanent lock bits are left alone, so this app can rewrite the tag later.</summary>
+    private static string SetAmiiboPassword(Type2Link link, Type2Chip chip, byte[] pwd, byte[] before, ref bool authed)
+    {
+        int cfg0 = chip.ConfigPage;
+        var oldCfg0 = before.Length >= (cfg0 + 1) * 4 ? before[(cfg0 * 4)..(cfg0 * 4 + 4)] : new byte[4];
+        var oldCfg1 = before.Length >= (cfg0 + 2) * 4 ? before[((cfg0 + 1) * 4)..((cfg0 + 1) * 4 + 4)] : new byte[4];
+
+        // PWD and PACK can always be written (the pages read back as zeros, so they are never "already set").
+        if (!WritePageWithRetry(link, cfg0 + 2, pwd, pwd, ref authed, out var pwdError))
+            return $"The data is in place but the Amiibo password could not be written (page {cfg0 + 2}: {pwdError}).";
+        if (!WritePageWithRetry(link, cfg0 + 3, [0x80, 0x80, 0x00, 0x00], pwd, ref authed, out var packError))
+            return $"The data is in place and the password written, but its PACK could not be set (page {cfg0 + 3}: {packError}).";
+
+        // Configuration: writes need the password from page 4 on, reads stay open. Skip what is already so,
+        // and accept a configuration that the original writer locked (CFGLCK), as Amiibo tools usually do.
+        bool protectedFromStart = oldCfg0[3] <= 4;
+        bool readsOpen = (oldCfg1[0] & 0x80) == 0;
+        bool configLocked = (oldCfg1[0] & 0x40) != 0;
+
+        if (protectedFromStart && readsOpen)
+            return "Amiibo password set from this tag's serial. The tag was already configured for it" +
+                   (configLocked ? " (configuration locked by the original writer)." : ".");
+
+        if (configLocked)
+            return "Amiibo password set, but the tag's configuration is permanently locked by its original writer, so " +
+                   (protectedFromStart ? "its read protection stays as it is." : "the password cannot be made to apply from page 4.");
+
+        if (!WritePageWithRetry(link, cfg0 + 1, [0x00, 0x00, 0x00, 0x00], pwd, ref authed, out var cfg1Error))
+            return $"Amiibo password set, but its configuration could not be written (page {cfg0 + 1}: {cfg1Error}).";
+        if (!WritePageWithRetry(link, cfg0, [oldCfg0[0], oldCfg0[1], oldCfg0[2], 0x04], pwd, ref authed, out var cfg0Error))
+            return $"Amiibo password set, but its configuration could not be written (page {cfg0}: {cfg0Error}).";
+
+        authed = true;
+        return "Amiibo password set from this tag's serial; the lock bits were not set, so the tag stays rewritable.";
+    }
+
+    /// <summary>Zeroes the user pages, leaves an empty NDEF TLV, and lifts password protection when the
+    /// Amiibo key opens it. Page 3 is one-time programmable and stays as it is.</summary>
+    private static (bool Ok, string Note) EraseTag(Tag tag)
+    {
+        if (!IsType2(tag))
+        {
+            var (ok, note) = WriteNdef(tag, BuildEmpty());
+            return (ok, ok ? "Content cleared (empty NDEF message written)." : note);
+        }
+
+        using var link = Type2Link.Open(tag);
+        if (link is null) return (false, "This tag cannot be erased page by page.");
+
+        link.Connect();
+        var chip = GetVersion(link);
+        if (chip is not { UserEnd: > 0 })
+            return (false, $"This chip could not be identified{(chip is null ? "" : " (" + chip.Name + ")")}, so the app cannot tell " +
+                           "its user pages from its lock and configuration pages. Erase works on NTAG213/215/216 and Ultralight EV1 only.");
+
+        var before = ReadMemory(link, chip);
+        if (before.Length < 16) return (false, "Could not read the tag. Hold it still and try again.");
+
+        int userEnd = chip.UserEnd;
+        var pwd = PasswordFor(link, before);
+        bool authed = false;
+        int auth0 = ReadAuth0(link, chip);
+        if (OpenProtection(link, chip, userEnd, pwd, ref authed) is { } blocked) return (false, blocked);
+
+        int written = 0;
+        for (int page = 4; page < userEnd; page++)
+        {
+            byte[] data = page == 4 ? [0x03, 0x00, 0xFE, 0x00] : [0x00, 0x00, 0x00, 0x00];
+            if (SamePage(before, page, data)) continue;
+            if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
+                return (false, $"Erase stopped at page {page} ({error}) after clearing {written} pages. " +
+                    "The page may be permanently locked, or the tag moved away.");
+            written++;
+        }
+
+        var notes = new List<string>();
+        if (chip is { HasPassword: true, ConfigPage: > 0 } && auth0 >= 0 && auth0 < chip.TotalPages && authed)
+        {
+            // Switch protection off (AUTH0 = FF) first; only then reset the password. The other way round, a
+            // failed configuration write would leave the tag locked behind a password nobody knows.
+            int cfg0 = chip.ConfigPage;
+            var cfgRead = link.Read(cfg0);
+            var oldCfg0 = cfgRead is not null ? cfgRead[..4] : new byte[] { 0x00, 0x00, 0x00, 0xFF };
+            bool lifted = WritePageWithRetry(link, cfg0, [oldCfg0[0], oldCfg0[1], oldCfg0[2], 0xFF], pwd, ref authed, out _);
+            if (lifted)
+            {
+                WritePageWithRetry(link, cfg0 + 2, [0xFF, 0xFF, 0xFF, 0xFF], pwd, ref authed, out _);
+                WritePageWithRetry(link, cfg0 + 3, [0x00, 0x00, 0x00, 0x00], pwd, ref authed, out _);
+            }
+            notes.Add(lifted
+                ? "Password protection removed."
+                : "Password protection stays (its configuration is locked); the Amiibo key still opens it for this app.");
+        }
+
+        if (before[12] == 0xF1)
+            notes.Add("Page 3 keeps the Amiibo capability container (one-time programmable), so phones will not treat this " +
+                      "tag as a text or link tag; it can still hold another binary dump.");
+
+        return (true, $"Tag erased: {written} pages cleared. {string.Join(" ", notes)}".TrimEnd());
+    }
+
+    /// <summary>Raw page access to a Type 2 tag. Prefers Android's MifareUltralight tech, whose WritePage
+    /// understands the tag's 4-bit ACK, and falls back to plain NfcA commands.</summary>
+    private sealed class Type2Link : IDisposable
+    {
+        private readonly MifareUltralight? _ul;
+        private readonly NfcA? _nfcA;
+
+        public byte[] Uid { get; }
+
+        private Type2Link(Tag tag, MifareUltralight? ul, NfcA? nfcA)
+        {
+            _ul = ul;
+            _nfcA = nfcA;
+            Uid = tag.GetId() ?? [];
+        }
+
+        public static Type2Link? Open(Tag tag)
+        {
+            var ul = MifareUltralight.Get(tag);
+            if (ul is not null) return new Type2Link(tag, ul, null);
+            var nfcA = NfcA.Get(tag);
+            return nfcA is null ? null : new Type2Link(tag, null, nfcA);
+        }
+
+        private BasicTagTechnology Tech => (BasicTagTechnology?)_ul ?? _nfcA!;
+
+        public void Connect()
+        {
+            Tech.Connect();
+            if (_ul is not null) _ul.Timeout = 1000;
+            else _nfcA!.Timeout = 1000;
+        }
+
+        /// <summary>A NAK (wrong password, unknown command, locked page) puts the tag to sleep; wake it again.</summary>
+        public void Reconnect()
+        {
+            try { Tech.Close(); } catch { }
+            Tech.Connect();
+        }
+
+        public byte[]? Transceive(byte[] command) =>
+            _ul is not null ? _ul.Transceive(command) : _nfcA!.Transceive(command);
+
+        /// <summary>READ: 4 pages (16 bytes) from the given page, or null when the tag refuses.</summary>
+        public byte[]? Read(int page)
+        {
+            try
+            {
+                var result = Transceive([0x30, (byte)page]);
+                return result is { Length: >= 16 } ? result : null;
+            }
+            catch
+            {
+                try { Reconnect(); } catch { }
+                return null;
+            }
+        }
+
+        public void WritePage(int page, byte[] data)
+        {
+            if (_ul is not null) _ul.WritePage(page, data);
+            else _nfcA!.Transceive([0xA2, (byte)page, data[0], data[1], data[2], data[3]]);
+        }
+
+        public void Dispose()
+        {
+            try { Tech.Close(); } catch { }
+            Tech.Dispose();
+        }
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -571,8 +1093,13 @@ public sealed class NfcReader
 #else
     public bool IsSupported => false;
     public bool IsEnabled => false;
+    public bool IsArmedToWrite => false;
     public void Start() { }
     public void Stop() { }
     public void OpenSettings() { }
+    public void ArmRawWrite(byte[] dump, string dumpSerial) { }
+    public void ArmErase() { }
+    public void Disarm() { }
+    public static bool IsAmiiboDump(byte[] bytes) => false;
 #endif
 }

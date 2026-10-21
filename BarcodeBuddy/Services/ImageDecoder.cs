@@ -34,15 +34,7 @@ public static class ImageDecoder
             gray[i] = (byte)((r * 299 + g * 587 + b * 114) / 1000);
         }
 
-        var source = new RGBLuminanceSource(gray, w, h, RGBLuminanceSource.BitmapFormat.Gray8);
-        var reader = new BarcodeReaderGeneric
-        {
-            AutoRotate = true,
-            TryInverted = true,
-            Options = { TryHarder = true },
-        };
-
-        var result = reader.Decode(source);
+        var result = GrayDecoder.Decode(gray, w, h);
         return result is null ? null : ScanResult.From(result);
 #else
         return null;

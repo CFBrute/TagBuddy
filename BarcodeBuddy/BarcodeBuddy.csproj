@@ -17,7 +17,10 @@
 
 		<SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
 
-		<!-- Keep the .NET assemblies inside the APK so a sideloaded Debug build runs without Visual Studio Fast Deployment. -->
+		<!-- Keep the .NET assemblies inside the APK so a sideloaded Debug build runs without Visual Studio Fast Deployment.
+		     Native libraries are stored uncompressed (android:extractNativeLibs="false" in the manifest) so Android 16's
+		     16 KB page-size check can inspect them. Do not enable AndroidUseAssemblyStore for Debug: the runtime then
+		     aborts at startup on phones with a regional locale such as en-SE while looking up satellite resources. -->
 		<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
 	</PropertyGroup>
 
@@ -40,7 +43,7 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
-		<PackageReference Include="ZXing.Net.Maui.Controls" Version="0.4.0" />
+		<PackageReference Include="ZXing.Net.Maui.Controls" Version="0.10.4" />
 	</ItemGroup>
 
 </Project>

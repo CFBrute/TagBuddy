@@ -8,5 +8,6 @@ public partial class AppShell : Shell
     {
         InitializeComponent();
         Routing.RegisterRoute(ShowBarcodePage.Route, typeof(ShowBarcodePage));
+        Routing.RegisterRoute(WebPage.Route, typeof(WebPage));
     }
 }

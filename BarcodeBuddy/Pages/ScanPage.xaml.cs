@@ -13,6 +13,12 @@ public partial class ScanPage : ContentPage
     private ScanResult? _last;
     private bool _cameraAllowed;
 
+    /// <summary>A linear barcode must be read identically on two frames in a row before it counts. Linear
+    /// decoders have no real checksum against noise and happily "find" a UPC code inside a dense QR code or a
+    /// textured surface; a genuine barcode repeats, a hallucination does not.</summary>
+    private string? _candidate;
+    private int _candidateHits;
+
     public ScanPage(FavoritesService favorites)
     {
         InitializeComponent();
@@ -57,9 +63,12 @@ public partial class ScanPage : ContentPage
                 AutoRotate = true,
                 Multiple = false,
                 TryHarder = true,
+                CameraResolutionSelector = ChooseResolution,
             },
             IsDetecting = true,
         };
+        _candidate = null;
+        _candidateHits = 0;
         _camera.BarcodesDetected += OnBarcodesDetected;
         CameraHost.Content = _camera;
 
@@ -78,14 +87,33 @@ public partial class ScanPage : ContentPage
         _camera = null;
     }
 
-    private void ShowCameraLayout(bool cameraOn)
+    /// <summary>Three layouts: live camera on top; a chosen picture on top (large while it is being analysed,
+    /// a strip once there is a result); or results only.</summary>
+    private void ShowCameraLayout(bool cameraOn, bool picture = false, bool pictureLarge = false)
     {
-        CameraArea.IsVisible = cameraOn;
-        Root.RowDefinitions[0].Height = cameraOn ? GridLength.Star : new GridLength(0);
-        Root.RowDefinitions[1].Height = cameraOn ? GridLength.Auto : GridLength.Star;
-        ResultScroll.MaximumHeightRequest = cameraOn ? 160 : double.PositiveInfinity;
+        CameraArea.IsVisible = cameraOn || picture;
+        CameraHost.IsVisible = cameraOn;
+        CameraButtons.IsVisible = cameraOn;
+        PickedImage.IsVisible = picture;
+
+        Root.RowDefinitions[0].Height = cameraOn || pictureLarge ? GridLength.Star : picture ? new GridLength(240) : new GridLength(0);
+        Root.RowDefinitions[1].Height = cameraOn || pictureLarge ? GridLength.Auto : GridLength.Star;
+        ResultScroll.MaximumHeightRequest = cameraOn || pictureLarge ? 160 : double.PositiveInfinity;
         ResultTopBar.IsVisible = !cameraOn;
     }
+
+    /// <summary>Picks the analysis frame size: the largest the camera offers up to about full HD. The default
+    /// is small and cannot resolve dense QR codes (login codes, long links); larger than this only costs time.</summary>
+    private static CameraResolution? ChooseResolution(IReadOnlyList<CameraResolution> available)
+    {
+        if (available.Count == 0) return null;
+        var fits = available.Where(r => Math.Max(r.Width, r.Height) <= 1920).ToList();
+        var pool = fits.Count > 0 ? fits : available.ToList();
+        return pool.OrderByDescending(r => (long)r.Width * r.Height).First();
+    }
+
+    private static bool IsTwoDimensional(BarcodeFormat format) =>
+        format is BarcodeFormat.QrCode or BarcodeFormat.DataMatrix or BarcodeFormat.Aztec or BarcodeFormat.Pdf417;
 
     private void OnBarcodesDetected(object? sender, BarcodeDetectionEventArgs e)
     {
@@ -95,6 +123,15 @@ public partial class ScanPage : ContentPage
         MainThread.BeginInvokeOnMainThread(() =>
         {
             if (_last is not null) return; // already handled a result for this scan
+
+            if (!IsTwoDimensional(result.Format))
+            {
+                var key = $"{result.Format}:{result.Value}";
+                _candidateHits = key == _candidate ? _candidateHits + 1 : 1;
+                _candidate = key;
+                if (_candidateHits < 2) return;
+            }
+
             ShowResult(ScanResult.From(result), "scanned with the camera");
             try { Vibration.Default.Vibrate(80); } catch { /* not supported on every device */ }
         });
@@ -114,8 +151,6 @@ public partial class ScanPage : ContentPage
         }
         if (file is null) return;
 
-        StatusLabel.Text = "Looking for a code in the picture...";
-
         byte[] bytes;
         using (var stream = await file.OpenReadAsync())
         using (var buffer = new MemoryStream())
@@ -124,28 +159,57 @@ public partial class ScanPage : ContentPage
             bytes = buffer.ToArray();
         }
 
-        var result = await Task.Run(() => ImageDecoder.Decode(bytes));
+        // Show the picture itself while it is analysed; the camera is released meanwhile.
+        _last = null;
+        StopCamera();
+        PickedImage.Source = ImageSource.FromStream(() => new MemoryStream(bytes));
+        ShowCameraLayout(cameraOn: false, picture: true, pictureLarge: true);
+        ResultLabel.Text = string.Empty;
+        ResultButtons.IsVisible = false;
+        Details.IsVisible = false;
+        StatusLabel.Text = "Looking for a code in the picture...";
+        AnalysingOverlay.IsVisible = true;
+        AnalysingSpinner.IsRunning = true;
+
+        ScanResult? result;
+        try
+        {
+            result = await Task.Run(() => ImageDecoder.Decode(bytes));
+        }
+        finally
+        {
+            AnalysingSpinner.IsRunning = false;
+            AnalysingOverlay.IsVisible = false;
+        }
+
         if (result is null)
         {
-            StatusLabel.Text = "No barcode or QR code found in that picture";
+            StatusLabel.Text = "No barcode or QR code found in that picture. Try a sharper or closer picture, or scan again.";
             return;
         }
 
-        ShowResult(result, "read from a picture");
+        ShowResult(result, "read from a picture", keepPicture: true);
     }
 
-    private void ShowResult(ScanResult result, string source)
+    private void ShowResult(ScanResult result, string source, bool keepPicture = false)
     {
         _last = result;
         StopCamera();
-        ShowCameraLayout(false);
+        ShowCameraLayout(cameraOn: false, picture: keepPicture);
 
         StatusLabel.Text = $"{result.FormatLabel}, {source}";
         ResultLabel.Text = result.Value;
         ShowDetails(result);
         OpenLinkButton.IsVisible = Links.TryGetOpenable(result.Value, out var uri);
         if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+        ViewPageButton.IsVisible = Links.IsWebLink(result.Value, out _);
+        Preview.Value = result.Value;
         ResultButtons.IsVisible = true;
+    }
+
+    private async void OnViewPage(object? sender, EventArgs e)
+    {
+        if (_last is not null) await WebPage.ShowAsync(_last.Value);
     }
 
     private void ShowDetails(ScanResult result)
@@ -178,11 +242,13 @@ public partial class ScanPage : ContentPage
     private void OnScanAgain(object? sender, EventArgs e)
     {
         _last = null;
+        PickedImage.Source = null;
         StatusLabel.Text = "Point the camera at a barcode or QR code";
         ResultLabel.Text = string.Empty;
         Details.IsVisible = false;
         Details.Children.Clear();
         ResultButtons.IsVisible = false;
+        Preview.Value = null;
         StartCamera();
     }
 

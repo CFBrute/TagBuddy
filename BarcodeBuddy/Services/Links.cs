@@ -23,6 +23,10 @@ public static class Links
         return true;
     }
 
+    /// <summary>True for http(s) links: the ones that can be shown in the in-app page viewer and previewed.</summary>
+    public static bool IsWebLink(string? value, out Uri uri) =>
+        TryGetOpenable(value, out uri) && uri.Scheme is "http" or "https";
+
     public static string OpenLabel(Uri uri) => uri.Scheme.ToLowerInvariant() switch
     {
         "http" or "https" => "Open link",

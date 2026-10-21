@@ -51,7 +51,9 @@ public static class ScanDetails
                     break;
 
                 case "errorscorrected":
-                    yield return ("Errors corrected", $"{value} (the code was damaged but still readable)");
+                    yield return ("Errors corrected", Convert.ToInt32(value) > 0
+                        ? $"{value} (the code was damaged but still readable)"
+                        : "0 (read cleanly)");
                     break;
 
                 case "structuredappendsequence":
@@ -153,7 +155,40 @@ public static class ScanDetails
         {
             yield return ("Host", uri.Host);
             if (!uri.IsDefaultPort) yield return ("Port", uri.Port.ToString());
+            if (uri.AbsolutePath.Length > 1) yield return ("Path", Uri.UnescapeDataString(uri.AbsolutePath));
             if (uri.Scheme == "http") yield return ("Warning", "Plain http link, not encrypted");
+
+            // Login and setup links carry their settings as parameters (server addresses, tenant, tokens).
+            // Show each one so the reader can see where the link points before opening it.
+            foreach (var parameter in QueryParameters(uri))
+                yield return parameter;
+        }
+    }
+
+    /// <summary>Key/value pairs from the query string and from a query hidden in the fragment (#...?a=b).
+    /// Values that look like secrets are shortened so the screen does not expose them in full.</summary>
+    public static IEnumerable<(string Key, string Value)> QueryParameters(Uri uri)
+    {
+        var parts = new List<string>();
+        if (uri.Query.Length > 1) parts.Add(uri.Query[1..]);
+        var fragment = uri.Fragment.Length > 1 ? uri.Fragment[1..] : "";
+        int q = fragment.IndexOf('?');
+        if (q >= 0) parts.Add(fragment[(q + 1)..]);
+        else if (fragment.Contains('=')) parts.Add(fragment);
+
+        foreach (var part in parts)
+        {
+            foreach (var pair in part.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = pair.IndexOf('=');
+                var key = Uri.UnescapeDataString(eq < 0 ? pair : pair[..eq]).Replace('+', ' ');
+                var value = eq < 0 ? "" : Uri.UnescapeDataString(pair[(eq + 1)..].Replace('+', ' '));
+                if (key.Length == 0) continue;
+
+                bool secret = Regex.IsMatch(key, "token|secret|password|pwd|key|auth|code|sig", RegexOptions.IgnoreCase) && value.Length > 12;
+                if (secret) value = value[..6] + "…" + value[^4..] + $"  ({value.Length} characters)";
+                yield return (key, value.Length == 0 ? "(empty)" : value);
+            }
         }
     }
 }
