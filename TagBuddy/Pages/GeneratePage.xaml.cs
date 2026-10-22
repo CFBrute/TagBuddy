@@ -162,7 +162,7 @@ public partial class GeneratePage : ContentPage
             var text = await Clipboard.Default.GetTextAsync();
             if (string.IsNullOrEmpty(text))
             {
-                await DisplayAlertAsync("Nothing to paste", "The clipboard has no text.", "OK");
+                Notice.Show("Nothing to paste: the clipboard has no text");
                 return;
             }
             ValueEntry.Text = text.Trim();
