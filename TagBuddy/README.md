@@ -1,30 +1,34 @@
 # Tag Buddy
 
-Android-only .NET MAUI app (C#) that generates and scans barcodes.
+Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, and reads and writes NFC tags.
 
 ## Features
 
 - **Generate / Barcode** tab: pick a linear type, type text, and the barcode renders live.
   Types: Code 128, Code 39, Code 93, EAN-13, EAN-8, UPC-A, ITF, Codabar. Input is validated per type.
   Tap the code to open it full screen at maximum brightness for scanning.
-- **Everywhere a code is shown** (both Generate tabs, full screen, Favorites menu): icon buttons (long-press for a label): share sends a PNG
+- **Everywhere a code is shown** (both Generate tabs, full screen, Saved menu): icon buttons (long-press for a label): share sends a PNG
   of the code through the Android share sheet, save stores it under Pictures/Tag Buddy in the
   gallery, and an open-link button appears when the value is a web link, mail address, phone number, SMS or
   map location.
 - **Generate / QR Code** tab: multi-line content, live QR with a readout of version, size and byte count.
   "Advanced options" exposes the error-correction level (L/M/Q/H) and the quiet-zone margin.
+- **Text under the image** (both Generate tabs): the text printed under the code in shared and saved images.
+  It follows the content until edited; position, size, distance and max width are ratios of the code.
 - **NFC** tab, Read: hold a tag or card to the phone. Shows its serial number, radio/chip type and NDEF capacity,
   decodes NDEF records (text, links, MIME, external) and offers the same actions as a scanned code for the content.
   For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII).
-- **NFC** tab, Write: type a link, text or vCard (or load a favorite) and hold a writable tag to write it as NDEF.
+- **NFC** tab, Write: type a link, text or vCard (or load one from Saved) and hold a writable tag to write it as NDEF.
   Writable NDEF tags only; the serial number is never changed and locked cards cannot be written.
+  Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.
-- **Favorites** tab: saved codes with their options. Tap to show full screen; the menu on each row offers
-  Open link (for links), Share image, Save image, "Use text in Barcode generator", "Use text in QR generator",
-  "Copy text" and "Delete". Stored as JSON in the
-  app's private data folder.
+- **Saved** tab: codes with their options, text notes and tag dumps in one list, filtered by kind. Tap a code
+  to show it full screen, a dump to see its memory; the menu on each row offers what fits the kind (open or view
+  the link, share or save the image, use the text in a generator, write it to a tag, make a dump from text,
+  share a dump's .bin file, rename, delete). Stored as `saved.json` in the app's private data folder, with dump
+  bytes as .bin files next to it; older `favorites.json` files are taken over on first start.
 - **Scan** tab: camera scanner (ZXing), plus "From image" to decode a code from a picture on the phone.
   Shows what the code contains (web link, Wi-Fi, contact card, ...),
   its length, and decoder details such as the QR error-correction level, structured-append parts and byte
@@ -93,23 +97,31 @@ things about them decide what the app can do, and they are documented at the top
 ## Project layout
 
 - `Models/BarcodeTypes.cs` - supported formats, hints and per-format validation.
-- `Models/BarcodeItem.cs` - a saved code (name, value, format, QR options).
+- `Models/SavedItem.cs` - a saved code, text note or tag dump (with QR and image-text options).
+- `Pages/CodeGeneratorPage.cs` - what the QR and Barcode tabs share: live preview, paste, save/share/open.
+- `Pages/QrPage`, `Pages/GeneratePage` - the QR and linear barcode tabs.
+- `Pages/CaptionSection` - the "text under the image" section of both generators.
+- `Pages/ShowBarcodePage` - full-screen display with a brightness slider.
+- `Pages/SavedPage`, `Pages/DumpPage` - the Saved list, and one saved tag dump.
+- `Pages/ScanPage` - camera scanner with details; `Pages/WebPage` - in-app view of a link.
+- `Pages/NfcPage` - NFC tab.
+- `Pages/AppNavigation.cs` - hands content from one tab to another (generators, NFC writing).
+- `Pages/Palette.cs`, `Pages/DetailRows.cs`, `Pages/IconButtons.cs` - small UI helpers shared by pages.
 - `Services/BarcodeRenderer.cs` - text to module matrix via the ZXing encoder.
+- `Services/BarcodeImage.cs` - renders a code to PNG, shares it, saves it to the gallery.
 - `Services/ScanDetails.cs` - explains scanned content and decoder metadata.
 - `Services/ScanResult.cs` - one result type for camera scans and picture decodes.
-- `Services/ImageDecoder.cs` - finds a code inside a picked photo.
-- `Services/NfcReader.cs` - NFC reader mode and NDEF decoding (Android).
-- `Pages/NfcPage` - NFC tab.
-- `Services/BarcodeImage.cs` - renders a code to PNG, shares it, saves it to the gallery.
+- `Services/FrameDecoder.cs`, `Services/GrayDecoder.cs`, `Services/ImageDecoder.cs` - centre-first live decoding,
+  and finding a code in a picked photo.
+- `Services/NfcReader*.cs` - NFC reader mode (Android), split by concern: lifecycle (`NfcReader.cs`), reading
+  (`.Read.cs`), Type 2 page access and passwords (`.Type2.cs`), writing (`.Write.cs`).
+- `Services/Type2Dump.cs` - checks on a dump's bytes (size, serial, chip label) before it goes near a tag.
+- `Services/SavedService.cs` - loads/saves everything in Saved; `DumpText` finds the readable text in a dump.
 - `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
-- `Services/CodeActions.cs` - the shared share / save / open / copy actions.
-- `Services/FavoritesService.cs` - loads/saves favorites to `favorites.json`.
+- `Services/CodeActions.cs` - the shared share / save / open / copy actions and save prompts.
+- `Services/LinkPreviews.cs`, `OEmbed.cs`, `HtmlHead.cs`, `PageSnapshot.cs`, `Favicons.cs` - link previews and site icons.
 - `Controls/BarcodeView.cs` - draws a module matrix as bars or squares.
-- `Pages/GeneratePage` - linear barcode tab.
-- `Pages/QrPage` - QR tab with advanced options.
-- `Pages/ShowBarcodePage` - full-screen display.
-- `Pages/FavoritesPage` - saved list with per-item actions.
-- `Pages/ScanPage` - camera scanner with details.
+- `Controls/PreviewView.cs`, `LinkPreviewView.cs`, `SiteIconView.cs`, `ViewfinderDrawable.cs` - the other drawn views.
 
 ## Building
 
@@ -171,7 +183,7 @@ Keep the keystore and its password safe: the same key must sign every future upd
 
 ## Dependencies
 
-- [ZXing.Net.Maui.Controls](https://github.com/Redth/ZXing.Net.Maui) 0.4.0 – barcode generation view and camera reader view.
+- [ZXing.Net.Maui.Controls](https://github.com/Redth/ZXing.Net.Maui) 0.10.4 – barcode generation view and camera reader view.
 
 ## App icon, splash and theme
 
