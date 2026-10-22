@@ -331,7 +331,7 @@ public static class LinkPreviews
     private static Task<(string? Path, bool Sparse, bool Skipped)> CaptureSnapshotAsync(Uri uri) =>
         PageSnapshot.CaptureAsync(uri, CacheKey(uri));
 
-    private static bool UsesCrawlerUa(Uri uri) => OEmbed.HostIs(uri.Host, CrawlerUaHosts);
+    private static bool UsesCrawlerUa(Uri uri) => Features.CrawlerUserAgent && OEmbed.HostIs(uri.Host, CrawlerUaHosts);
 
     private static bool IsSnapshotExcluded(Uri uri) => OEmbed.HostIs(uri.Host, SnapshotExcludedHosts);
 

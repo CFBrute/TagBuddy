@@ -155,14 +155,14 @@
                                 BackgroundColor="#6B7280" TextColor="White" />
                     </Grid>
 
-                    <Label Text="Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable. An Amiibo dump also gets the Nintendo password set from this tag's serial. Amiibo data is tied to the serial it was made for, so write it back to the same tag."
+                    <Label x:Name="DumpHint" Text="Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable. An Amiibo dump also gets the Nintendo password set from this tag's serial. Amiibo data is tied to the serial it was made for, so write it back to the same tag."
                            FontSize="12" TextColor="Gray"
                            HorizontalTextAlignment="Center" />
                 </VerticalStackLayout>
 
                 <!-- Erase -->
                 <VerticalStackLayout x:Name="ErasePanel" Spacing="12" IsVisible="False">
-                    <Label Text="Clears every user page of the tag (all zeros with an empty NDEF message) and removes password protection when the tag uses the Amiibo key. The serial number and one-time pages are untouched. Save a dump first if you may want the content back."
+                    <Label x:Name="EraseHint" Text="Clears every user page of the tag (all zeros with an empty NDEF message) and removes password protection when the tag uses the Amiibo key. The serial number and one-time pages are untouched. Save a dump first if you may want the content back."
                            FontSize="12" TextColor="Gray"
                            HorizontalTextAlignment="Center" />
                 </VerticalStackLayout>

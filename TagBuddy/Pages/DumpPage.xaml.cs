@@ -27,7 +27,9 @@ public partial class DumpPage : ContentPage, IQueryAttributable
         _item = item;
         NameLabel.Text = item.DisplayName;
         SummaryLabel.Text = $"{item.FormatLabel}  ·  {item.Subtitle}  ·  saved {item.CreatedAt:yyyy-MM-dd HH:mm}";
-        TextLabel.Text = item.HasDumpText ? item.DumpText : "No readable text found. Amiibo data is encrypted, so that is expected for an Amiibo.";
+        TextLabel.Text = item.HasDumpText ? item.DumpText
+            : Features.Amiibo ? "No readable text found. Amiibo data is encrypted, so that is expected for an Amiibo."
+            : "No readable text found.";
 
         try
         {

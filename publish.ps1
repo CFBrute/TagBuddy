@@ -4,8 +4,12 @@
 #
 # The version is 1.0.<git commit count>, so commit first: publishing with uncommitted changes stamps a
 # "*" after the commit in the app and refuses to tag.
+#
+# With -PlayStore, builds the Play Store edition instead (no Amiibo support; see TagBuddy\Features.cs) as a
+# signed app bundle, publish\TagBuddy_1_0_14_play.aab, to upload in the Play Console.
 param(
-    [switch]$Tag
+    [switch]$Tag,
+    [switch]$PlayStore
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -21,14 +25,17 @@ $count = git -C $root rev-list --count HEAD
 $version = "1.0.$count"
 if ($dirty) { Write-Warning "Uncommitted changes: the app will show the commit with a '*'." }
 
-dotnet publish $project -c Release -f net10.0-android -v q -nologo
+$extension = if ($PlayStore) { "aab" } else { "apk" }
+$suffix = if ($PlayStore) { "_play" } else { "" }
+
+dotnet publish $project -c Release -f net10.0-android -v q -nologo "-p:PlayStore=$($PlayStore.IsPresent.ToString().ToLower())"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
-$built = Join-Path $root "TagBuddy\bin\Release\net10.0-android\publish\com.barcodebuddy.app-Signed.apk"
-if (-not (Test-Path $built)) { throw "No signed APK at $built" }
+$built = Join-Path $root "TagBuddy\bin\Release\net10.0-android\publish\com.barcodebuddy.app-Signed.$extension"
+if (-not (Test-Path $built)) { throw "No signed .$extension at $built" }
 
 New-Item -ItemType Directory -Force $out | Out-Null
-$apk = Join-Path $out ("TagBuddy_{0}.apk" -f ($version -replace '\.', '_'))
+$apk = Join-Path $out ("TagBuddy_{0}{1}.{2}" -f ($version -replace '\.', '_'), $suffix, $extension)
 Copy-Item $built $apk -Force
 "Published: $apk ({0:N1} MB)" -f ((Get-Item $apk).Length / 1MB)
 
@@ -48,6 +55,11 @@ if ($Tag) {
         if (-not $pushed) { throw "git push of $name failed with exit code $LASTEXITCODE" }
         "Tagged and pushed $name."
     }
+}
+
+if ($PlayStore) {
+    "`nUpload the .aab in the Play Console. To try it on a phone first, use bundletool or an internal test track."
+    exit 0
 }
 
 "`nInstall on a phone (a Release APK has its own signing key, so a Debug install must be removed first):"

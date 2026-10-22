@@ -38,6 +38,14 @@
 	</PropertyGroup>
 	<Import Project="Signing.local.props" Condition="Exists('Signing.local.props')" />
 
+	<!-- Play Store build: dotnet publish -c Release -f net10.0-android -p:PlayStore=true. Defines PLAY_STORE, which
+	     leaves out what Google Play's policies object to (see Features.cs), and makes an app bundle (.aab), the
+	     only format Play accepts. Without it the build is the full sideload version. -->
+	<PropertyGroup Condition="'$(PlayStore)' == 'true'">
+		<DefineConstants>$(DefineConstants);PLAY_STORE</DefineConstants>
+		<AndroidPackageFormats>aab</AndroidPackageFormats>
+	</PropertyGroup>
+
 	<!-- Stamps the version (1.0.<commit count>) into the APK's versionName, the commit count into its
 	     versionCode, and the commit it was built from (with "*" when the working tree had uncommitted
 	     changes) plus the build time into the assembly, where BuildInfo reads them for the Saved tab.
