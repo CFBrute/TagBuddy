@@ -8,6 +8,34 @@ using Android.Nfc.Tech;
 namespace TagBuddy.Services;
 
 /// <summary>Reads NFC tags (13.56 MHz, the kind a phone reacts to) while a page is in the foreground.</summary>
+///
+/// <remarks>
+/// <para><b>Type 2 tag memory (NTAG213/215/216, Ultralight EV1), which the write routines below depend on.</b>
+/// Memory is 4-byte pages. Pages 0-1 and the first byte of page 2 hold the 7-byte serial (UID), burned at the
+/// factory and never writable. Page 2 bytes 2-3 are the <i>static lock bits</i>. Page 3 is the <i>capability
+/// container</i> (CC). Page 4 up to <c>UserEnd</c> is user memory. After it come the <i>dynamic lock bits</i>,
+/// then the configuration pages CFG0 (holds AUTH0, the first password-protected page), CFG1 (AUTHLIM, the
+/// wrong-password limit, and PROT), PWD and PACK.</para>
+///
+/// <para><b>Locks are one-time and never set by writing data.</b> Each lock bit starts clear and can be set
+/// once; it can never be cleared, and the pages it covers are read-only for the life of the tag. Writing a
+/// page's data does nothing to any lock bit, so a tag rewritten a hundred times with text stays unlocked.
+/// This app never sets a lock bit: the dump writer skips page 2 and the dynamic lock page on purpose. Lock
+/// bits only appear because another writer put them there, typically an Amiibo tool copying Nintendo's
+/// image, whose lock bytes (0F E0 static, 01 dynamic) lock pages 3, 13-15 and 16-31. <see cref="LockedPages"/>
+/// decodes both sets, and the writers leave locked pages alone and say so in their result.</para>
+///
+/// <para><b>Page 3 is one-time on its own.</b> The chip treats the CC as OTP: bits can be set, never cleared.
+/// A blank tag has 00 00 00 00; NDEF formatting writes E1 10 xx 00 and an Amiibo image writes F1 10 FF EE.
+/// Once a tag has had the Amiibo value, no phone will ever read it as a text or link tag again, so a tag's
+/// first write decides what it is for. The raw-bytes writer exists for exactly that case: it stores text in
+/// the user pages with no NDEF wrapper, which this app reads back but phones ignore.</para>
+///
+/// <para><b>Passwords.</b> An Amiibo tag is password-protected (AUTH0 = 4) with a key that is a fixed formula
+/// of its serial (<see cref="AmiiboPassword"/>), so the app can always open one. Other protected tags are left
+/// alone: a wrong guess counts against AUTHLIM, after which the tag locks for good. A failed handshake looks
+/// the same for a wrong key and for a tag that moved during it, which is why it is retried once.</para>
+/// </remarks>
 public sealed class NfcReader
 {
     public static NfcReader Instance { get; } = new();

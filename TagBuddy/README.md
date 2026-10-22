@@ -72,6 +72,24 @@ it was written: when the frames are unusable or never arrive it switches back to
 itself, and setting `CentreFirstDecoding = false` turns it off for good. With the library's detection, QR codes
 cannot show the amber "seen" state, because the library reports nothing before a successful read.
 
+## NFC tags: what can and cannot be written
+
+The NFC tab works with Type 2 tags (NTAG213/215/216, Ultralight EV1): 4-byte pages, a factory serial in pages
+0-2, the capability container (CC) in page 3, user memory from page 4, then lock and configuration pages. Three
+things about them decide what the app can do, and they are documented at the top of `Services/NfcReader.cs`:
+
+- **Lock bits are one-time and only set on purpose.** Writing data never locks anything; a tag rewritten a
+  hundred times stays unlocked. An Amiibo writer, though, copies Nintendo's lock bytes, which make pages 3,
+  13-15 and 16-31 read-only for the life of the tag. This app never sets a lock bit. It decodes them and
+  writes around them, and its result lists the pages it had to leave alone.
+- **Page 3 is one-time on its own.** NDEF formatting writes `E1 10 ...`; an Amiibo image writes `F1 10 FF EE`.
+  Once a tag has had the Amiibo value, phones will never read it as a text or link tag again, so a tag's first
+  write decides what it is for. "Raw bytes (no NDEF)" stores text in the user pages anyway; this app reads it
+  back, phones ignore it.
+- **Passwords.** Amiibo tags use a key that is a fixed formula of the serial, which the app knows. Other
+  password-protected tags are never guessed at, because wrong guesses count towards a limit that locks the tag
+  for good.
+
 ## Project layout
 
 - `Models/BarcodeTypes.cs` - supported formats, hints and per-format validation.
