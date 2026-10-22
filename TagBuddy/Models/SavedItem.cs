@@ -72,9 +72,9 @@ public class SavedItem
     public const double MinCaptionWidthScale = 1.0;
     public const double MaxCaptionWidthScale = 8.0;
 
-    public string ImageText => Caption ?? Value;
-    public bool CaptionLeft => CaptionAlign == "Left";
-    public bool CaptionRight => CaptionAlign == "Right";
+    [JsonIgnore] public string ImageText => Caption ?? Value;
+    [JsonIgnore] public bool CaptionLeft => CaptionAlign == "Left";
+    [JsonIgnore] public bool CaptionRight => CaptionAlign == "Right";
 
     public int CaptionTextPx(int codeHeightPx) =>
         Math.Max(8, (int)Math.Round(Math.Clamp(CaptionTextScale, MinCaptionTextScale, MaxCaptionTextScale) * codeHeightPx));
@@ -107,13 +107,12 @@ public class SavedItem
     public string DumpText { get; set; } = string.Empty;
 
     // ---------------------------------------------------------------- derived
+    // Worked out from the stored properties above, so [JsonIgnore] keeps them out of saved.json.
 
-    public bool IsCode => Kind == SavedKind.Code;
-    public bool IsText => Kind == SavedKind.Text;
-    public bool IsDump => Kind == SavedKind.Dump;
-    public bool IsQr => IsCode && Format == BarcodeTypes.QrCode.Key;
-
-    // Not stored: worked out from the value, so saved.json stays as it was.
+    [JsonIgnore] public bool IsCode => Kind == SavedKind.Code;
+    [JsonIgnore] public bool IsText => Kind == SavedKind.Text;
+    [JsonIgnore] public bool IsDump => Kind == SavedKind.Dump;
+    [JsonIgnore] public bool IsQr => IsCode && Format == BarcodeTypes.QrCode.Key;
 
     /// <summary>The value is a web link (codes and text alike; dumps have no value).</summary>
     [JsonIgnore] public bool IsLink => !IsDump && Links.IsWebLink(Value, out _);
@@ -124,14 +123,12 @@ public class SavedItem
     /// <summary>A text note that is not a link: its row shows "Aa" and a few lines of the text.</summary>
     [JsonIgnore] public bool IsPlainText => IsText && !IsLink;
 
-    [JsonIgnore] public bool IsNotPlainText => !IsPlainText;
-
-    public string DisplayName => !string.IsNullOrWhiteSpace(Name) ? Name
+    [JsonIgnore] public string DisplayName => !string.IsNullOrWhiteSpace(Name) ? Name
         : IsDump ? $"{DumpChip} {DumpSerial}".Trim()
         : Value;
 
     /// <summary>Short kind label for the list: the barcode format, "Text", or the chip.</summary>
-    public string FormatLabel => Kind switch
+    [JsonIgnore] public string FormatLabel => Kind switch
     {
         SavedKind.Text => "Text",
         SavedKind.Dump => DumpChip.Length > 0 ? DumpChip : "Tag dump",
@@ -139,16 +136,16 @@ public class SavedItem
     };
 
     /// <summary>Second line of the list row.</summary>
-    public string Subtitle => Kind switch
+    [JsonIgnore] public string Subtitle => Kind switch
     {
         SavedKind.Dump => $"{DumpSize} bytes ({DumpSize / 4} pages)" + (DumpSerial.Length > 0 ? $"  ·  {DumpSerial}" : ""),
         _ => Value,
     };
 
     /// <summary>Dumps only: the readable text line, if any.</summary>
-    public bool HasDumpText => IsDump && DumpText.Length > 0;
+    [JsonIgnore] public bool HasDumpText => IsDump && DumpText.Length > 0;
 
-    public QrOptions Qr => new(QrErrorCorrection, QrMargin);
+    [JsonIgnore] public QrOptions Qr => new(QrErrorCorrection, QrMargin);
 }
 
 /// <summary>Options that change how a QR code is generated.</summary>
