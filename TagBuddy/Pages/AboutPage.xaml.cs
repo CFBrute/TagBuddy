@@ -30,7 +30,7 @@ public partial class AboutPage : ContentPage
 
     private void ShowPreviewHint() => AutoPreviewHint.Text = AppSettings.AutoPreviews
         ? "Web links show their title, picture and site icon as soon as they appear."
-        : "Nothing is fetched until you tap \"Tap to load preview\". Previews and icons already on the phone still show.";
+        : "Nothing is fetched until you tap \"Tap to load preview\" or open the page. Previews and icons already on the phone still show.";
 
     private async void OnClearCache(object? sender, EventArgs e)
     {

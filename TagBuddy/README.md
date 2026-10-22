@@ -57,8 +57,28 @@ as a browser or a crawler. Sources, lightest first (`Services/LinkPreviews.cs`):
    advertises. Instagram, Facebook and Threads show such a request a login wall, so their links usually get
    just the site's icon.
 3. A rendered picture of the page (`Services/PageSnapshot.cs`), the heavy last resort. The web view is attached
-   behind the app's content so the page counts as visible, uses a phone-width viewport, waits until the page
-   stops changing, and a picture with (almost) nothing on it is never kept.
+   behind the app's content so the page counts as visible, uses a phone-width viewport, loads lazy images at
+   once, waits until the page and its web fonts stop changing, and hides cookie banners and other overlays in
+   its private copy before drawing (nothing is clicked or accepted; if hiding leaves the page empty, they come
+   back). A picture with (almost) nothing on it is never kept. The rendered page is also read by script for
+   its title, description, preview picture and icons, which pages built by script only have after rendering;
+   its own preview picture then beats the snapshot. Bot-check pages ("Just a moment...") are recognised and
+   never kept.
+
+When a load finds no picture but does learn something (a title, the site icon), that is kept and shown, and
+the full preview is tried again after a few hours. When a link redirects to another domain, the icon is kept
+for the address the link was known by too.
+
+Opening a link in the in-app viewer (`Pages/WebPage`) teaches the app: once the page has loaded, its title,
+description, preview picture and icons (or a picture of the top of the page as the person sees it) become the
+link's preview when nothing better is stored, and cards on screen update (`LinkPreviews.PreviewUpdated`).
+Only the page the link led to counts. For single-use links only the icon is kept, since their pages can show
+personal things.
+
+Known sites (`Services/KnownSites.cs`) are recognised from the address alone: a card says "YouTube · Video" or
+"Short link (bit.ly)" before anything loads or with previews off, and a site's other addresses (`youtu.be`,
+`redd.it`, `wa.me`, `amzn.to`, `m.`/`mobile.`/`amp.` hosts) share one stored icon. Short links never take on
+their destination's icon.
 
 Single-use links (sign-in codes, tokens, unsubscribe/confirm/reset paths) are never requested; only their
 site's icon is shown.
@@ -68,8 +88,9 @@ most 128 px and reused for every link to that site. Only the site itself is aske
 service. Order, stopping at the first icon of 64 px or more: the icons the page declares (apple-touch-icon first,
 SVG skipped), `/apple-touch-icon.png` and `/favicon.ico`, the icons the site's homepage declares (when the page
 itself was not read, as for single-use links), and the parent domain's well-known files (`m.example.com` →
-`example.com`; country suffixes such as `co.uk` are never treated as a site). Without an icon the blue link
-glyph is shown. "Clear stored previews and icons" on the About tab empties the cache.
+`example.com`; country suffixes such as `co.uk` are never treated as a site). A site without an icon of its
+own borrows its parent site's stored one (`en.wikipedia.org` from `wikipedia.org`). Without an icon the blue
+link glyph is shown. "Clear stored previews and icons" on the About tab empties the cache.
 
 Previews are cached for 7 days; one without a real picture is retried after 6 hours (`RetryAfter`).
 
@@ -127,6 +148,7 @@ things about them decide what the app can do, and they are documented at the top
   (`.Read.cs`), Type 2 page access and passwords (`.Type2.cs`), writing (`.Write.cs`).
 - `Services/Type2Dump.cs` - checks on a dump's bytes (size, serial, chip label) before it goes near a tag.
 - `Services/SavedService.cs` - loads/saves everything in Saved; `DumpText` finds the readable text in a dump.
+- `Services/KnownSites.cs` - well-known sites, their other addresses, and link shorteners.
 - `Services/AppSettings.cs` - the person's settings (automatic link previews).
 - `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
 - `Services/CodeActions.cs` - the shared share / save / open / copy actions and save prompts.

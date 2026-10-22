@@ -35,57 +35,28 @@ public static class Favicons
         return Memory.GetOrAdd(key, k => FetchAsync(pageUri, linkTags, k));
     }
 
-    /// <summary>One entry per site: www.example.com and example.com share their icon, and so do http and https.</summary>
-    internal static string SiteKey(Uri uri)
-    {
-        var host = uri.Host.ToLowerInvariant();
-        if (host.StartsWith("www.", StringComparison.Ordinal)) host = host[4..];
-        return LinkPreviews.CacheKey(host);
-    }
+    /// <summary>One entry per site: www.example.com, m.example.com and example.com share their icon, and so do
+    /// http and https and a known site's other addresses (youtu.be and youtube.com; see <see cref="KnownSites"/>).</summary>
+    internal static string SiteKey(Uri uri) => LinkPreviews.CacheKey(KnownSites.IconHost(uri));
 
     private static async Task<string?> FetchAsync(Uri pageUri, IReadOnlyList<LinkTag>? linkTags, string key)
     {
         try
         {
-            // The file name carries the icon's pixel size: the image control caches by path, so a better icon
-            // fetched later must get a new name to show up.
             var none = Path.Combine(Dir, key + ".none");
-            var existing = Directory.Exists(Dir) ? Directory.GetFiles(Dir, key + ".*.png").FirstOrDefault() : null;
-            if (existing is not null && new FileInfo(existing).Length > 0) return existing;
+            if (Stored(key) is { } existing) return existing;
             if (File.Exists(none))
             {
-                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(none) < NegativeLifetime) return null;
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(none) < NegativeLifetime) return ParentCached(pageUri);
                 TryDelete(none);
             }
 
-            bool reachedServer = false;
-            int bestSide = 0, n = 0;
-            string? best = null;
-            await foreach (var candidate in CandidatesAsync(pageUri, linkTags))
-            {
-                var (bytes, answered) = await DownloadAsync(candidate);
-                reachedServer |= answered;
-                if (bytes is null) continue;
+            var (best, _, reachedServer) = await DownloadBestAsync(CandidatesAsync(pageUri, linkTags), key, 0);
+            if (best is not null) return best;
 
-                var temp = Path.Combine(Dir, $"{key}.{++n}.candidate");
-                int side = Normalize(bytes, temp);
-                if (side > bestSide)
-                {
-                    if (best is not null) TryDelete(best);
-                    bestSide = side;
-                    best = temp;
-                }
-                else TryDelete(temp);
-
-                if (bestSide >= GoodSize) break;
-            }
-
-            if (best is not null)
-            {
-                var png = Path.Combine(Dir, $"{key}.{bestSide}.png");
-                File.Move(best, png, overwrite: true);
-                return png;
-            }
+            // Nothing of its own: a sister page of the parent site we already know (en.wikipedia.org when
+            // wikipedia.org is stored) lends its icon, kept under this site too for next time.
+            if (ParentCached(pageUri) is { } borrowed) return Remember(pageUri, borrowed) ?? borrowed;
 
             if (reachedServer)
             {
@@ -106,14 +77,110 @@ public static class Favicons
         }
     }
 
-    /// <summary>The site's icon if it is already on the phone, without any request; null otherwise.</summary>
+    /// <summary>Downloads candidates in order until one is at least <see cref="GoodSize"/>, and stores the largest
+    /// usable one as this site's icon if it beats <paramref name="haveSide"/>. The file name carries the icon's
+    /// pixel size: the image control caches by path, so a better icon fetched later must get a new name.</summary>
+    private static async Task<(string? Path, int Side, bool ReachedServer)> DownloadBestAsync(IAsyncEnumerable<Uri> candidates, string key, int haveSide)
+    {
+        bool reachedServer = false;
+        int bestSide = haveSide, n = 0;
+        string? best = null;
+        await foreach (var candidate in candidates)
+        {
+            var (bytes, answered) = await DownloadAsync(candidate);
+            reachedServer |= answered;
+            if (bytes is null) continue;
+
+            var temp = Path.Combine(Dir, $"{key}.{Guid.NewGuid():N}.{++n}.candidate");
+            int side = Normalize(bytes, temp);
+            if (side > bestSide)
+            {
+                if (best is not null) TryDelete(best);
+                bestSide = side;
+                best = temp;
+            }
+            else TryDelete(temp);
+
+            if (bestSide >= GoodSize) break;
+        }
+        if (best is null) return (null, haveSide, reachedServer);
+
+        var png = Path.Combine(Dir, $"{key}.{bestSide}.png");
+        foreach (var old in Directory.GetFiles(Dir, key + ".*.png")) if (old != png) TryDelete(old);
+        File.Move(best, png, overwrite: true);
+        TryDelete(Path.Combine(Dir, key + ".none"));
+        Memory[key] = Task.FromResult<string?>(png);
+        return (png, bestSide, reachedServer);
+    }
+
+    /// <summary>The stored icon file of a site key, or null.</summary>
+    private static string? Stored(string key)
+    {
+        if (!Directory.Exists(Dir)) return null;
+        var existing = Directory.GetFiles(Dir, key + ".*.png").FirstOrDefault();
+        return existing is not null && new FileInfo(existing).Length > 0 ? existing : null;
+    }
+
+    private static string? ParentCached(Uri uri) => ParentSite(uri) is { } parent ? Stored(SiteKey(parent)) : null;
+
+    /// <summary>Keeps <paramref name="iconPath"/> as the icon of <paramref name="uri"/>'s site too, unless that site
+    /// has one already: the address a link was first known by (example.com that redirected to example.co.uk, or a
+    /// page whose icon came from its parent site). Returns the stored copy, or null when nothing was stored.</summary>
+    public static string? Remember(Uri uri, string iconPath)
+    {
+        try
+        {
+            if (uri.Scheme is not ("http" or "https") || KnownSites.IsShortener(uri) || !File.Exists(iconPath)) return null;
+            var key = SiteKey(uri);
+            if (Stored(key) is not null) return null;
+            Directory.CreateDirectory(Dir);
+            var copy = Path.Combine(Dir, $"{key}.{SideOf(iconPath)}.png");
+            File.Copy(iconPath, copy, overwrite: true);
+            TryDelete(Path.Combine(Dir, key + ".none"));
+            Memory[key] = Task.FromResult<string?>(copy);
+            return copy;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Tries the icons a page declares as it was actually rendered (by the snapshot, or in the in-app
+    /// viewer the person opened), and keeps one if it is better than what is stored. Requests go to the URLs the
+    /// page itself names. Returns the site's icon afterwards, new or old.</summary>
+    public static async Task<string?> LearnAsync(Uri pageUri, IReadOnlyList<LinkTag> icons)
+    {
+        try
+        {
+            if (icons.Count == 0 || pageUri.Scheme is not ("http" or "https")) return GetCached(pageUri);
+            var key = SiteKey(pageUri);
+            var current = Stored(key);
+            int have = current is null ? 0 : SideOf(current);
+            if (have >= GoodSize) return current;
+            var (path, _, _) = await DownloadBestAsync(AsAsync(Declared(pageUri, icons)), key, have);
+            return path ?? current;
+        }
+        catch
+        {
+            return GetCached(pageUri);
+        }
+    }
+
+    private static async IAsyncEnumerable<Uri> AsAsync(IEnumerable<Uri> items)
+    {
+        foreach (var item in items) yield return item;
+        await Task.CompletedTask;
+    }
+
+    /// <summary>The site's icon if it is already on the phone, its own or its parent site's, without any request;
+    /// null otherwise.</summary>
     public static string? GetCached(Uri pageUri)
     {
         try
         {
-            if (pageUri.Scheme is not ("http" or "https") || !Directory.Exists(Dir)) return null;
-            var existing = Directory.GetFiles(Dir, SiteKey(pageUri) + ".*.png").FirstOrDefault();
-            return existing is not null && new FileInfo(existing).Length > 0 ? existing : null;
+            if (pageUri.Scheme is not ("http" or "https")) return null;
+            return Stored(SiteKey(pageUri)) ?? ParentCached(pageUri);
         }
         catch
         {
