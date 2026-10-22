@@ -8,7 +8,9 @@
 	<uses-feature android:name="android.hardware.nfc" android:required="false" />
 	<uses-feature android:name="android.hardware.camera" android:required="false" />
 	<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
-	<!-- Android 11+ hides other apps unless declared here: the browser (links, privacy policy) and the mail app (bug reports) -->
+	<!-- Android 11+ hides other apps unless declared here, and MAUI's Browser and Launcher check for one before opening
+	     anything: the browser (links, privacy policy), the mail app (bug reports, mailto links), and the phone, SMS
+	     and maps apps for tel:, sms: and geo: links. -->
 	<queries>
 		<intent>
 			<action android:name="android.intent.action.VIEW" />
@@ -21,6 +23,26 @@
 		<intent>
 			<action android:name="android.intent.action.SENDTO" />
 			<data android:scheme="mailto" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="mailto" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="tel" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="sms" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="smsto" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="geo" />
 		</intent>
 	</queries>
 </manifest>
