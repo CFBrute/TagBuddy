@@ -11,6 +11,10 @@ public static class BuildInfo
     /// publishing.</summary>
     public const string SupportEmail = "tagbuddy-support@example.com";
 
+    /// <summary>The privacy policy, published from docs/privacy.html by GitHub Pages (Settings → Pages → Deploy
+    /// from branch main, folder /docs). Google Play wants it reachable from inside the app and in the listing.</summary>
+    public const string PrivacyPolicyUrl = "https://cfbrute.github.io/TagBuddy/privacy.html";
+
     private static readonly Assembly App = typeof(BuildInfo).Assembly;
 
     private static readonly (string Version, string Commit) Parts =

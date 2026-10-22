@@ -174,6 +174,15 @@ Release builds are signed with a self-signed keystore that lives outside the rep
 Or by hand, `dotnet publish -c Release -f net10.0-android`; the signed APK then lands in
 `bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
 
+## Privacy policy
+
+`docs/privacy.html` is the privacy policy Google Play asks for, with a small `docs/index.html` next to it.
+Publish it with GitHub Pages: repository Settings → Pages → "Deploy from a branch", branch `main`, folder
+`/docs`. It then lives at `https://cfbrute.github.io/TagBuddy/privacy.html` (`BuildInfo.PrivacyPolicyUrl`, opened
+from the About tab); use the same address in the Play Console. The page loads nothing from other sites. Keep it
+in step with the app: a change in what the app sends or stores needs a new date and text there. Its contact
+address is the same placeholder as `BuildInfo.SupportEmail`.
+
 ## Editions: sideload and Play Store
 
 One switch, `-p:PlayStore=true`, builds the Play Store edition. It defines `PLAY_STORE`, which `Features.cs`
