@@ -43,25 +43,13 @@ public partial class DumpPage : ContentPage, IQueryAttributable
     private async void OnWrite(object? sender, EventArgs e)
     {
         if (_item is null) return;
-        await Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { ["dump"] = _item.Id.ToString() });
+        await AppNavigation.ToNfcWriteDumpAsync(_item);
     }
 
     private async void OnShare(object? sender, EventArgs e)
     {
-        if (_item is null || _data is null) return;
-        try
-        {
-            var path = await SavedService.ExportTempAsync(_item.DumpFile, _data);
-            await Share.Default.RequestAsync(new ShareFileRequest
-            {
-                Title = _item.DisplayName,
-                File = new ShareFile(path, "application/octet-stream"),
-            });
-        }
-        catch (Exception ex)
-        {
-            await DisplayAlertAsync("Could not share", ex.Message, "OK");
-        }
+        if (_item is not null && _data is not null)
+            await CodeActions.ShareDumpAsync(this, _item.DumpFile, _data, _item.DisplayName);
     }
 
     private async void OnCopyHex(object? sender, EventArgs e)
