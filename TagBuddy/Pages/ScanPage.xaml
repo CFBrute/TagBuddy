@@ -12,6 +12,33 @@
         <Grid x:Name="CameraArea" Grid.Row="0">
             <ContentView x:Name="CameraHost" />
 
+            <!-- Viewfinder over the live camera: a dimmed frame around the square where the code should be. Its
+                 corners turn amber when something code-like is seen and flash green on a read. Tap to focus. -->
+            <GraphicsView x:Name="Viewfinder" BackgroundColor="Transparent" InputTransparent="False" IsVisible="False">
+                <GraphicsView.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnViewfinderTapped" />
+                </GraphicsView.GestureRecognizers>
+            </GraphicsView>
+            <Border x:Name="HintBorder"
+                    BackgroundColor="#80000000"
+                    StrokeThickness="0"
+                    Padding="10,6"
+                    Margin="16,0,16,16"
+                    HorizontalOptions="Center"
+                    VerticalOptions="End"
+                    InputTransparent="True"
+                    IsVisible="False">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Label x:Name="HintLabel"
+                       Text="Hold the code inside the square"
+                       TextColor="White"
+                       FontSize="14"
+                       HorizontalTextAlignment="Center"
+                       LineBreakMode="WordWrap" />
+            </Border>
+
             <!-- The picture chosen with "From image", shown while it is analysed and next to its result -->
             <Image x:Name="PickedImage"
                    Aspect="AspectFit"
@@ -75,7 +102,7 @@
 
                 <VerticalStackLayout x:Name="ResultButtons" Spacing="12" IsVisible="False">
                     <HorizontalStackLayout HorizontalOptions="Center">
-                        <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                        <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_bookmark.png"
                                 Clicked="OnSave" SemanticProperties.Description="Save" ToolTipProperties.Text="Save" />
                         <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
                                 Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
@@ -87,7 +114,7 @@
                         <Button Text="Open in generator" Clicked="OnUseInGenerator"
                                 BackgroundColor="#6B7280" TextColor="White" />
                     </HorizontalStackLayout>
-                    <controls:LinkPreviewView x:Name="Preview" AutoLoad="False" />
+                    <controls:LinkPreviewView x:Name="Preview" />
                 </VerticalStackLayout>
 
                 <!-- Details about the scanned code (format, content kind, error correction, ...) -->

@@ -49,7 +49,7 @@
 
                     <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
                         <HorizontalStackLayout HorizontalOptions="Center">
-                            <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                            <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_bookmark.png"
                                     Clicked="OnSave" SemanticProperties.Description="Save as text" ToolTipProperties.Text="Save as text" />
                             <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
                                     Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
@@ -61,7 +61,7 @@
                             <Button Text="Open in QR generator" Clicked="OnUseInGenerator"
                                     BackgroundColor="#6B7280" TextColor="White" />
                         </HorizontalStackLayout>
-                        <controls:LinkPreviewView x:Name="Preview" AutoLoad="False" />
+                        <controls:LinkPreviewView x:Name="Preview" />
                     </VerticalStackLayout>
 
                     <VerticalStackLayout x:Name="Details" Spacing="4"

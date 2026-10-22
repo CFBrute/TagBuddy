@@ -431,7 +431,7 @@
         <Setter Property="SelectedTabColor" Value="{AppThemeBinding Light={StaticResource Gray950}, Dark={StaticResource Gray200}}" />
     </Style>
 
-    <!-- Round icon-only buttons used for share / save / open / favorite actions -->
+    <!-- Round icon-only buttons used for share / save / open actions -->
     <Style TargetType="Button" x:Key="IconButton">
         <Setter Property="WidthRequest" Value="56" />
         <Setter Property="HeightRequest" Value="56" />

@@ -4,7 +4,8 @@ using Microsoft.Maui.Controls.Shapes;
 namespace TagBuddy.Controls;
 
 /// <summary>A card with a web page's picture, title and description. Give it any value: it stays hidden unless
-/// the value is a web link, and loads the preview on its own. Tapping the card opens the link.</summary>
+/// the value is a web link (or plain text with <see cref="ShowText"/> on), and loads the preview on its own as
+/// soon as the value is set. Tapping the card opens the link. Single-use links are never requested.</summary>
 public sealed class LinkPreviewView : ContentView
 {
     public static readonly BindableProperty ValueProperty = BindableProperty.Create(
@@ -16,10 +17,11 @@ public sealed class LinkPreviewView : ContentView
         nameof(Compact), typeof(bool), typeof(LinkPreviewView), false,
         propertyChanged: (b, _, _) => { var v = (LinkPreviewView)b; v.BuildLayout(); v.Reload(); });
 
-    /// <summary>Whether the page is fetched as soon as the value is set. Off for content that just arrived from
-    /// a scanned code or a tag: the site is not contacted until the person taps the card.</summary>
-    public static readonly BindableProperty AutoLoadProperty = BindableProperty.Create(
-        nameof(AutoLoad), typeof(bool), typeof(LinkPreviewView), true);
+    /// <summary>Whether a value that is not a web link is shown as a plain text card. Off by default: the pages
+    /// that use this card already show the text itself.</summary>
+    public static readonly BindableProperty ShowTextProperty = BindableProperty.Create(
+        nameof(ShowText), typeof(bool), typeof(LinkPreviewView), false,
+        propertyChanged: (b, _, _) => ((LinkPreviewView)b).Reload());
 
     public string? Value
     {
@@ -33,39 +35,52 @@ public sealed class LinkPreviewView : ContentView
         set => SetValue(CompactProperty, value);
     }
 
-    public bool AutoLoad
+    public bool ShowText
     {
-        get => (bool)GetValue(AutoLoadProperty);
-        set => SetValue(AutoLoadProperty, value);
+        get => (bool)GetValue(ShowTextProperty);
+        set => SetValue(ShowTextProperty, value);
     }
+
+    /// <summary>What the picture frame shows: the page's picture, the site icon on a neutral tile, the link glyph
+    /// on a blue tile (compact rows only, so rows line up), or nothing.</summary>
+    private enum FrameMode { None, Picture, Icon, Glyph }
 
     private readonly Border _card;
     private readonly Image _image;
+    private readonly Image _frameIcon;
     private readonly Border _imageFrame;
     private readonly Label _title;
     private readonly Label _description;
     private readonly Label _host;
+    private readonly Image _hostIcon;
+    private readonly HorizontalStackLayout _hostLine;
     private readonly Grid _grid;
     private Uri? _uri;
     private int _generation;
-    private bool _loaded;
 
     public LinkPreviewView()
     {
         IsVisible = false;
 
         _image = new Image { Aspect = Aspect.AspectFill };
+        _frameIcon = new Image { Aspect = Aspect.AspectFit, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center, IsVisible = false };
+        var frameContent = new Grid();
+        frameContent.Add(_image);
+        frameContent.Add(_frameIcon);
         _imageFrame = new Border
         {
-            Content = _image,
+            Content = frameContent,
             StrokeThickness = 0,
             Padding = 0,
-            BackgroundColor = Color.FromArgb("#E5E7EB"),
             IsVisible = false,
         };
         _title = new Label { FontFamily = "OpenSansSemibold", FontSize = 15, LineBreakMode = LineBreakMode.TailTruncation, MaxLines = 2 };
         _description = new Label { FontSize = 13, TextColor = Colors.Gray, LineBreakMode = LineBreakMode.TailTruncation, MaxLines = 3 };
-        _host = new Label { FontSize = 11, TextColor = Color.FromArgb("#C7780B"), LineBreakMode = LineBreakMode.TailTruncation };
+        _host = new Label { FontSize = 11, TextColor = Color.FromArgb("#C7780B"), LineBreakMode = LineBreakMode.TailTruncation, VerticalOptions = LayoutOptions.Center };
+        _hostIcon = new Image { WidthRequest = 16, HeightRequest = 16, Aspect = Aspect.AspectFit, VerticalOptions = LayoutOptions.Center, IsVisible = false };
+        _hostLine = new HorizontalStackLayout { Spacing = 6 };
+        _hostLine.Add(_hostIcon);
+        _hostLine.Add(_host);
 
         _grid = new Grid();
         _card = new Border
@@ -82,8 +97,8 @@ public sealed class LinkPreviewView : ContentView
         var tap = new TapGestureRecognizer();
         tap.Tapped += async (_, _) =>
         {
+            // A plain text card has no link; the row around it handles its own taps.
             if (_uri is null) return;
-            if (!_loaded) { await LoadAsync(); return; }   // first tap fetches when AutoLoad is off
             if (!await Pages.WebPage.ShowAsync(_uri.AbsoluteUri)) await Links.OpenAsync(_uri);
         };
         _card.GestureRecognizers.Add(tap);
@@ -114,13 +129,16 @@ public sealed class LinkPreviewView : ContentView
 
             var text = new VerticalStackLayout { Spacing = 2, VerticalOptions = LayoutOptions.Center };
             text.Add(_title);
-            text.Add(_host);
+            text.Add(_description);
+            text.Add(_hostLine);
             _grid.Add(text, 1, 0);
             return;
         }
 
         _grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         _grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        _grid.Padding = 0;
+        _grid.ColumnSpacing = 0;
         _imageFrame.WidthRequest = -1;
         _imageFrame.HeightRequest = 160;
         _imageFrame.StrokeShape = new RoundRectangle { CornerRadius = new CornerRadius(10, 10, 0, 0) };
@@ -131,78 +149,145 @@ public sealed class LinkPreviewView : ContentView
         var body = new VerticalStackLayout { Spacing = 4, Padding = new Thickness(12, 10) };
         body.Add(_title);
         body.Add(_description);
-        body.Add(_host);
+        body.Add(_hostLine);
         _grid.Add(body, 0, 1);
     }
 
     private async void Reload()
     {
-        ++_generation;
-        _loaded = false;
+        int generation = ++_generation;
 
         if (!LinkPreviews.IsPreviewable(Value, out var uri))
         {
             _uri = null;
+            if (ShowText && !string.IsNullOrWhiteSpace(Value))
+            {
+                ShowTextCard(Value!);
+                return;
+            }
             IsVisible = false;
             return;
         }
 
         _uri = uri;
+        _title.IsVisible = true;
         _title.Text = uri.Host;
         _description.IsVisible = !Compact;
+        _description.MaxLines = 3;
+        _hostLine.IsVisible = true;
         _host.Text = uri.Host;
-        _image.Source = null;
-        _imageFrame.IsVisible = false;
+        _hostIcon.Source = null;
+        _hostIcon.IsVisible = false;
+        SetFrame(Compact ? FrameMode.Glyph : FrameMode.None);
         IsVisible = true;
 
-        // A sign-in or one-time link must only be requested once, by the page itself: a preview fetch would
-        // use the code up. Skip the preview and let the tap open the page directly.
-        if (LooksSingleUse(uri))
+        // A sign-in or one-time link must only be requested once, by the page itself: a preview fetch would use
+        // the code up. Skip the preview and let the tap open the page directly. The site's icon only needs the
+        // site's address, so it is still shown.
+        if (LinkPreviews.IsSingleUse(uri))
         {
-            _loaded = true;
+            _description.IsVisible = !Compact;
             _description.Text = "This link carries a sign-in or one-time code, so no preview is fetched. Tap to open the page.";
             _host.Text = uri.Host + "  ·  tap to open";
+            var icon = await LinkPreviews.GetIconAsync(uri);
+            if (generation != _generation) return;
+            if (icon is not null) ShowIcon(icon, inFrame: Compact);
             return;
         }
 
-        _description.Text = AutoLoad ? "Loading preview..." : "Tap to load a preview of this page";
-        if (AutoLoad) await LoadAsync();
+        _description.Text = "Loading preview...";
+        await LoadAsync(generation);
     }
 
-    private static bool LooksSingleUse(Uri uri) =>
-        System.Text.RegularExpressions.Regex.IsMatch(uri.Query + uri.Fragment,
-            @"[?&#](code|token|otp|ticket|nonce|auth|session|sig|key)=", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    /// <summary>The value is text, not a link: show it as is, with no picture, title or site line.</summary>
+    private void ShowTextCard(string text)
+    {
+        SetFrame(FrameMode.None);
+        _title.IsVisible = false;
+        _hostLine.IsVisible = false;
+        _description.IsVisible = true;
+        _description.MaxLines = Compact ? 4 : 8;
+        _description.Text = text;
+        IsVisible = true;
+    }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(int generation)
     {
         if (_uri is null) return;
-        int generation = _generation;
-        _description.Text = "Loading preview...";
 
-        var preview = await LinkPreviews.GetAsync(_uri);
+        LinkPreview? preview;
+        try { preview = await LinkPreviews.GetAsync(_uri); }
+        catch { preview = null; }
         if (generation != _generation) return;   // the value changed while loading (list row recycled, new scan)
 
         if (preview is null)
         {
             // No answer from the site: keep a quiet one-liner in the full card, nothing at all in lists.
             if (Compact) { IsVisible = false; return; }
-            _loaded = true;                              // let the next tap open the page anyway
             _description.Text = "The site did not answer and the page could not be rendered, so there is no preview. Tap to open the page.";
             return;
         }
 
-        _loaded = true;
         _title.Text = preview.TitleOrHost;
-        _description.Text = preview.Description ?? "This page has no preview text. Tap to open it.";
+        _description.Text = preview.Text ?? preview.Description ?? "This page has no preview text. Tap to open it.";
         _description.IsVisible = !Compact;
         _host.Text = preview.Host + "  ·  tap to open";
 
+        bool hasIcon = preview.HasIcon && File.Exists(preview.IconUrl);
         if (preview.HasImage)
         {
             _image.Source = LinkPreviews.IsLocalPath(preview.ImageUrl!)
                 ? ImageSource.FromFile(preview.ImageUrl!)
                 : ImageSource.FromUri(new Uri(preview.ImageUrl!));
-            _imageFrame.IsVisible = true;
+            SetFrame(FrameMode.Picture);
+            if (hasIcon) ShowIcon(preview.IconUrl!, inFrame: false);
+        }
+        else if (hasIcon)
+        {
+            ShowIcon(preview.IconUrl!, inFrame: true);
+        }
+        else
+        {
+            SetFrame(Compact ? FrameMode.Glyph : FrameMode.None);
+        }
+    }
+
+    /// <summary>Shows the site icon next to the host name, and in the picture frame when there is no picture.</summary>
+    private string? _frameIconPath;
+
+    private void ShowIcon(string path, bool inFrame)
+    {
+        _hostIcon.Source = ImageSource.FromFile(path);
+        _hostIcon.IsVisible = true;
+        if (!inFrame) return;
+        _frameIcon.Source = ImageSource.FromFile(path);
+        _frameIconPath = path;
+        SetFrame(FrameMode.Icon);
+    }
+
+    private void SetFrame(FrameMode mode)
+    {
+        _imageFrame.IsVisible = mode != FrameMode.None;
+        _image.IsVisible = mode == FrameMode.Picture;
+        _frameIcon.IsVisible = mode is FrameMode.Icon or FrameMode.Glyph;
+        if (mode != FrameMode.Picture) _image.Source = null;
+
+        switch (mode)
+        {
+            case FrameMode.Picture:
+                _imageFrame.SetAppThemeColor(BackgroundColorProperty, Color.FromArgb("#E5E7EB"), Color.FromArgb("#E5E7EB"));
+                break;
+            case FrameMode.Icon:
+                _frameIcon.WidthRequest = _frameIcon.HeightRequest = _frameIconPath is null
+                    ? (Compact ? 32 : 64)
+                    : Favicons.DisplaySize(_frameIconPath, Compact ? 32 : 64);
+                _imageFrame.SetAppThemeColor(BackgroundColorProperty, Color.FromArgb("#F3F4F6"), Color.FromArgb("#374151"));
+                break;
+            case FrameMode.Glyph:
+                _frameIcon.Source = "ic_link.png";
+                _frameIcon.WidthRequest = _frameIcon.HeightRequest = 28;
+                _imageFrame.SetAppThemeColor(BackgroundColorProperty, Color.FromArgb("#2563EB"), Color.FromArgb("#2563EB"));
+                break;
         }
     }
 }

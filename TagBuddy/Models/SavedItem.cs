@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using TagBuddy.Services;
 
 namespace TagBuddy.Models;
 
@@ -111,6 +112,19 @@ public class SavedItem
     public bool IsText => Kind == SavedKind.Text;
     public bool IsDump => Kind == SavedKind.Dump;
     public bool IsQr => IsCode && Format == BarcodeTypes.QrCode.Key;
+
+    // Not stored: worked out from the value, so saved.json stays as it was.
+
+    /// <summary>The value is a web link (codes and text alike; dumps have no value).</summary>
+    [JsonIgnore] public bool IsLink => !IsDump && Links.IsWebLink(Value, out _);
+
+    /// <summary>A text note that is a web link: its row shows the site's icon instead of "Aa".</summary>
+    [JsonIgnore] public bool IsLinkText => IsText && IsLink;
+
+    /// <summary>A text note that is not a link: its row shows "Aa" and a few lines of the text.</summary>
+    [JsonIgnore] public bool IsPlainText => IsText && !IsLink;
+
+    [JsonIgnore] public bool IsNotPlainText => !IsPlainText;
 
     public string DisplayName => !string.IsNullOrWhiteSpace(Name) ? Name
         : IsDump ? $"{DumpChip} {DumpSerial}".Trim()

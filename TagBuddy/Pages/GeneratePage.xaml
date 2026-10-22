@@ -117,7 +117,7 @@
             </Grid>
 
             <HorizontalStackLayout x:Name="Actions" HorizontalOptions="Center" IsVisible="False">
-                <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_bookmark.png"
                         Clicked="OnAddFavorite" SemanticProperties.Description="Save" ToolTipProperties.Text="Save" />
                 <Button Style="{StaticResource IconButton}" ImageSource="ic_share.png"
                         Clicked="OnShare" SemanticProperties.Description="Share image" ToolTipProperties.Text="Share image" />

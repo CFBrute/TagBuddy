@@ -7,31 +7,129 @@ using System.Text.RegularExpressions;
 
 namespace TagBuddy.Services;
 
-/// <summary>What a web page says about itself: title, description and picture (Open Graph, Twitter cards, or
-/// the plain title tag). Only the fields the page provides are set.</summary>
-public sealed record LinkPreview(string Url, string Host, string? Title, string? Description, string? ImageUrl, DateTime FetchedAt)
+/// <summary>What a web page says about itself: title, description and picture (oEmbed, Open Graph, Twitter
+/// cards, or the plain title tag), plus the site's icon. Only the fields the page provides are set.
+/// New fields go at the end with a default, so preview files written by an older version still read.</summary>
+public sealed record LinkPreview(
+    string Url,
+    string Host,
+    string? Title,
+    string? Description,
+    string? ImageUrl,
+    DateTime FetchedAt,
+    string? IconUrl = null,
+    string? SiteName = null,
+    string? Text = null,
+    DateTime? RetryAfter = null)
 {
     public bool HasImage => !string.IsNullOrWhiteSpace(ImageUrl);
+    public bool HasIcon => !string.IsNullOrWhiteSpace(IconUrl);
     public string TitleOrHost => string.IsNullOrWhiteSpace(Title) ? Host : Title;
 }
 
-/// <summary>Fetches link previews with an in-memory and on-disk cache, so the favorites list and repeated
-/// scans of the same code do not hit the network again. Nothing but a plain GET of the page is sent.</summary>
+/// <summary>Fetches link previews with an in-memory and on-disk cache, so the Saved list and repeated scans of
+/// the same code do not hit the network again. Sources, best first: a known site's oEmbed endpoint, the page's
+/// own head tags (and the oEmbed link it advertises), and as a last resort a rendered picture of the page.
+/// Links that look single-use are never requested.</summary>
 public static class LinkPreviews
 {
     private const int MaxHtmlBytes = 512 * 1024;
+    private const int MaxTextBytes = 2 * 1024;
     private static readonly TimeSpan DiskCacheLifetime = TimeSpan.FromDays(7);
 
-    private static readonly HttpClient Http = CreateClient();
+    /// <summary>How long a preview without a picture is kept before it is tried again: the page may have been
+    /// slow, blank or not yet rendered, which says little about the next attempt.</summary>
+    private static readonly TimeSpan RetryLifetime = TimeSpan.FromHours(6);
+
+    /// <summary>Instagram, Facebook and Threads show a login wall to browsers but serve their Open Graph tags to
+    /// link crawlers. Their pages are requested with the Facebook crawler's user agent first. Unofficial: it can
+    /// stop working at any time, and then the normal request is used.</summary>
+    private static readonly string[] CrawlerUaHosts = ["instagram.com", "facebook.com", "fb.com", "fb.watch", "threads.net", "threads.com"];
+    private const string CrawlerUserAgent = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+
+    /// <summary>Sites whose rendered page is a login wall or an app shell, not a preview of anything.</summary>
+    private static readonly string[] SnapshotExcludedHosts = [.. CrawlerUaHosts, "x.com", "twitter.com"];
+
+    internal static readonly HttpClient Http = CreateClient();
+
+    /// <summary>At most four requests at a time across previews, icons and oEmbed, so a Saved list with fifty
+    /// links does not open fifty sockets at once.</summary>
+    private static readonly SemaphoreSlim NetGate = new(4, 4);
+
     private static readonly ConcurrentDictionary<string, Task<LinkPreview?>> Memory = new(StringComparer.Ordinal);
-    private static readonly string CacheDir = Path.Combine(FileSystem.CacheDirectory, "link-previews");
+    internal static readonly string CacheDir = Path.Combine(FileSystem.CacheDirectory, "link-previews-v2");
+
+    private static readonly Regex SingleUseQuery = new(
+        @"[?&#](code|token|otp|ticket|nonce|auth|session|sig|key|access_token|id_token|state|signature|hash|t|magic|confirm)=",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex SingleUsePath = new(
+        @"/(unsubscribe|confirm|verify|activate|reset|magic|invite/accept)(?![a-z])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    static LinkPreviews()
+    {
+        // Version 1 previews have no icons and may hold blank snapshots; drop them once so everything is
+        // fetched afresh. In the background: it may be many small files and the first caller is the UI.
+        var old = Path.Combine(FileSystem.CacheDirectory, "link-previews");
+        _ = Task.Run(() =>
+        {
+            try { if (Directory.Exists(old)) Directory.Delete(old, true); } catch { /* best effort */ }
+        });
+    }
 
     /// <summary>True for values that are web links, the only kind a page preview makes sense for.</summary>
     public static bool IsPreviewable(string? value, out Uri uri) => Links.IsWebLink(value, out uri);
 
-    /// <summary>The preview for a web link, or null when the page could not be reached or read.</summary>
-    public static Task<LinkPreview?> GetAsync(Uri uri) =>
-        Memory.GetOrAdd(uri.AbsoluteUri, _ => FetchAsync(uri));
+    /// <summary>True for a sign-in, one-time or side-effect link (unsubscribe, confirm, password reset). A GET on
+    /// it would use the code up or do the thing, so only the page itself, opened by the person, may request it.</summary>
+    public static bool IsSingleUse(Uri uri) =>
+        SingleUseQuery.IsMatch(uri.Query + uri.Fragment) || SingleUsePath.IsMatch(uri.AbsolutePath);
+
+    /// <summary>The preview for a web link, or null when the page could not be reached or read, or when the link
+    /// is single-use (never requested).</summary>
+    public static Task<LinkPreview?> GetAsync(Uri uri)
+    {
+        if (IsSingleUse(uri)) return Task.FromResult<LinkPreview?>(null);
+        return Memory.GetOrAdd(uri.AbsoluteUri, _ => FetchAsync(uri));
+    }
+
+    /// <summary>Starts loading the preview and icon of a value that was just stored, so Saved shows them without
+    /// waiting. For a single-use link only the site's icon is fetched (origin only).</summary>
+    public static void Prefetch(string? value)
+    {
+        try
+        {
+            if (!IsPreviewable(value, out var uri)) return;
+            Forget(IsSingleUse(uri) ? Favicons.GetAsync(uri, null) : GetAsync(uri));
+        }
+        catch
+        {
+            // Prefetching is a convenience only.
+        }
+    }
+
+    /// <summary>The site icon for a link: the one found while reading its page when there is a preview,
+    /// otherwise the site's usual icon files.</summary>
+    public static async Task<string?> GetIconAsync(Uri uri)
+    {
+        try
+        {
+            if (!IsSingleUse(uri))
+            {
+                var preview = await GetAsync(uri);
+                if (preview is { HasIcon: true } && File.Exists(preview.IconUrl)) return preview.IconUrl;
+            }
+            return await Favicons.GetAsync(uri, null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void Forget(Task task) =>
+        task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
 
     private static HttpClient CreateClient()
     {
@@ -51,120 +149,261 @@ public static class LinkPreviews
         return client;
     }
 
+    /// <summary>Sends a request through the shared client under the request gate and lets <paramref name="read"/>
+    /// consume the answer before the slot is given back. The body read has its own time limit, because the
+    /// client's timeout stops at the headers.</summary>
+    internal static async Task<T> SendAsync<T>(HttpRequestMessage request, Func<HttpResponseMessage, CancellationToken, Task<T>> read)
+    {
+        await NetGate.WaitAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            using (request)
+            using (var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token))
+                return await read(response, cts.Token);
+        }
+        finally
+        {
+            NetGate.Release();
+        }
+    }
+
+    /// <summary>Reads at most <paramref name="max"/> bytes of the body; null when it is larger.</summary>
+    internal static async Task<byte[]?> ReadCappedAsync(HttpResponseMessage response, int max, CancellationToken token)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(token);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, token)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+            if (buffer.Length > max) return null;
+        }
+        return buffer.ToArray();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Fetching
+    // ------------------------------------------------------------------------------------------------
+
     private static async Task<LinkPreview?> FetchAsync(Uri uri)
     {
         var cached = await ReadDiskAsync(uri);
-        if (cached is not null && (!cached.HasImage || !IsLocalPath(cached.ImageUrl!) || File.Exists(cached.ImageUrl!)))
-            return cached;
-
-        // Video sites answer a plain request with a consent page in many countries; their oEmbed endpoint
-        // hands out the title, channel and thumbnail without any of that.
-        var video = await TryYouTubeAsync(uri);
-        if (video is not null)
+        if (cached is not null && FilesPresent(cached))
         {
-            await WriteDiskAsync(uri, video);
-            return video;
+            // Stale while revalidate: an old preview shows at once (Saved never flashes "Loading"), and a fresh
+            // one replaces it in memory for the next time the row is shown.
+            if (!IsFresh(cached)) Forget(RefreshAsync(uri));
+            return cached;
         }
 
-        LinkPreview? preview;
+        var (preview, persisted) = await FetchNetworkAsync(uri);
+        if (!persisted) Memory.TryRemove(uri.AbsoluteUri, out _);   // a later view may try again
+        return preview;
+    }
+
+    private static async Task RefreshAsync(Uri uri)
+    {
+        try
+        {
+            var (fresh, persisted) = await FetchNetworkAsync(uri);
+            // Only a real answer replaces the old preview; an offline attempt keeps what was there.
+            if (fresh is not null && persisted) Memory[uri.AbsoluteUri] = Task.FromResult<LinkPreview?>(fresh);
+        }
+        catch
+        {
+            // Keep the stale preview.
+        }
+    }
+
+    private static bool IsFresh(LinkPreview preview) =>
+        DateTime.UtcNow - preview.FetchedAt < DiskCacheLifetime
+        && (preview.RetryAfter is null || preview.RetryAfter > DateTime.UtcNow);
+
+    private static bool FilesPresent(LinkPreview preview) =>
+        (!preview.HasImage || !IsLocalPath(preview.ImageUrl!) || File.Exists(preview.ImageUrl!))
+        && (!preview.HasIcon || File.Exists(preview.IconUrl!));
+
+    /// <summary>The preview from the network, and whether it was written to disk (false after a failure, so the
+    /// next view tries again).</summary>
+    private static async Task<(LinkPreview? Preview, bool Persisted)> FetchNetworkAsync(Uri uri)
+    {
+        // 1. Big sites answer a plain request with a consent page or an app shell; their oEmbed endpoint hands out
+        //    the title, author and thumbnail without any of that. A rendered picture is never used for them.
+        var provided = await OEmbed.TryProviderAsync(uri);
+        if (provided is not null)
+        {
+            var icon = await Favicons.GetAsync(uri, null);
+            provided = provided with { IconUrl = icon };
+            if (!provided.HasImage) provided = provided with { RetryAfter = DateTime.UtcNow + RetryLifetime };
+            await WriteDiskAsync(uri, provided);
+            return (provided, true);
+        }
+
+        // 2. The page itself.
+        LinkPreview preview;
+        IReadOnlyList<LinkTag>? linkTags = null;
+        string? oembedHref = null;
+        Uri finalUri = uri;
         bool persist = true;
         try
         {
-            using var response = await Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
+            var page = await GetPageAsync(uri, UsesCrawlerUa(uri));
+            if (page.Kind == PageKind.Html && UsesCrawlerUa(uri) && page.Preview is { HasImage: false })
+                page = await GetPageAsync(uri, crawler: false);   // the crawler answer was empty: try as a browser
+            else if (page.Kind == PageKind.Failed && UsesCrawlerUa(uri))
+                page = await GetPageAsync(uri, crawler: false);
+
+            finalUri = page.FinalUri;
+            preview = page.Preview;
+            linkTags = page.LinkTags;
+            oembedHref = page.OEmbedHref;
+            if (page.Kind == PageKind.Failed) persist = false;
+
+            if (page.Kind is PageKind.File or PageKind.Text)
+            {
+                // Not a page but a file or plain text: say so, and never try to render it.
+                preview = preview with { IconUrl = await Favicons.GetAsync(finalUri, null) };
+                await WriteDiskAsync(uri, preview);
+                return (preview, true);
+            }
+        }
+        catch
+        {
+            // Offline, blocked, timed out, or not a real site. A browser engine may still manage; if not, there is
+            // simply no preview, and a later attempt may try again.
+            persist = false;
+            preview = new LinkPreview(uri.AbsoluteUri, uri.Host, null, null, null, DateTime.UtcNow);
+        }
+
+        // 3. No picture, but the page advertises its own oEmbed: its thumbnail is the next best thing.
+        if (!preview.HasImage && oembedHref is not null)
+        {
+            var discovered = await OEmbed.TryDiscoveredAsync(finalUri, oembedHref);
+            if (discovered is not null)
+                preview = preview with
+                {
+                    ImageUrl = discovered.ImageUrl,
+                    Title = preview.Title ?? discovered.Title,
+                    Description = preview.Description ?? discovered.Description,
+                    SiteName = preview.SiteName ?? discovered.SiteName,
+                };
+        }
+
+        // 4. The icon, and when there is still no picture a rendered snapshot, at the same time.
+        var iconTask = Favicons.GetAsync(finalUri, linkTags);
+        bool trySnapshot = !preview.HasImage && !IsSnapshotExcluded(finalUri) && !IsSnapshotExcluded(uri);
+        var snapshotTask = trySnapshot ? CaptureSnapshotAsync(uri) : Task.FromResult<(string? Path, bool Sparse, bool Skipped)>((null, false, false));
+        await Task.WhenAll(iconTask, snapshotTask);
+        var iconPath = await iconTask;
+        var snapshot = await snapshotTask;
+        preview = preview with { IconUrl = iconPath };
+
+        if (snapshot.Path is not null)
+        {
+            // A sparse picture (a logo on an empty page) only beats having nothing: with an icon, the card shows
+            // the icon instead.
+            if (!snapshot.Sparse || iconPath is null)
+                preview = preview with
+                {
+                    ImageUrl = snapshot.Path,
+                    Description = preview.Description ?? (preview.Title is null ? "Tap to open the page." : null),
+                };
+            else
+                TryDelete(snapshot.Path);
+        }
+        if (snapshot.Skipped) persist = false;   // the app was in the background: try again when it is shown
+
+        if (!persist)
+            return (preview.HasImage || preview.Description is not null || preview.HasIcon ? preview : null, false);
+
+        // 5. A full preview lasts a week; one without a real picture (blank, slow or sparse page) is tried again
+        //    after a few hours.
+        bool complete = preview.HasImage && !(snapshot.Path is not null && snapshot.Sparse);
+        if (!complete) preview = preview with { RetryAfter = DateTime.UtcNow + RetryLifetime };
+        await WriteDiskAsync(uri, preview);
+        return (preview, true);
+    }
+
+    /// <summary>The rendered picture's path, whether it is sparse, and whether rendering was skipped because the
+    /// app was not in the foreground.</summary>
+    private static Task<(string? Path, bool Sparse, bool Skipped)> CaptureSnapshotAsync(Uri uri) =>
+        PageSnapshot.CaptureAsync(uri, CacheKey(uri));
+
+    private static bool UsesCrawlerUa(Uri uri) => OEmbed.HostIs(uri.Host, CrawlerUaHosts);
+
+    private static bool IsSnapshotExcluded(Uri uri) => OEmbed.HostIs(uri.Host, SnapshotExcludedHosts);
+
+    private enum PageKind { Html, Text, File, Failed }
+
+    private sealed record PageResult(PageKind Kind, Uri FinalUri, LinkPreview Preview, IReadOnlyList<LinkTag>? LinkTags, string? OEmbedHref);
+
+    private static Task<PageResult> GetPageAsync(Uri uri, bool crawler)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        if (crawler) request.Headers.TryAddWithoutValidation("User-Agent", CrawlerUserAgent);
+
+        return SendAsync(request, async (response, token) =>
+        {
             var finalUri = response.RequestMessage?.RequestUri ?? uri;
             var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
 
             if (!response.IsSuccessStatusCode)
             {
-                // A plain request was refused, but the page may still render in a browser engine (bot
-                // checks, login walls, odd servers). Not kept on disk: a 503 today says nothing about next week.
-                persist = false;
+                // A plain request was refused, but the page may still render in a browser engine (bot checks,
+                // login walls, odd servers). Not kept on disk: a 503 today says nothing about next week.
                 var status = $"The page answered {(int)response.StatusCode} {response.ReasonPhrase}".Trim();
-                preview = new LinkPreview(finalUri.AbsoluteUri, finalUri.Host, null, status, null, DateTime.UtcNow);
+                return new PageResult(PageKind.Failed, finalUri,
+                    new LinkPreview(finalUri.AbsoluteUri, finalUri.Host, null, status, null, DateTime.UtcNow), null, null);
             }
-            else if (!mediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
+
+            if (mediaType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
             {
-                // Not a page but a file: say so, and never try to render it.
+                // Plain text: its first lines are the best description there is.
+                var text = await ReadTextAsync(response, MaxTextBytes, token);
+                var snippet = HtmlHead.Clean(text.Length > 300 ? text[..300] : text);
+                var name = Path.GetFileName(finalUri.AbsolutePath);
+                return new PageResult(PageKind.Text, finalUri,
+                    new LinkPreview(finalUri.AbsoluteUri, finalUri.Host, string.IsNullOrEmpty(name) ? null : name,
+                        snippet ?? "Plain text", null, DateTime.UtcNow, Text: snippet), null, null);
+            }
+
+            if (!mediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
+            {
                 var size = response.Content.Headers.ContentLength;
-                preview = new LinkPreview(finalUri.AbsoluteUri, finalUri.Host, Path.GetFileName(finalUri.AbsolutePath),
-                    $"Download: {DescribeMediaType(mediaType)}{(size is > 0 ? $", {FormatSize(size.Value)}" : "")}",
-                    mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? finalUri.AbsoluteUri : null,
-                    DateTime.UtcNow);
-                await WriteDiskAsync(uri, preview);
-                return preview;
+                return new PageResult(PageKind.File, finalUri,
+                    new LinkPreview(finalUri.AbsoluteUri, finalUri.Host, Path.GetFileName(finalUri.AbsolutePath),
+                        $"Download: {DescribeMediaType(mediaType)}{(size is > 0 ? $", {FormatSize(size.Value)}" : "")}",
+                        mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? finalUri.AbsoluteUri : null,
+                        DateTime.UtcNow), null, null);
             }
-            else
-            {
-                var html = await ReadHtmlAsync(response);
-                preview = Parse(html, finalUri);
-            }
-        }
-        catch
-        {
-            // Offline, blocked, timed out, or not a real site. A browser engine may still manage; if not,
-            // there is simply no preview, and a later attempt may try again.
-            persist = false;
-            preview = new LinkPreview(uri.AbsoluteUri, uri.Host, null, null, null, DateTime.UtcNow);
-        }
 
-        if (!preview.HasImage)
-        {
-            var snapshot = await PageSnapshot.CaptureAsync(uri, CacheKey(uri));
-            if (snapshot is not null)
-                preview = preview with { ImageUrl = snapshot, Description = preview.Description ?? (preview.Title is null ? "Tap to open the page." : null) };
-        }
-
-        if (!persist)
-        {
-            Memory.TryRemove(uri.AbsoluteUri, out _);
-            return preview.HasImage || preview.Description is not null ? preview : null;
-        }
-
-        await WriteDiskAsync(uri, preview);
-        return preview;
+            var html = await ReadTextAsync(response, MaxHtmlBytes, token);
+            var (preview, tags, oembed) = Parse(html, finalUri);
+            return new PageResult(PageKind.Html, finalUri, preview, tags, oembed);
+        });
     }
 
     /// <summary>True when the picture is a file this app rendered rather than a web address.</summary>
     public static bool IsLocalPath(string imageUrl) => imageUrl.StartsWith('/') || imageUrl.Contains(":\\");
 
-    private static async Task<LinkPreview?> TryYouTubeAsync(Uri uri)
-    {
-        var host = uri.Host.ToLowerInvariant();
-        bool isYouTube = host is "youtu.be" || host.EndsWith("youtube.com");
-        if (!isYouTube) return null;
-        try
-        {
-            var oembed = "https://www.youtube.com/oembed?format=json&url=" + Uri.EscapeDataString(uri.AbsoluteUri);
-            using var response = await Http.GetAsync(oembed);
-            if (!response.IsSuccessStatusCode) return null;
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var root = doc.RootElement;
-            string? title = root.TryGetProperty("title", out var t) ? t.GetString() : null;
-            string? author = root.TryGetProperty("author_name", out var a) ? a.GetString() : null;
-            string? thumb = root.TryGetProperty("thumbnail_url", out var th) ? th.GetString() : null;
-            if (title is null && thumb is null) return null;
-            return new LinkPreview(uri.AbsoluteUri, uri.Host, Clean(title),
-                author is null ? "YouTube" : $"YouTube  ·  {author}", thumb, DateTime.UtcNow);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    internal static string CacheKey(Uri uri) => CacheKey(uri.AbsoluteUri);
 
-    private static string CacheKey(Uri uri) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(uri.AbsoluteUri)))[..32];
+    internal static string CacheKey(string text) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..32];
 
-    private static async Task<string> ReadHtmlAsync(HttpResponseMessage response)
+    private static async Task<string> ReadTextAsync(HttpResponseMessage response, int maxBytes, CancellationToken token)
     {
-        await using var stream = await response.Content.ReadAsStreamAsync();
+        await using var stream = await response.Content.ReadAsStreamAsync(token);
         using var buffer = new MemoryStream();
         var chunk = new byte[16 * 1024];
         int read;
-        while (buffer.Length < MaxHtmlBytes && (read = await stream.ReadAsync(chunk)) > 0)
+        while (buffer.Length < maxBytes && (read = await stream.ReadAsync(chunk, token)) > 0)
             buffer.Write(chunk, 0, read);
 
         var bytes = buffer.ToArray();
+        if (bytes.Length > maxBytes) Array.Resize(ref bytes, maxBytes);
         var encoding = Encoding.UTF8;
         var charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
         if (string.IsNullOrEmpty(charset))
@@ -181,16 +420,23 @@ public static class LinkPreviews
         return encoding.GetString(bytes);
     }
 
-    /// <summary>Picks the preview fields out of the page's head. Regex is enough here: only meta tags and the
-    /// title are wanted, and a page that confuses it just gets a plainer preview.</summary>
-    internal static LinkPreview Parse(string html, Uri pageUri)
+    /// <summary>Picks the preview fields out of the page's head, plus its link tags (for the icon) and the
+    /// oEmbed link it advertises, if any.</summary>
+    internal static (LinkPreview Preview, IReadOnlyList<LinkTag> LinkTags, string? OEmbedHref) Parse(string html, Uri pageUri)
     {
-        int headEnd = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
-        var head = headEnd > 0 ? html[..headEnd] : html;
+        var head = HtmlHead.Head(html);
+        var tags = HtmlHead.LinkTags(head);
 
-        var title = Meta(head, "property", "og:title") ?? Meta(head, "name", "twitter:title") ?? TitleTag(head);
-        var description = Meta(head, "property", "og:description") ?? Meta(head, "name", "description") ?? Meta(head, "name", "twitter:description");
-        var image = Meta(head, "property", "og:image") ?? Meta(head, "property", "og:image:url") ?? Meta(head, "name", "twitter:image");
+        var title = HtmlHead.Property(head, "og:title") ?? HtmlHead.Property(head, "twitter:title") ?? HtmlHead.TitleTag(head);
+        var description = HtmlHead.Property(head, "og:description") ?? HtmlHead.Meta(head, "name", "description")
+                          ?? HtmlHead.Property(head, "twitter:description");
+        var image = HtmlHead.Property(head, "og:image:secure_url") ?? HtmlHead.Property(head, "og:image")
+                    ?? HtmlHead.Property(head, "og:image:url") ?? HtmlHead.Property(head, "twitter:image")
+                    ?? HtmlHead.Property(head, "twitter:image:src")
+                    ?? tags.FirstOrDefault(t => HtmlHead.HasRel(t, "image_src")).Href;
+        var siteName = HtmlHead.Property(head, "og:site_name") ?? HtmlHead.Meta(head, "name", "application-name");
+        var oembed = tags.FirstOrDefault(t => HtmlHead.HasRel(t, "alternate")
+                                              && string.Equals(t.Type, "application/json+oembed", StringComparison.OrdinalIgnoreCase)).Href;
 
         if (description is { Length: > 220 }) description = description[..217].TrimEnd() + "...";
         if (title is { Length: > 120 }) title = title[..117].TrimEnd() + "...";
@@ -199,35 +445,10 @@ public static class LinkPreviews
         if (!string.IsNullOrWhiteSpace(image) && Uri.TryCreate(pageUri, image.Trim(), out var abs) && abs.Scheme is "http" or "https")
             imageUrl = abs.AbsoluteUri;
 
-        return new LinkPreview(pageUri.AbsoluteUri, pageUri.Host, Clean(title), Clean(description), imageUrl, DateTime.UtcNow);
+        var preview = new LinkPreview(pageUri.AbsoluteUri, pageUri.Host, HtmlHead.Clean(title), HtmlHead.Clean(description),
+            imageUrl, DateTime.UtcNow, SiteName: HtmlHead.Clean(siteName));
+        return (preview, tags, string.IsNullOrWhiteSpace(oembed) ? null : oembed);
     }
-
-    private static string? Meta(string head, string attribute, string name)
-    {
-        // Both attribute orders: <meta property="og:title" content="..."> and <meta content="..." property="og:title">
-        var escaped = Regex.Escape(name);
-        var m = Regex.Match(head,
-            $@"<meta\b[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\1[^>]*?\bcontent\s*=\s*([""'])(?<v>.*?)\2",
-            RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        if (!m.Success)
-            m = Regex.Match(head,
-                $@"<meta\b[^>]*?\bcontent\s*=\s*([""'])(?<v>.*?)\1[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\2",
-                RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        if (!m.Success) return null;
-        var value = WebUtility.HtmlDecode(m.Groups["v"].Value).Trim();
-        return value.Length == 0 ? null : value;
-    }
-
-    private static string? TitleTag(string head)
-    {
-        var m = Regex.Match(head, @"<title[^>]*>(.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        if (!m.Success) return null;
-        var value = WebUtility.HtmlDecode(m.Groups[1].Value).Trim();
-        return value.Length == 0 ? null : value;
-    }
-
-    private static string? Clean(string? text) =>
-        string.IsNullOrWhiteSpace(text) ? null : Regex.Replace(text, @"\s+", " ").Trim();
 
     private static string DescribeMediaType(string mediaType) => mediaType.ToLowerInvariant() switch
     {
@@ -248,12 +469,18 @@ public static class LinkPreviews
         _ => $"{bytes / 1024.0 / 1024.0:0.#} MB",
     };
 
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { /* best effort */ }
+    }
+
     // ------------------------------------------------------------------------------------------------
-    // Disk cache: one small JSON file per link, so favorites show their previews without a network round trip.
+    // Disk cache: one small JSON file per link, so Saved shows its previews without a network round trip.
     // ------------------------------------------------------------------------------------------------
 
     private static string DiskPath(Uri uri) => Path.Combine(CacheDir, CacheKey(uri) + ".json");
 
+    /// <summary>The stored preview whatever its age; <see cref="IsFresh"/> decides whether it is refreshed.</summary>
     private static async Task<LinkPreview?> ReadDiskAsync(Uri uri)
     {
         try
@@ -261,8 +488,7 @@ public static class LinkPreviews
             var path = DiskPath(uri);
             if (!File.Exists(path)) return null;
             await using var stream = File.OpenRead(path);
-            var preview = await JsonSerializer.DeserializeAsync<LinkPreview>(stream);
-            return preview is not null && DateTime.UtcNow - preview.FetchedAt < DiskCacheLifetime ? preview : null;
+            return await JsonSerializer.DeserializeAsync<LinkPreview>(stream);
         }
         catch
         {

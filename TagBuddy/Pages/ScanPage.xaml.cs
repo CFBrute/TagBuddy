@@ -1,4 +1,5 @@
 using System.Text;
+using TagBuddy.Controls;
 using TagBuddy.Models;
 using TagBuddy.Services;
 using ZXing.Net.Maui;
@@ -8,6 +9,20 @@ namespace TagBuddy.Pages;
 
 public partial class ScanPage : ContentPage
 {
+    /// <summary>Centre-first decoding: the app decodes the camera frames itself, the centre square first and the
+    /// whole picture every fourth frame (see <see cref="FrameDecoder"/>), instead of letting the library decode
+    /// every whole frame. It could not be tried on a phone when it was written, so it falls back to the library's
+    /// own detection by itself when the frames turn out to be unusable or never arrive.
+    /// To turn it off for good, set this to false: the camera then uses the library's detection only.</summary>
+    public static bool CentreFirstDecoding = true;
+
+    /// <summary>How long to wait for the first decoded frame before deciding that the frames never arrive.</summary>
+    private static readonly TimeSpan DecoderWatchdog = TimeSpan.FromSeconds(4);
+
+    /// <summary>Set once the own decoder had to give up, so later scans in this session start with the library's
+    /// detection straight away instead of waiting for the watchdog again.</summary>
+    private static bool _ownDecoderUnavailable;
+
     private readonly SavedService _saved;
     private CameraBarcodeReaderView? _camera;
     private ScanResult? _last;
@@ -19,10 +34,27 @@ public partial class ScanPage : ContentPage
     private string? _candidate;
     private int _candidateHits;
 
+    private const string DefaultHint = "Hold the code inside the square";
+    private const string FirstHint = "Nothing found yet. Move closer, hold steady, or turn on the torch.";
+    private const string SecondHint = "Still nothing. Tap the square to focus, or use From image.";
+
+    /// <summary>The overlay, a timer for the hints and for fading the "seen" state, and when this scan started.</summary>
+    private readonly ViewfinderDrawable _finder = new();
+    private IDispatcherTimer? _hintTimer;
+    private DateTime _scanStarted;
+    private DateTime _seenAt;
+
+    /// <summary>Set between a successful read and the result being shown, so the green flash plays once.</summary>
+    private bool _resultPending;
+
+    /// <summary>The app's own decoder while centre-first decoding is in use; null with the library's detection.</summary>
+    private FrameDecoder? _decoder;
+
     public ScanPage(SavedService favorites)
     {
         InitializeComponent();
         _saved = favorites;
+        Viewfinder.Drawable = _finder;
     }
 
     protected override async void OnAppearing()
@@ -62,26 +94,150 @@ public partial class ScanPage : ContentPage
                           BarcodeFormat.DataMatrix | BarcodeFormat.Aztec | BarcodeFormat.Pdf417,
                 AutoRotate = true,
                 Multiple = false,
-                TryHarder = true,
+                // TryHarder costs several times the decode time per frame, and live frames keep coming: a frame
+                // that does not decode fast is better replaced by the next one. Pictures picked with "From image"
+                // still use it (GrayDecoder).
+                TryHarder = false,
+                // The library waits 150 ms between analysed frames (and 300 ms before the first) by default; without
+                // TryHarder a frame decodes well within that, so look at more of them.
+                DelayBetweenAnalyzingFrames = 50,
+                InitialDelayBeforeAnalyzingFrames = 150,
                 CameraResolutionSelector = ChooseResolution,
             },
-            IsDetecting = true,
+            IsDetecting = !UseOwnDecoder,
         };
         _candidate = null;
         _candidateHits = 0;
+        _resultPending = false;
         _camera.BarcodesDetected += OnBarcodesDetected;
+        if (UseOwnDecoder) StartOwnDecoder(_camera);
         CameraHost.Content = _camera;
 
         ShowCameraLayout(true);
+        StartHints();
+    }
+
+    private static bool UseOwnDecoder => CentreFirstDecoding && !_ownDecoderUnavailable;
+
+    /// <summary>Feeds the camera frames to the app's own decoder. Its events arrive on the camera thread and are
+    /// passed to the same handlers as the library's. Any problem switches to the library's detection.</summary>
+    private void StartOwnDecoder(CameraBarcodeReaderView camera)
+    {
+        try
+        {
+            var decoder = new FrameDecoder();
+            decoder.Decoded += result => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (ReferenceEquals(decoder, _decoder)) OnCandidate(result);
+            });
+            decoder.Seen += () => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (ReferenceEquals(decoder, _decoder)) ShowSeen();
+            });
+            decoder.Unusable += () => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (ReferenceEquals(decoder, _decoder)) UseLibraryDetection();
+            });
+            _decoder = decoder;
+            camera.FrameReady += decoder.OnFrame;
+        }
+        catch
+        {
+            _decoder = null;
+            camera.IsDetecting = true;
+        }
+    }
+
+    /// <summary>Stops the app's own decoder (if any) and lets the library decode the frames, as without
+    /// centre-first decoding.</summary>
+    private void UseLibraryDetection()
+    {
+        var decoder = _decoder;
+        _decoder = null;
+        if (decoder is null) return;
+        decoder.Stop();
+        _ownDecoderUnavailable = true;
+        if (_camera is null) return;
+        try { _camera.FrameReady -= decoder.OnFrame; } catch { /* the view is going away */ }
+        System.Diagnostics.Debug.WriteLine("ScanPage: centre-first decoding unavailable, using the library's detection");
+        if (_last is null) _camera.IsDetecting = true;
+    }
+
+    /// <summary>Resets the overlay and starts the timer that changes the hint when nothing is found for a while
+    /// and lets an amber "seen" state fade back to white.</summary>
+    private void StartHints()
+    {
+        _scanStarted = DateTime.UtcNow;
+        _finder.State = ViewfinderState.Idle;
+        _finder.Pulse = 0;
+        HintLabel.Text = DefaultHint;
+        Viewfinder.Invalidate();
+
+        _hintTimer ??= CreateHintTimer();
+        _hintTimer.Start();
+    }
+
+    private IDispatcherTimer CreateHintTimer()
+    {
+        var timer = Dispatcher.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(250);
+        timer.Tick += (_, _) => OnHintTick();
+        return timer;
+    }
+
+    private void OnHintTick()
+    {
+        if (_camera is null) return;
+        var now = DateTime.UtcNow;
+
+        // No decoded frame after a few seconds: the frames do not reach the app's decoder on this phone.
+        if (_decoder is not null && _decoder.FramesDecoded == 0 && now - _scanStarted > DecoderWatchdog)
+            UseLibraryDetection();
+
+        if (_finder.State == ViewfinderState.Seen && now - _seenAt > TimeSpan.FromMilliseconds(700))
+        {
+            _finder.State = ViewfinderState.Idle;
+            Viewfinder.Invalidate();
+        }
+
+        var elapsed = now - _scanStarted;
+        var hint = elapsed > TimeSpan.FromSeconds(12) ? SecondHint
+                 : elapsed > TimeSpan.FromSeconds(6) ? FirstHint
+                 : DefaultHint;
+        if (HintLabel.Text != hint) HintLabel.Text = hint;
+    }
+
+    /// <summary>Something code-like is in view but not read yet: tell the person to hold still.</summary>
+    private void ShowSeen()
+    {
+        if (_camera is null || _resultPending) return;
+        _seenAt = DateTime.UtcNow;
+        if (_finder.State == ViewfinderState.Seen) return;
+        _finder.State = ViewfinderState.Seen;
+        Viewfinder.Invalidate();
+    }
+
+    private void OnViewfinderTapped(object? sender, TappedEventArgs e)
+    {
+        // The library focuses on the centre of the picture, which is where the square is.
+        try { _camera?.AutoFocus(); } catch { /* not every camera can focus */ }
     }
 
     /// <summary>Removes the camera view, which disconnects its handler and turns the camera off.</summary>
     private void StopCamera()
     {
+        _hintTimer?.Stop();
         if (_camera is null) return;
         _camera.IsDetecting = false;
         _camera.IsTorchOn = false;
         _camera.BarcodesDetected -= OnBarcodesDetected;
+        // Before the view goes: a late frame must not reach a decoder whose page has moved on.
+        if (_decoder is { } decoder)
+        {
+            decoder.Stop();
+            try { _camera.FrameReady -= decoder.OnFrame; } catch { /* the view is going away */ }
+            _decoder = null;
+        }
         CameraHost.Content = null;
         _camera.Handler?.DisconnectHandler();
         _camera = null;
@@ -94,6 +250,8 @@ public partial class ScanPage : ContentPage
         CameraArea.IsVisible = cameraOn || picture;
         CameraHost.IsVisible = cameraOn;
         CameraButtons.IsVisible = cameraOn;
+        Viewfinder.IsVisible = cameraOn;
+        HintBorder.IsVisible = cameraOn;
         PickedImage.IsVisible = picture;
 
         Root.RowDefinitions[0].Height = cameraOn || pictureLarge ? GridLength.Star : picture ? new GridLength(240) : new GridLength(0);
@@ -119,22 +277,40 @@ public partial class ScanPage : ContentPage
     {
         var result = e.Results.FirstOrDefault();
         if (result is null) return;
+        var scanned = ScanResult.From(result);
+        MainThread.BeginInvokeOnMainThread(() => OnCandidate(scanned));
+    }
 
-        MainThread.BeginInvokeOnMainThread(() =>
+    /// <summary>A decoded code from the camera, on the main thread. Linear codes need a second identical read
+    /// first; the first one shows as "seen".</summary>
+    private async void OnCandidate(ScanResult result)
+    {
+        if (_last is not null || _resultPending || _camera is null) return; // already handled a result for this scan
+
+        if (!IsTwoDimensional(result.Format))
         {
-            if (_last is not null) return; // already handled a result for this scan
-
-            if (!IsTwoDimensional(result.Format))
+            var key = $"{result.Format}:{result.Value}";
+            _candidateHits = key == _candidate ? _candidateHits + 1 : 1;
+            _candidate = key;
+            if (_candidateHits < 2)
             {
-                var key = $"{result.Format}:{result.Value}";
-                _candidateHits = key == _candidate ? _candidateHits + 1 : 1;
-                _candidate = key;
-                if (_candidateHits < 2) return;
+                ShowSeen();
+                return;
             }
+        }
 
-            ShowResult(ScanResult.From(result), "scanned with the camera");
-            try { Vibration.Default.Vibrate(80); } catch { /* not supported on every device */ }
-        });
+        // Flash the corners green, and show the result a moment later so the flash is visible before the camera
+        // view is removed.
+        _resultPending = true;
+        _finder.State = ViewfinderState.Read;
+        new Animation(v => { _finder.Pulse = (float)v; Viewfinder.Invalidate(); }, 0, 1)
+            .Commit(this, "ViewfinderPulse", length: 250, easing: Easing.CubicOut);
+        try { Vibration.Default.Vibrate(80); } catch { /* not supported on every device */ }
+
+        await Task.Delay(150);
+        _resultPending = false;
+        if (_last is not null) return;   // a picture was read meanwhile
+        ShowResult(result, "scanned with the camera");
     }
 
     private async void OnPickImage(object? sender, EventArgs e)

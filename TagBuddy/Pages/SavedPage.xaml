@@ -69,13 +69,17 @@
                                         BackgroundColor="#6B7280"
                                         StrokeThickness="0"
                                         VerticalOptions="Center"
-                                        IsVisible="{Binding IsText}">
+                                        IsVisible="{Binding IsPlainText}">
                                     <Border.StrokeShape>
                                         <RoundRectangle CornerRadius="6" />
                                     </Border.StrokeShape>
                                     <Label Text="Aa" FontSize="22" FontFamily="OpenSansSemibold" TextColor="White"
                                            HorizontalOptions="Center" VerticalOptions="Center" />
                                 </Border>
+                                <!-- A text note that is a link: the site's icon, or the link glyph until it is known -->
+                                <controls:SiteIconView Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                                       Value="{Binding Value}"
+                                                       IsVisible="{Binding IsLinkText}" />
                                 <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
                                         WidthRequest="56" HeightRequest="56"
                                         BackgroundColor="#374151"
@@ -95,11 +99,21 @@
                                        FontSize="16"
                                        LineBreakMode="TailTruncation"
                                        VerticalOptions="End" />
+                                <!-- One line for codes, links and dumps; a plain text note shows up to three lines of itself -->
                                 <Label Grid.Row="1" Grid.Column="1"
                                        Text="{Binding Subtitle}"
+                                       IsVisible="{Binding IsNotPlainText}"
                                        TextColor="Gray"
                                        FontSize="13"
                                        LineBreakMode="TailTruncation"
+                                       VerticalOptions="Start" />
+                                <Label Grid.Row="1" Grid.Column="1"
+                                       Text="{Binding Subtitle}"
+                                       IsVisible="{Binding IsPlainText}"
+                                       TextColor="Gray"
+                                       FontSize="13"
+                                       LineBreakMode="WordWrap"
+                                       MaxLines="3"
                                        VerticalOptions="Start" />
                                 <Label Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
                                        Text="{Binding FormatLabel}"
@@ -127,6 +141,7 @@
 
                                 <controls:LinkPreviewView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
                                                           Compact="True"
+                                                          ShowText="False"
                                                           Value="{Binding Value}"
                                                           Margin="0,8,8,0" />
                             </Grid>

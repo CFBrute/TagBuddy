@@ -55,11 +55,36 @@ public class SavedService
             }
 
             if (!File.Exists(_path) && Items.Count > 0) await SaveAsync();
+            WarmPreviews();
         }
         catch
         {
             // A corrupt file should not prevent the app from starting.
         }
+    }
+
+    /// <summary>Loads the previews of saved links one after another in the background, so Saved is warm when it
+    /// is opened without competing with the rows on screen (the request gate bounds it anyway).</summary>
+    private void WarmPreviews()
+    {
+        var values = Items.Where(i => i.IsLink).Select(i => i.Value).ToList();
+        if (values.Count == 0) return;
+        _ = Task.Run(async () =>
+        {
+            foreach (var value in values)
+            {
+                try
+                {
+                    if (!LinkPreviews.IsPreviewable(value, out var uri)) continue;
+                    if (LinkPreviews.IsSingleUse(uri)) await Favicons.GetAsync(uri, null);
+                    else await LinkPreviews.GetAsync(uri);
+                }
+                catch
+                {
+                    // One bad link must not stop the rest.
+                }
+            }
+        });
     }
 
     /// <summary>Reads the old favorites file and the old dump index into one list. The old files are renamed,
@@ -133,6 +158,7 @@ public class SavedService
         await LoadAsync();
         Items.Insert(0, item);
         await SaveAsync();
+        LinkPreviews.Prefetch(item.Value);   // Saved then shows the preview and icon without waiting
     }
 
     public async Task<SavedItem> AddTextAsync(string name, string text)
@@ -191,6 +217,7 @@ public class SavedService
             Items.Insert(index, item);
         }
         await SaveAsync();
+        LinkPreviews.Prefetch(item.Value);   // the text may now be a different link; a no-op when cached
     }
 
     public async Task SaveAsync()

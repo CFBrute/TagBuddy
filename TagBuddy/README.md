@@ -34,6 +34,44 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes.
 Codes are rendered by the app itself (`Controls/BarcodeView.cs` draws the module matrix produced by the ZXing
 encoder in `Services/BarcodeRenderer.cs`), which is what makes the QR options possible.
 
+## Link previews and site icons
+
+Web links get a preview card (Scan and NFC results, Saved rows). It loads on its own as soon as the link is
+shown, and saving anything with a link prefetches it. Sources, lightest first (`Services/LinkPreviews.cs`):
+
+1. oEmbed for known sites (`Services/OEmbed.cs`): YouTube, Vimeo, TikTok, X/Twitter, Reddit, Spotify,
+   SoundCloud, Flickr, Dailymotion and Bluesky. Posts without a thumbnail (X, Bluesky) show their text.
+2. The page's head: Open Graph, Twitter cards, `image_src`, title and description, plus the oEmbed link the page
+   advertises. Instagram, Facebook and Threads are requested with the Facebook crawler's user agent
+   (`facebookexternalhit`), because they show crawlers their preview tags and everyone else a login wall.
+   This is unofficial and may stop working.
+3. A rendered picture of the page (`Services/PageSnapshot.cs`), the heavy last resort. The web view is attached
+   behind the app's content so the page counts as visible, uses a phone-width viewport, waits until the page
+   stops changing, and a picture with (almost) nothing on it is never kept.
+
+Single-use links (sign-in codes, tokens, unsubscribe/confirm/reset paths) are never requested; only their
+site's icon is shown.
+
+Site icons (`Services/Favicons.cs`) are kept once per site in `cache/link-previews-v2/icons/` as PNG files of at
+most 128 px and reused for every link to that site. Order: apple-touch-icon, the largest declared icon (SVG
+skipped), `/apple-touch-icon.png`, `/favicon.ico`, and Google's favicon service as a last resort
+(`Favicons.UseGoogleFallback`). Without an icon the blue link glyph is shown.
+
+Previews are cached for 7 days; one without a real picture is retried after 6 hours (`RetryAfter`).
+
+## Scanner
+
+The Scan tab shows a viewfinder: the picture is dimmed around a centre square where the code should be held.
+The corners turn amber when something code-like is seen and flash green on a read; hints change after 6 and 12
+seconds without a result, and tapping the square focuses. Live frames are decoded without TryHarder (pictures
+from "From image" still use it).
+
+Centre-first decoding (`ScanPage.CentreFirstDecoding`, `Services/FrameDecoder.cs`) decodes the centre square of
+most camera frames and the whole picture at half size every fourth frame. It could not be tested on a phone when
+it was written: when the frames are unusable or never arrive it switches back to the library's own detection by
+itself, and setting `CentreFirstDecoding = false` turns it off for good. With the library's detection, QR codes
+cannot show the amber "seen" state, because the library reports nothing before a successful read.
+
 ## Project layout
 
 - `Models/BarcodeTypes.cs` - supported formats, hints and per-format validation.
