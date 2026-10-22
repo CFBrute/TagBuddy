@@ -20,8 +20,6 @@ public class SavedService
 
     public ObservableCollection<SavedItem> Items { get; } = [];
 
-    public IEnumerable<SavedItem> Codes => Items.Where(i => i.IsCode);
-    public IEnumerable<SavedItem> Texts => Items.Where(i => i.IsText);
     public IEnumerable<SavedItem> Dumps => Items.Where(i => i.IsDump);
 
     public async Task LoadAsync()

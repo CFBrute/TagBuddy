@@ -13,9 +13,6 @@ public sealed class PreviewView : GraphicsView
         BackgroundColor = Colors.White;
     }
 
-    /// <summary>Pixel size of the picture on show, or 0×0.</summary>
-    public (float Width, float Height) PictureSize => _image is null ? (0, 0) : (_image.Width, _image.Height);
-
     /// <summary>Decodes a PNG into a platform image. Safe to call on a background thread.</summary>
     public static Microsoft.Maui.Graphics.IImage? Decode(byte[] png)
     {
