@@ -107,7 +107,7 @@ public sealed partial class NfcReader
                     // Read-protected pages (PROT=1) on an Amiibo-style tag: present the Nintendo key, then read
                     // again. Other protected tags are left alone: a wrong guess counts against their AUTHLIM.
                     if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4
-                        && LooksAmiibo(rawMemory) && TryAuthenticate(link, AmiiboPassword(link.Uid)))
+                        && Features.Amiibo && LooksAmiibo(rawMemory) && TryAuthenticate(link, AmiiboPassword(link.Uid)))
                         rawMemory = ReadMemory(link, chip);
 
                     if (rawMemory.Length >= 16)
@@ -172,7 +172,7 @@ public sealed partial class NfcReader
     /// <summary>Adds what the page layout reveals: Amiibo content, lock bits, password protection.</summary>
     private static void DescribeType2Layout(byte[] bytes, Type2Chip? chip, List<(string, string)> details)
     {
-        if (IsAmiiboDump(bytes))
+        if (Features.Amiibo && IsAmiiboDump(bytes))
             details.Add(("Data", "Amiibo-style content (NTAG215 layout with the Nintendo capability container)"));
 
         if (bytes[10] != 0 || bytes[11] != 0)
@@ -192,8 +192,8 @@ public sealed partial class NfcReader
             int auth0 = bytes[chip.ConfigPage * 4 + 3];
             bool readProtected = (bytes[(chip.ConfigPage + 1) * 4] & 0x80) != 0;
             if (auth0 < chip.TotalPages)
-                details.Add(("Password", $"Pages from {auth0} are {(readProtected ? "read- and write-" : "write-")}protected. " +
-                    "Amiibo-style tags use a key derived from the serial, which this app knows."));
+                details.Add(("Password", $"Pages from {auth0} are {(readProtected ? "read- and write-" : "write-")}protected." +
+                    (Features.Amiibo ? " Amiibo-style tags use a key derived from the serial, which this app knows." : "")));
         }
     }
 

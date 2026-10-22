@@ -163,6 +163,26 @@ Release builds are signed with a self-signed keystore that lives outside the rep
 Or by hand, `dotnet publish -c Release -f net10.0-android`; the signed APK then lands in
 `bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
 
+## Editions: sideload and Play Store
+
+One switch, `-p:PlayStore=true`, builds the Play Store edition. It defines `PLAY_STORE`, which `Features.cs`
+turns into flags, and produces an app bundle (.aab), the only format Play accepts:
+
+```powershell
+..\publish.ps1 -PlayStore    # signed bundle as ..\publish\TagBuddy_1_0_<n>_play.aab
+```
+
+The Play Store edition leaves out what Google Play's policies object to:
+
+- **Amiibo support.** Nintendo-protected tags are treated like any other password-protected tag (the app never
+  guesses a password), Amiibo dumps are refused for writing, and the app does not name Amiibo content.
+  Reading tags, plain NTAG backups, raw text and erasing unprotected tags work as before.
+- **The Facebook crawler user agent** for Instagram, Facebook and Threads previews; those links get the normal
+  request, which usually yields just the site's icon.
+
+The sideload build (the default) keeps both. The Saved tab names the edition under the version, so a bug report
+says which build it came from.
+
 ## Versions
 
 The version is `1.0.<git commit count>`: the first two numbers are `VersionPrefix` in the project file,

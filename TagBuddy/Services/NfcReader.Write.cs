@@ -100,7 +100,7 @@ public sealed partial class NfcReader
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
     /// Amiibo-style, otherwise none. Guessing on other tags would count against their failed-attempt limit.</summary>
     private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
-        amiiboDump || LooksAmiibo(tagMemory) ? AmiiboPassword(link.Uid) : null;
+        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory)) ? AmiiboPassword(link.Uid) : null;
 
     /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
     /// message when the operation cannot proceed.</summary>
@@ -109,8 +109,8 @@ public sealed partial class NfcReader
         int auth0 = ReadAuth0(link, chip);
         if (auth0 < 0 || auth0 >= lastPageTouched) return null;
         if (pwd is null)
-            return $"This tag is password-protected from page {auth0} and is not Amiibo-style, so this app will not guess " +
-                   "its password. Nothing was changed.";
+            return $"This tag is password-protected from page {auth0}{(Features.Amiibo ? " and is not Amiibo-style" : "")}, " +
+                   "so this app will not guess its password. Nothing was changed.";
         authed = TryAuthenticate(link, pwd);
         if (authed) return null;
 
@@ -161,7 +161,7 @@ public sealed partial class NfcReader
         }
         else if (cc[0] != 0xE1)
         {
-            return (false, IsAmiiboDump(before)
+            return (false, Features.Amiibo && IsAmiiboDump(before)
                 ? "This tag carries Amiibo data and its capability container (page 3) is one-time programmable, so phones " +
                   "will never read it as a text or link tag. It can still be erased or loaded with another binary dump."
                 : $"This tag is not NDEF-formatted (capability container {ToHex(cc)}) and cannot be formatted, so text and links cannot be written to it.");
@@ -206,7 +206,7 @@ public sealed partial class NfcReader
     private static (bool Ok, string Note) WriteRaw(Tag tag, Func<byte[], Type2Chip, (byte[]? Dump, string? Error)> build, string dumpSerial)
     {
         using var link = Type2Link.Open(tag);
-        if (link is null) return (false, "Binary dumps can only be written to Type 2 tags (NTAG, Ultralight, Amiibo).");
+        if (link is null) return (false, "Binary dumps can only be written to Type 2 tags (NTAG, Ultralight).");
 
         link.Connect();
         var chip = GetVersion(link);
@@ -226,6 +226,8 @@ public sealed partial class NfcReader
         int dumpPages = dump.Length / 4;
         int endPage = Math.Min(dumpPages, chip.UserEnd);
         bool amiibo = IsAmiiboDump(dump);
+        if (amiibo && !Features.Amiibo)
+            return (false, "This dump holds game-figure data, which this version of the app does not write. Nothing was changed.");
         if (amiibo && chip.UserEnd < 130)
             return (false, $"An Amiibo dump needs 130 pages of user memory (NTAG215); this {chip.Name} has {chip.UserEnd - 4}.");
 
@@ -274,7 +276,7 @@ public sealed partial class NfcReader
             if (!locked[page] && !SamePage(after, page, dump[(page * 4)..(page * 4 + 4)])) mismatched++;
 
         var serial = ToHex(link.Uid);
-        if (dumpSerial.Length > 0 && !string.Equals(dumpSerial, serial, StringComparison.OrdinalIgnoreCase))
+        if (amiibo && dumpSerial.Length > 0 && !string.Equals(dumpSerial, serial, StringComparison.OrdinalIgnoreCase))
             notes.Add($"The dump came from tag {dumpSerial} and this tag is {serial}; Amiibo data is bound to its original serial, so a console may reject it.");
 
         if (mismatched > 0)
@@ -388,8 +390,8 @@ public sealed partial class NfcReader
         }
 
         if (before[12] == 0xF1)
-            notes.Add("Page 3 keeps the Amiibo capability container (one-time programmable), so phones will not treat this " +
-                      "tag as a text or link tag; it can still hold another binary dump.");
+            notes.Add($"Page 3 keeps {(Features.Amiibo ? "the Amiibo" : "a non-NDEF")} capability container (one-time programmable), " +
+                      "so phones will not treat this tag as a text or link tag; it can still hold another binary dump.");
 
         return (true, $"Tag erased: {written} pages cleared. {string.Join(" ", notes)}".TrimEnd());
     }

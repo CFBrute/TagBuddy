@@ -15,7 +15,8 @@ public partial class NfcPage : ContentPage
     private enum WriteMode { Auto, Link, Text, Contact, Raw, Dump, Erase }
 
     private const string NdefHint = "Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written.";
-    private const string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back, and it works on Amiibo-formatted tags where text never can.";
+    private static readonly string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back" +
+        (Features.Amiibo ? ", and it works on Amiibo-formatted tags where text never can." : ".");
 
     /// <summary>Readable text found in a tag's raw memory when it carries no NDEF content.</summary>
     private string? _rawText;
@@ -40,6 +41,13 @@ public partial class NfcPage : ContentPage
     {
         InitializeComponent();
         _saved = saved;
+
+        if (!Features.Amiibo)
+        {
+            WriteTypePicker.Items[(int)WriteMode.Dump] = "Binary dump (backup)";
+            DumpHint.Text = "Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable.";
+            EraseHint.Text = "Clears every user page of the tag (all zeros with an empty NDEF message). The serial number and one-time pages are untouched. Save a dump first if you may want the content back.";
+        }
 
         WriteTypePicker.SelectedIndex = 0;
         SetMode(write: false);
@@ -210,7 +218,7 @@ public partial class NfcPage : ContentPage
         if (_last is not { HasRawMemory: true } tag) return;
         try
         {
-            var suggested = NfcReader.IsAmiiboDump(tag.RawMemory!) ? $"Amiibo {tag.Id}" : $"{DumpChipName} {tag.Id}";
+            var suggested = Features.Amiibo && NfcReader.IsAmiiboDump(tag.RawMemory!) ? $"Amiibo {tag.Id}" : $"{DumpChipName} {tag.Id}";
             var name = await DisplayPromptAsync("Save dump", $"{tag.RawMemory!.Length} bytes ({tag.RawMemory.Length / 4} pages). Give it a name:",
                 accept: "Save", cancel: "Cancel", initialValue: suggested, maxLength: 60);
             if (name is null) return;
@@ -410,7 +418,7 @@ public partial class NfcPage : ContentPage
         _dumpName = name;
         _dumpSerial = serial;
 
-        var kind = NfcReader.IsAmiiboDump(data) ? "Amiibo dump" : "Tag dump";
+        var kind = Features.Amiibo && NfcReader.IsAmiiboDump(data) ? "Amiibo dump" : "Tag dump";
         var from = serial.Length > 0 ? $"from tag {serial}" : "imported";
         DumpLabel.Text = $"{name}\n{kind}, {data.Length} bytes ({data.Length / 4} pages), {from}";
         ArmWrite();

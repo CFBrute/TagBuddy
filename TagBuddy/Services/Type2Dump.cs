@@ -21,5 +21,5 @@ public static class Type2Dump
     }
 
     /// <summary>The chip label a dump is saved under when no tag was read: "Amiibo" or "Type2".</summary>
-    public static string ChipLabel(byte[] data) => NfcReader.IsAmiiboDump(data) ? "Amiibo" : "Type2";
+    public static string ChipLabel(byte[] data) => Features.Amiibo && NfcReader.IsAmiiboDump(data) ? "Amiibo" : "Type2";
 }

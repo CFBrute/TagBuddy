@@ -25,7 +25,7 @@ public static class BuildInfo
     public static string Label => Describe(Version, Commit);
 
     /// <summary>The second line: when the build was made, and what a "*" means.</summary>
-    public static string Details => Explain(Commit, BuildTime);
+    public static string Details => WithEdition(Explain(Commit, BuildTime));
 
     /// <summary>"1.0.14+5be6c14*" into its version and commit.</summary>
     public static (string Version, string Commit) Split(string? informational)
@@ -37,6 +37,9 @@ public static class BuildInfo
 
     public static string Describe(string version, string commit) =>
         commit.Length > 0 ? $"Tag Buddy v{version}  ·  {commit}" : $"Tag Buddy v{version}";
+
+    /// <summary>The second line names the edition too, so a bug report says which build it came from.</summary>
+    private static string WithEdition(string details) => $"{Features.Edition} build  ·  {details}";
 
     public static string Explain(string commit, string buildTime)
     {
