@@ -651,18 +651,25 @@ public sealed class NfcReader
 
     /// <summary>PWD_AUTH. True when the tag answered with a PACK; a wrong password drops the connection,
     /// which is restored here.</summary>
+    /// <summary>PWD_AUTH with the given password. A wrong password and a tag that moved away during the
+    /// handshake both surface as a failed transceive, so one failure is retried once after reconnecting
+    /// before it counts; the caller words its message accordingly.</summary>
     private static bool TryAuthenticate(Type2Link link, byte[] pwd)
     {
-        try
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            var pack = link.Transceive([0x1B, pwd[0], pwd[1], pwd[2], pwd[3]]);
-            return pack is { Length: >= 2 };
+            try
+            {
+                var pack = link.Transceive([0x1B, pwd[0], pwd[1], pwd[2], pwd[3]]);
+                if (pack is { Length: >= 2 }) return true;
+            }
+            catch
+            {
+                // NAK or lost tag: fall through to the retry.
+            }
+            try { link.Reconnect(); } catch { return false; }
         }
-        catch
-        {
-            try { link.Reconnect(); } catch { }
-            return false;
-        }
+        return false;
     }
 
     /// <summary>AUTH0 from CFG0: the first page that needs the password (0xFF means none), or -1 if unknown.</summary>
@@ -671,6 +678,15 @@ public sealed class NfcReader
         if (chip is null || chip.ConfigPage < 0) return -1;
         var cfg = link.Read(chip.ConfigPage);
         return cfg is null ? -1 : cfg[3];
+    }
+
+    /// <summary>AUTHLIM from CFG1: how many wrong passwords the tag tolerates before it locks for good
+    /// (0 means no limit), or 0 if unknown.</summary>
+    private static int ReadAuthLimit(Type2Link link, Type2Chip? chip)
+    {
+        if (chip is null || chip.ConfigPage < 0) return 0;
+        var cfg1 = link.Read(chip.ConfigPage + 1);
+        return cfg1 is null ? 0 : cfg1[0] & 0x07;
     }
 
     private static bool IsType2(Tag tag)
@@ -729,7 +745,16 @@ public sealed class NfcReader
             return $"This tag is password-protected from page {auth0} and is not Amiibo-style, so this app will not guess " +
                    "its password. Nothing was changed.";
         authed = TryAuthenticate(link, pwd);
-        return authed ? null : "This tag is password-protected and the Amiibo key does not open it. Nothing was changed.";
+        if (authed) return null;
+
+        // The handshake fails the same way for a wrong key and for a tag that moved during it, and the
+        // Amiibo key is a fixed formula of the serial, so a slip of the hand is the likelier cause.
+        int limit = ReadAuthLimit(link, chip);
+        var limitNote = limit > 0
+            ? $" This tag locks for good after {limit} wrong attempts, so do not keep retrying if it fails again."
+            : "";
+        return "This tag is password-protected and did not accept the Amiibo key, or it moved away during the " +
+               "handshake. Hold it still and try again. Nothing was changed." + limitNote;
     }
 
     /// <summary>Writes an NDEF TLV into the user pages of a Type 2 tag, formatting a blank one first.</summary>
