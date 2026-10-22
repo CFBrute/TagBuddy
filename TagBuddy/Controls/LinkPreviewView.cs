@@ -118,6 +118,13 @@ public sealed class LinkPreviewView : ContentView
 
         Content = _card;
         BuildLayout();
+        LinkPreviews.PreviewUpdated += OnPreviewUpdated;
+    }
+
+    /// <summary>Something new was learned about this card's link (the person opened its page): show it.</summary>
+    private void OnPreviewUpdated(object? sender, Uri uri)
+    {
+        if (_uri is not null && uri.AbsoluteUri == _uri.AbsoluteUri) Reload();
     }
 
     private void BuildLayout()
@@ -185,7 +192,8 @@ public sealed class LinkPreviewView : ContentView
 
         _uri = uri;
         _title.IsVisible = true;
-        _title.Text = uri.Host;
+        // Known from the address alone ("YouTube · Video", "Short link (bit.ly)"), until the page says more.
+        _title.Text = KnownSites.Describe(uri) ?? uri.Host;
         _description.IsVisible = !Compact;
         _description.MaxLines = 3;
         _hostLine.IsVisible = true;

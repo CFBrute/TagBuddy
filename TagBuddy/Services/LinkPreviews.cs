@@ -51,6 +51,20 @@ public static class LinkPreviews
 
     internal static readonly HttpClient Http = CreateClient();
 
+    private static readonly WeakEventManager Events = new();
+
+    /// <summary>Raised on the main thread when a link's stored preview or its site's icon changed outside a normal
+    /// load (learned from a page the person opened), so cards on screen can show it. Weak: a card that is gone
+    /// does not stay alive for it.</summary>
+    public static event EventHandler<Uri> PreviewUpdated
+    {
+        add => Events.AddEventHandler(value);
+        remove => Events.RemoveEventHandler(value);
+    }
+
+    private static void RaiseUpdated(Uri uri) =>
+        MainThread.BeginInvokeOnMainThread(() => Events.HandleEvent(null!, uri, nameof(PreviewUpdated)));
+
     /// <summary>At most four requests at a time across previews, icons and oEmbed, so a Saved list with fifty
     /// links does not open fifty sockets at once.</summary>
     private static readonly SemaphoreSlim NetGate = new(4, 4);
@@ -315,13 +329,50 @@ public static class LinkPreviews
                 };
         }
 
+        // A bot check answered the plain request: its title says so, and it is not the page's.
+        if (PageInfo.IsInterstitialTitle(preview.Title)) preview = preview with { Title = null, Description = null };
+
         // 4. The icon, and when there is still no picture a rendered snapshot, at the same time.
         var iconTask = Favicons.GetAsync(finalUri, linkTags);
         bool trySnapshot = !preview.HasImage && !IsSnapshotExcluded(finalUri) && !IsSnapshotExcluded(uri);
-        var snapshotTask = trySnapshot ? CaptureSnapshotAsync(uri) : Task.FromResult<(string? Path, bool Sparse, bool Skipped)>((null, false, false));
+        var snapshotTask = trySnapshot ? CaptureSnapshotAsync(uri) : Task.FromResult(SnapshotResult.Nothing);
         await Task.WhenAll(iconTask, snapshotTask);
         var iconPath = await iconTask;
         var snapshot = await snapshotTask;
+
+        // 5. What the rendered page says about itself fills in what the plain request could not see: pages built
+        //    by script, and pages that refused the plain request but render fine. Bot checks are left out.
+        if (snapshot.Page is { IsInterstitial: false } rendered)
+        {
+            preview = preview with
+            {
+                Title = preview.Title ?? rendered.Title,
+                Description = preview.Description ?? rendered.Description,
+                SiteName = preview.SiteName ?? rendered.SiteName,
+            };
+            if (!preview.HasImage && rendered.ImageUrl is not null)
+            {
+                // The page's own preview picture beats a picture of the page.
+                preview = preview with { ImageUrl = rendered.ImageUrl };
+                if (snapshot.Path is not null) TryDelete(snapshot.Path);
+                snapshot = snapshot with { Path = null };
+            }
+            if (iconPath is null || Favicons.SideOf(iconPath) < 64)
+                iconPath = await Favicons.LearnAsync(rendered.Url, rendered.Icons) ?? iconPath;
+            if (rendered.Title is not null) persist = true;   // a browser got through where the plain request did not
+        }
+        else if (snapshot.Page is { IsInterstitial: true } && snapshot.Path is not null)
+        {
+            TryDelete(snapshot.Path);
+            snapshot = snapshot with { Path = null };
+        }
+
+        // The icon belongs to the address the link was known by too (a redirect to another domain).
+        if (iconPath is not null)
+        {
+            Favicons.Remember(uri, iconPath);
+            Favicons.Remember(finalUri, iconPath);
+        }
         preview = preview with { IconUrl = iconPath };
 
         if (snapshot.Path is not null)
@@ -337,23 +388,94 @@ public static class LinkPreviews
             else
                 TryDelete(snapshot.Path);
         }
-        if (snapshot.Skipped) persist = false;   // the app was in the background: try again when it is shown
+        if (snapshot.Skipped) return (Shows(preview) ? preview : null, false);   // in the background: try again when shown
 
-        if (!persist)
-            return (preview.HasImage || preview.Description is not null || preview.HasIcon ? preview : null, false);
+        // Something was learned (an icon, a title) even if the page itself failed: keep it, so the card shows it
+        // next time without asking again, and try for the full preview after a few hours. Offline, nothing was
+        // learned and nothing is kept.
+        bool learned = preview.HasIcon || preview.HasImage || preview.Title is not null;
+        if (!persist && !learned)
+            return (preview.Description is not null ? preview : null, false);
 
-        // 5. A full preview lasts a week; one without a real picture (blank, slow or sparse page) is tried again
-        //    after a few hours.
+        // 6. A full preview lasts a week; one without a real picture (blank, slow, sparse or failed page) is tried
+        //    again after a few hours.
         bool complete = preview.HasImage && !(snapshot.Path is not null && snapshot.Sparse);
         if (!complete) preview = preview with { RetryAfter = DateTime.UtcNow + RetryLifetime };
         await WriteDiskAsync(uri, preview);
         return (preview, true);
     }
 
-    /// <summary>The rendered picture's path, whether it is sparse, and whether rendering was skipped because the
-    /// app was not in the foreground.</summary>
-    private static Task<(string? Path, bool Sparse, bool Skipped)> CaptureSnapshotAsync(Uri uri) =>
+    private static bool Shows(LinkPreview preview) =>
+        preview.HasImage || preview.Description is not null || preview.HasIcon;
+
+    private static Task<SnapshotResult> CaptureSnapshotAsync(Uri uri) =>
         PageSnapshot.CaptureAsync(uri, CacheKey(uri));
+
+    /// <summary>The file name for a picture taken in the in-app viewer: new each time, because the image control
+    /// caches pictures by path.</summary>
+    public static string OpenedSnapshotKey(Uri link) => $"{CacheKey(link)}-opened-{DateTime.UtcNow.Ticks}";
+
+    /// <summary>The person opened a link in the in-app viewer: keep what the page showed them as the link's
+    /// preview, when nothing better is stored. Its title, description and preview picture, else the picture
+    /// <paramref name="capture"/> took of the top of the page; and its icon, under the site's address and the
+    /// link's. A sign-in or one-time link only gives its icon: its page may show personal things. Bot checks
+    /// are never kept. Works with automatic previews off too: the person asked for this page.</summary>
+    public static async Task LearnFromOpenedPageAsync(Uri link, SnapshotResult capture)
+    {
+        var page = capture.Page;
+        try
+        {
+            if (page is null || page.IsInterstitial)
+            {
+                if (capture.Path is not null) TryDelete(capture.Path);
+                return;
+            }
+
+            var icon = await Favicons.LearnAsync(page.Url, page.Icons);
+            if (icon is not null) Favicons.Remember(link, icon);
+
+            if (IsSingleUse(link))
+            {
+                if (capture.Path is not null) TryDelete(capture.Path);
+                RaiseUpdated(link);
+                return;
+            }
+
+            var existing = await ReadDiskAsync(link);
+            bool keepExisting = existing is { HasImage: true, RetryAfter: null } && FilesPresent(existing) && IsFresh(existing);
+            if (keepExisting)
+            {
+                if (capture.Path is not null) TryDelete(capture.Path);
+                if (icon is not null && !existing!.HasIcon)
+                {
+                    var withIcon = existing with { IconUrl = icon };
+                    await WriteDiskAsync(link, withIcon);
+                    Memory[link.AbsoluteUri] = Task.FromResult<LinkPreview?>(withIcon);
+                }
+                RaiseUpdated(link);
+                return;
+            }
+
+            string? image = page.ImageUrl ?? capture.Path;
+            if (page.ImageUrl is not null && capture.Path is not null) TryDelete(capture.Path);
+            // A picture taken earlier is replaced, not left behind.
+            if (existing?.ImageUrl is { } old && IsLocalPath(old) && old != image && image is not null) TryDelete(old);
+            bool complete = page.ImageUrl is not null || (capture.Path is not null && !capture.Sparse);
+
+            var preview = new LinkPreview(link.AbsoluteUri, page.Url.Host,
+                page.Title ?? existing?.Title, page.Description ?? existing?.Description,
+                image ?? existing?.ImageUrl, DateTime.UtcNow,
+                icon ?? existing?.IconUrl, page.SiteName ?? existing?.SiteName, existing?.Text,
+                complete ? null : DateTime.UtcNow + RetryLifetime);
+            await WriteDiskAsync(link, preview);
+            Memory[link.AbsoluteUri] = Task.FromResult<LinkPreview?>(preview);
+            RaiseUpdated(link);
+        }
+        catch
+        {
+            // Learning is a bonus; the page itself is open either way.
+        }
+    }
 
     private static bool IsSnapshotExcluded(Uri uri) => OEmbed.HostIs(uri.Host, SnapshotExcludedHosts);
 

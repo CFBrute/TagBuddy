@@ -61,6 +61,13 @@ public sealed class SiteIconView : ContentView
         };
         Content = _tile;
         InputTransparent = true;   // the row handles taps
+        LinkPreviews.PreviewUpdated += OnPreviewUpdated;
+    }
+
+    /// <summary>An icon was learned for some link: reload when it is this tile's site.</summary>
+    private void OnPreviewUpdated(object? sender, Uri uri)
+    {
+        if (Links.IsWebLink(Value, out var mine) && KnownSites.IconHost(mine) == KnownSites.IconHost(uri)) Reload();
     }
 
     private async void Reload()
