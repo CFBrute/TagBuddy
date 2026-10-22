@@ -39,7 +39,13 @@ if ($Tag) {
         "Tag $name already exists."
     } else {
         git -C $root tag -a $name -m "Tag Buddy $version"
-        git -C $root push origin $name
+        # git reports progress on stderr, which Windows PowerShell 5.1 would otherwise treat as an error.
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        cmd /c "git -C `"$root`" push origin $name 2>&1" | Out-Null
+        $pushed = $LASTEXITCODE -eq 0
+        $ErrorActionPreference = $previous
+        if (-not $pushed) { throw "git push of $name failed with exit code $LASTEXITCODE" }
         "Tagged and pushed $name."
     }
 }
