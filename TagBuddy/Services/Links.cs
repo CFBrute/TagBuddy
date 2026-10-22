@@ -44,15 +44,54 @@ public static class Links
     public static bool IsWebLink(string? value, out Uri uri) =>
         TryGetOpenable(value, out uri) && uri.Scheme is "http" or "https";
 
-    public static string OpenLabel(Uri uri) => uri.Scheme.ToLowerInvariant() switch
+    /// <summary>The button text for opening a link outside the app. Web links name the app that will take them
+    /// ("Open in YouTube", "Open in Chrome") when Android has one picked, so nobody expects a browser and lands in
+    /// another app.</summary>
+    public static string OpenLabel(Uri uri) => OpenLabel(uri, HandlerName(uri));
+
+    public static string OpenLabel(Uri uri, string? appName) => uri.Scheme.ToLowerInvariant() switch
     {
-        "http" or "https" => "Open link",
+        "http" or "https" => string.IsNullOrWhiteSpace(appName) ? "Open link" : $"Open in {appName}",
         "mailto" => "Send email",
         "tel" => "Call number",
         "sms" or "smsto" => "Send SMS",
         "geo" => "Show on map",
         _ => "Open",
     };
+
+    /// <summary>The name of the app Android will open the link in, such as "YouTube" or "Chrome". Null when
+    /// Android will ask the person to choose (no default app), when no app can take it, or off Android.</summary>
+    public static string? HandlerName(Uri uri)
+    {
+#if ANDROID
+        try
+        {
+            var context = Platform.AppContext;
+            var pm = context.PackageManager;
+            if (pm is null) return null;
+            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(uri.AbsoluteUri));
+            var info = OperatingSystem.IsAndroidVersionAtLeast(33)
+                ? pm.ResolveActivity(intent, Android.Content.PM.PackageManager.ResolveInfoFlags.Of((long)Android.Content.PM.PackageInfoFlags.MatchDefaultOnly))
+                : pm.ResolveActivity(intent, Android.Content.PM.PackageInfoFlags.MatchDefaultOnly);
+            var activity = info?.ActivityInfo;
+            if (activity is null) return null;
+
+            // Without a default app Android resolves to its own "Open with" picker; that is not an app to name.
+            if (activity.PackageName is "android" or "com.android.intentresolver" || activity.PackageName == context.PackageName ||
+                activity.Name?.EndsWith("ResolverActivity", StringComparison.Ordinal) == true)
+                return null;
+
+            var name = info!.LoadLabel(pm)?.Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch
+        {
+            return null;
+        }
+#else
+        return null;
+#endif
+    }
 
     /// <summary>Opens the link in the app that handles it: the browser, mail, phone, SMS or maps.</summary>
     public static async Task<bool> OpenAsync(Uri uri)

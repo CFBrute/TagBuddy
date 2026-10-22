@@ -25,6 +25,23 @@ public class ManifestTests
             intent.Elements("data").Any(d => (string?)d.Attribute(AndroidNs + "scheme") == scheme));
     }
 
+    /// <summary>Apps that take their own site's links are only visible with an entry for that host, so the viewer
+    /// can say "Open in YouTube" instead of naming a browser.</summary>
+    [Theory]
+    [InlineData("youtube.com")]
+    [InlineData("m.youtube.com")]
+    [InlineData("youtu.be")]
+    [InlineData("instagram.com")]
+    [InlineData("open.spotify.com")]
+    public void Manifest_can_see_apps_for_known_sites(string host)
+    {
+        var intents = LoadManifest().Root!.Element("queries")?.Elements("intent") ?? [];
+
+        Assert.Contains(intents, intent =>
+            intent.Elements("data").Any(d =>
+                (string?)d.Attribute(AndroidNs + "scheme") == "https" && (string?)d.Attribute(AndroidNs + "host") == host));
+    }
+
     /// <summary>Finds the manifest by walking up from the test output folder to the repository.</summary>
     private static XDocument LoadManifest()
     {

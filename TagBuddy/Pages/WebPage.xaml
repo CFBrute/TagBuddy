@@ -14,7 +14,7 @@
                    TextColor="Gray"
                    VerticalOptions="Center"
                    LineBreakMode="MiddleTruncation" />
-            <Button Grid.Column="1" Text="Open in browser" Clicked="OnOpenExternal" FontSize="12" Padding="10,4"
+            <Button x:Name="OpenExternalButton" Grid.Column="1" Text="Open in browser" Clicked="OnOpenExternal" FontSize="12" Padding="10,4"
                     BackgroundColor="#6B7280" TextColor="White" />
         </Grid>
 

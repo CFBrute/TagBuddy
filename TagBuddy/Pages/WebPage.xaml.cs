@@ -22,6 +22,21 @@ public partial class WebPage : ContentPage, IQueryAttributable
     public WebPage()
     {
         InitializeComponent();
+        UrlLabel.HandlerChanged += (_, _) => AttachCopyOnLongPress();
+    }
+
+    /// <summary>A long press on the address copies it: the page on show now, which is also what the open button
+    /// opens. MAUI has no long-press gesture, so this uses Android's own on the label.</summary>
+    private void AttachCopyOnLongPress()
+    {
+#if ANDROID
+        if (UrlLabel.Handler?.PlatformView is not Android.Views.View view) return;
+        view.LongClickable = true;
+        view.LongClick += async (_, _) =>
+        {
+            if ((_current ?? _uri) is { } page) await CodeActions.CopyTextAsync(this, page.AbsoluteUri);
+        };
+#endif
     }
 
     /// <summary>Opens the viewer for a web link. Values that are not web links open nothing and return false.</summary>
@@ -42,6 +57,7 @@ public partial class WebPage : ContentPage, IQueryAttributable
             Title = uri.Host;
             UrlLabel.Text = uri.AbsoluteUri;
             Web.Source = new UrlWebViewSource { Url = uri.AbsoluteUri };
+            ShowOpenExternalLabel(uri);
         }
     }
 
@@ -81,7 +97,11 @@ public partial class WebPage : ContentPage, IQueryAttributable
             UrlLabel.Text = $"{e.Url}  ({e.Result})";
             return;
         }
-        if (Uri.TryCreate(e.Url, UriKind.Absolute, out var shown) && shown.Scheme is "http" or "https") _current = shown;
+        if (Uri.TryCreate(e.Url, UriKind.Absolute, out var shown) && shown.Scheme is "http" or "https")
+        {
+            _current = shown;
+            ShowOpenExternalLabel(shown);
+        }
         if (_landed is null && _uri is { } link && Uri.TryCreate(e.Url, UriKind.Absolute, out var landed))
         {
             _landed = landed;
@@ -112,9 +132,14 @@ public partial class WebPage : ContentPage, IQueryAttributable
         }
     }
 
+    /// <summary>Names the app the page will open in, since that is not always a browser: a YouTube link goes to
+    /// the YouTube app. When the app cannot tell (Android picks, or the site's app is not in the manifest queries), it says either may open.</summary>
+    private void ShowOpenExternalLabel(Uri page) =>
+        OpenExternalButton.Text = Links.HandlerName(page) is { } app ? $"Open in {app}" : "Open in app or browser";
+
     private async void OnOpenExternal(object? sender, EventArgs e)
     {
         if ((_current ?? _uri) is { } current && !await Links.OpenAsync(current))
-            await DisplayAlertAsync("No browser", "No app on this phone can open web pages.", "OK");
+            await DisplayAlertAsync("No app", "No app on this phone can open this page.", "OK");
     }
 }
