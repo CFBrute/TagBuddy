@@ -1,6 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-
-namespace TagBuddy;
+﻿namespace TagBuddy;
 
 public partial class App : Application
 {

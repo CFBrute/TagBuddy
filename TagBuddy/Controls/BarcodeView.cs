@@ -11,12 +11,14 @@ public class BarcodeView : GraphicsView
         nameof(Matrix), typeof(BitMatrix), typeof(BarcodeView), null,
         propertyChanged: (b, _, _) => ((BarcodeView)b).Invalidate());
 
-    public static readonly BindableProperty ForegroundProperty = BindableProperty.Create(
-        nameof(Foreground), typeof(Color), typeof(BarcodeView), Colors.Black,
+    /// <summary>Colour of the bars and dark modules.</summary>
+    public static readonly BindableProperty BarColorProperty = BindableProperty.Create(
+        nameof(BarColor), typeof(Color), typeof(BarcodeView), Colors.Black,
         propertyChanged: (b, _, _) => ((BarcodeView)b).Invalidate());
 
-    public static readonly BindableProperty BackgroundProperty = BindableProperty.Create(
-        nameof(Background), typeof(Color), typeof(BarcodeView), Colors.White,
+    /// <summary>Colour of the spaces and the quiet zone.</summary>
+    public static readonly BindableProperty SpaceColorProperty = BindableProperty.Create(
+        nameof(SpaceColor), typeof(Color), typeof(BarcodeView), Colors.White,
         propertyChanged: (b, _, _) => ((BarcodeView)b).Invalidate());
 
     /// <summary>A saved code to draw. Set this from a list template instead of <see cref="Matrix"/>: the item is
@@ -52,16 +54,16 @@ public class BarcodeView : GraphicsView
         }
     }
 
-    public new Color Foreground
+    public Color BarColor
     {
-        get => (Color)GetValue(ForegroundProperty);
-        set => SetValue(ForegroundProperty, value);
+        get => (Color)GetValue(BarColorProperty);
+        set => SetValue(BarColorProperty, value);
     }
 
-    public new Color Background
+    public Color SpaceColor
     {
-        get => (Color)GetValue(BackgroundProperty);
-        set => SetValue(BackgroundProperty, value);
+        get => (Color)GetValue(SpaceColorProperty);
+        set => SetValue(SpaceColorProperty, value);
     }
 
     public BarcodeView()
@@ -75,13 +77,13 @@ public class BarcodeView : GraphicsView
         public void Draw(ICanvas canvas, RectF rect)
         {
             canvas.Antialias = false;
-            canvas.FillColor = owner.Background;
+            canvas.FillColor = owner.SpaceColor;
             canvas.FillRectangle(rect);
 
             var m = owner.Matrix;
             if (m is null || m.Width == 0 || m.Height == 0) return;
 
-            canvas.FillColor = owner.Foreground;
+            canvas.FillColor = owner.BarColor;
 
             if (m.Height == 1)
                 DrawBars(canvas, rect, m);
