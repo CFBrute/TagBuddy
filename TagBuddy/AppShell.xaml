@@ -30,10 +30,17 @@
                       Icon="tab_nfc.png"
                       Route="nfc"
                       ContentTemplate="{DataTemplate pages:NfcPage}" />
-        <ShellContent Title="About"
-                      Icon="tab_about.png"
-                      Route="about"
-                      ContentTemplate="{DataTemplate pages:AboutPage}" />
+        <!-- More has two top tabs: Settings first (used more often), then About -->
+        <Tab Title="More"
+             Icon="tab_more.png"
+             Route="more">
+            <ShellContent Title="Settings"
+                          Route="settings"
+                          ContentTemplate="{DataTemplate pages:SettingsPage}" />
+            <ShellContent Title="About"
+                          Route="about"
+                          ContentTemplate="{DataTemplate pages:AboutPage}" />
+        </Tab>
     </TabBar>
 
 </Shell>

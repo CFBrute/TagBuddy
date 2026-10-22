@@ -49,7 +49,7 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
     {
         base.OnAppearing();
         // Setting the slider applies the brightness through OnBrightnessChanged.
-        BrightnessSlider.Value = ScreenBrightness.StartLevel(ScreenBrightness.Current());
+        BrightnessSlider.Value = ScreenBrightness.StartLevel(ScreenBrightness.Current(), AppSettings.MaxBrightness);
         DeviceDisplay.Current.KeepScreenOn = true;
     }
 
@@ -82,47 +82,5 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
     private async void OnOpenLink(object? sender, EventArgs e)
     {
         if (_item is not null) await CodeActions.OpenLinkAsync(this, _item.Value);
-    }
-}
-
-/// <summary>Pushes the screen up so scanners can read the code reliably, without the jump from a dimmed
-/// phone to a blinding screen: the page starts at double the phone's own level and a slider does the rest.</summary>
-static class ScreenBrightness
-{
-    /// <summary>Where the page starts for a given phone brightness: double it, but never under 20 % and
-    /// never over 100 %. So 0 → 20, 20 → 40, 40 → 80, and 50 or more → 100.</summary>
-    public static float StartLevel(float current) => Math.Clamp(current * 2f, 0.2f, 1f);
-
-    /// <summary>The phone's current screen brightness, 0..1, or 1 when it cannot be read.</summary>
-    public static float Current()
-    {
-#if ANDROID
-        try
-        {
-            var resolver = Platform.AppContext.ContentResolver;
-            int value = Android.Provider.Settings.System.GetInt(resolver, Android.Provider.Settings.System.ScreenBrightness, 255);
-            return Math.Clamp(value / 255f, 0f, 1f);
-        }
-        catch
-        {
-            return 1f;
-        }
-#else
-        return 1f;
-#endif
-    }
-
-    // -1 means "follow the system brightness setting".
-    public static void Restore() => Set(-1f);
-
-    public static void Set(float brightness)
-    {
-#if ANDROID
-        var window = Platform.CurrentActivity?.Window;
-        if (window?.Attributes is null) return;
-        var attrs = window.Attributes;
-        attrs.ScreenBrightness = brightness;
-        window.Attributes = attrs;
-#endif
     }
 }

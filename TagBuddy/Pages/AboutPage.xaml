@@ -15,24 +15,12 @@
             <Label Text="Barcodes, QR codes and NFC tags. No ads, no account, no tracking."
                    FontSize="14" />
 
-            <!-- Settings -->
-            <Label Text="Settings" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <Label Grid.Column="0" Text="Load link previews automatically" VerticalOptions="Center" />
-                <Switch Grid.Column="1" x:Name="AutoPreviewSwitch" Toggled="OnAutoPreviewToggled"
-                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
-            </Grid>
-            <Label x:Name="AutoPreviewHint" FontSize="12" TextColor="Gray" />
-            <Button Text="Clear stored previews and icons" Clicked="OnClearCache"
-                    BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
-                    Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-
             <!-- What leaves the phone -->
             <Label Text="Privacy" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
             <Label FontSize="13"
                    Text="Everything you save stays on this phone. The app has no account, no ads and no analytics, and sends nothing about you anywhere." />
             <Label FontSize="13"
-                   Text="The only network use is link previews: for a web link you scan, read from a tag or save, the app asks that website for the page's title, picture and icon, saying honestly that it is Tag Buddy. Links that carry a sign-in or one-time code are never opened this way; only the site's icon is fetched. Switch off automatic previews above and nothing is sent until you tap a preview." />
+                   Text="The only network use is link previews: for a web link you scan, read from a tag or save, the app asks that website for the page's title, picture and icon, saying honestly that it is Tag Buddy. Links that carry a sign-in or one-time code are never opened this way; only the site's icon is fetched. Switch off automatic previews on the Settings tab and nothing is sent until you tap a preview." />
             <Label FontSize="13"
                    Text="Everything previews bring back, and every link you scan or open, stays on this phone. None of it is ever sent to the developer." />
             <Label FontSize="13"

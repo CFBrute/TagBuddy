@@ -2,42 +2,16 @@ using TagBuddy.Services;
 
 namespace TagBuddy.Pages;
 
-/// <summary>The About tab: which build this is, the settings, what the app sends over the network, and a way to
+/// <summary>The About tab under More: which build this is, what the app sends over the network, and a way to
 /// report bugs or complain by email.</summary>
 public partial class AboutPage : ContentPage
 {
-    private bool _loading;
-
     public AboutPage()
     {
         InitializeComponent();
         VersionLabel.Text = BuildInfo.Label;
         BuildLabel.Text = BuildInfo.Details;
         EmailLabel.Text = BuildInfo.SupportEmail;
-
-        _loading = true;
-        AutoPreviewSwitch.IsToggled = AppSettings.AutoPreviews;
-        _loading = false;
-        ShowPreviewHint();
-    }
-
-    private void OnAutoPreviewToggled(object? sender, ToggledEventArgs e)
-    {
-        if (_loading) return;
-        AppSettings.AutoPreviews = e.Value;
-        ShowPreviewHint();
-    }
-
-    private void ShowPreviewHint() => AutoPreviewHint.Text = AppSettings.AutoPreviews
-        ? "Web links show their title, picture and site icon as soon as they appear."
-        : "Nothing is fetched until you tap \"Tap to load preview\" or open the page. Previews and icons already on the phone still show.";
-
-    private async void OnClearCache(object? sender, EventArgs e)
-    {
-        if (!await DisplayAlertAsync("Clear previews", "Forget every stored link preview and site icon? They load again when needed.", "Clear", "Cancel"))
-            return;
-        await Task.Run(LinkPreviews.ClearCache);
-        Notice.Show("Previews and icons cleared");
     }
 
     /// <summary>A bug report starts with the questions worth answering and ends with the build and the phone.</summary>
@@ -51,7 +25,7 @@ public partial class AboutPage : ContentPage
         await ComposeAsync("Tag Buddy feedback", $"\n\n--\n{BuildInfo.Label}\n");
 
     private async void OnPrivacyPolicy(object? sender, EventArgs e) =>
-        await Links.OpenAsync(new Uri(BuildInfo.PrivacyPolicyUrl));
+        await CodeActions.OpenLinkAsync(this, BuildInfo.PrivacyPolicyUrl);
 
     private async void OnCopyAddress(object? sender, EventArgs e) =>
         await CodeActions.CopyTextAsync(this, BuildInfo.SupportEmail);

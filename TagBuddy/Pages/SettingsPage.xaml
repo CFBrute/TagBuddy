@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="TagBuddy.Pages.SettingsPage"
+             Title="Settings">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <!-- Scanning and NFC -->
+            <Label Text="Scanning and NFC" FontAttributes="Bold" FontSize="16" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Vibrate on scan and NFC" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="VibrateSwitch" Toggled="OnVibrateToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Beep on scan and NFC" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="SoundSwitch" Toggled="OnSoundToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Label FontSize="12" TextColor="Gray"
+                   Text="When a code is scanned or a tag is read or written. The beep stays quiet while the phone is on silent or vibrate." />
+
+            <!-- Display -->
+            <Label Text="Display" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Always show codes at maximum brightness" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="MaxBrightnessSwitch" Toggled="OnMaxBrightnessToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Label x:Name="MaxBrightnessHint" FontSize="12" TextColor="Gray" />
+
+            <!-- Link previews -->
+            <Label Text="Link previews" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Load link previews automatically" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="AutoPreviewSwitch" Toggled="OnAutoPreviewToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Label x:Name="AutoPreviewHint" FontSize="12" TextColor="Gray" />
+            <Button Text="Clear stored previews and icons" Clicked="OnClearCache"
+                    BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                    Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

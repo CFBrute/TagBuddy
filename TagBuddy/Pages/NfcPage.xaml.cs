@@ -142,7 +142,7 @@ public partial class NfcPage : ContentPage
     private void OnTagRead(NfcTagInfo tag)
     {
         _last = tag;
-        try { Vibration.Default.Vibrate(60); } catch { /* not supported on every device */ }
+        Feedback.Success();
 
         WaitingPanel.IsVisible = false;
         ResultPanel.IsVisible = true;
@@ -379,7 +379,8 @@ public partial class NfcPage : ContentPage
 
     private void OnTagWritten(bool ok, string note)
     {
-        try { Vibration.Default.Vibrate(ok ? 60 : 200); } catch { /* not supported on every device */ }
+        if (ok) Feedback.Success();
+        else Feedback.Failure();
 
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;
