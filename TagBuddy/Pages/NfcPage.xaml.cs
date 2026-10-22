@@ -291,12 +291,6 @@ public partial class NfcPage : ContentPage
         if (CurrentContent is { } content) await WebPage.ShowAsync(content);
     }
 
-    private async void OnUseInGenerator(object? sender, EventArgs e)
-    {
-        if (CurrentContent is not { } content) return;
-        await Shell.Current.GoToAsync("//generate/qr", new Dictionary<string, object> { ["value"] = content });
-    }
-
     // ---------------------------------------------------------------- write
 
     private int WriteType => Math.Max(0, WriteTypePicker.SelectedIndex);

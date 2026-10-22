@@ -56,11 +56,8 @@
                             <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
                                     Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
                         </HorizontalStackLayout>
-                        <HorizontalStackLayout HorizontalOptions="Center" Spacing="10">
-                            <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False" />
-                            <Button Text="Open in QR generator" Clicked="OnUseInGenerator"
-                                    BackgroundColor="#6B7280" TextColor="White" />
-                        </HorizontalStackLayout>
+                        <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False"
+                                HorizontalOptions="Center" />
                         <controls:LinkPreviewView x:Name="Preview" />
                     </VerticalStackLayout>
 
