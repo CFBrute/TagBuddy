@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:TagBuddy.Controls"
+             x:Class="TagBuddy.Pages.NfcPage"
+             Title="NFC">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+
+            <!-- Read / Write mode switch -->
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                <Button x:Name="ReadModeButton" Grid.Column="0" Text="Read a tag" Clicked="OnReadMode" />
+                <Button x:Name="WriteModeButton" Grid.Column="1" Text="Write a tag" Clicked="OnWriteMode"
+                        BackgroundColor="#6B7280" TextColor="White" />
+            </Grid>
+
+            <!-- ===================== READ ===================== -->
+            <VerticalStackLayout x:Name="ReadSection" Spacing="12">
+
+                <!-- Waiting state -->
+                <VerticalStackLayout x:Name="WaitingPanel" Spacing="12" Padding="0,30,0,20">
+                    <Image Source="tab_nfc.png" WidthRequest="72" HeightRequest="72" HorizontalOptions="Center" Opacity="0.6" />
+                    <Label x:Name="StatusLabel"
+                           Text="Hold a tag or card against the back of the phone"
+                           FontSize="16"
+                           HorizontalTextAlignment="Center" />
+                    <Label x:Name="HintLabel"
+                           Text="Works with NFC stickers, access cards, transit and bank cards and ID documents. Content shows when the tag carries a link or text; protected cards show only their type and serial number."
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                    <Button x:Name="SettingsButton"
+                            Text="Turn on NFC"
+                            Clicked="OnOpenSettings"
+                            HorizontalOptions="Center"
+                            IsVisible="False" />
+                </VerticalStackLayout>
+
+                <!-- Result -->
+                <VerticalStackLayout x:Name="ResultPanel" Spacing="12" IsVisible="False">
+                    <Label x:Name="TagTitle"
+                           FontSize="13"
+                           TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                    <Label x:Name="ContentLabel"
+                           FontSize="18"
+                           FontFamily="OpenSansSemibold"
+                           HorizontalTextAlignment="Center"
+                           LineBreakMode="WordWrap" />
+
+                    <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
+                        <HorizontalStackLayout HorizontalOptions="Center">
+                            <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_favorite.png"
+                                    Clicked="OnSave" SemanticProperties.Description="Save as text" ToolTipProperties.Text="Save as text" />
+                            <Button Style="{StaticResource IconButton}" ImageSource="ic_copy.png"
+                                    Clicked="OnCopy" SemanticProperties.Description="Copy text" ToolTipProperties.Text="Copy text" />
+                            <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
+                                    Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
+                        </HorizontalStackLayout>
+                        <HorizontalStackLayout HorizontalOptions="Center" Spacing="10">
+                            <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False" />
+                            <Button Text="Open in QR generator" Clicked="OnUseInGenerator"
+                                    BackgroundColor="#6B7280" TextColor="White" />
+                        </HorizontalStackLayout>
+                        <controls:LinkPreviewView x:Name="Preview" AutoLoad="False" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout x:Name="Details" Spacing="4"
+                                         Padding="12"
+                                         BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+
+                    <!-- Full readable memory of a Type 2 tag (NTAG/Ultralight/Amiibo) -->
+                    <VerticalStackLayout x:Name="MemoryPanel" Spacing="8" IsVisible="False">
+                        <Label Text="Readable memory"
+                               FontAttributes="Bold"
+                               HorizontalTextAlignment="Center" />
+                        <Label Text="Every page of this tag's memory. Save it as a binary dump to keep a backup that can be written back to the tag later."
+                               FontSize="12" TextColor="Gray"
+                               HorizontalTextAlignment="Center" />
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Button Grid.Column="0" Text="Save dump" Clicked="OnSaveDump" />
+                            <Button Grid.Column="1" Text="Share .bin file" Clicked="OnShareDump"
+                                    BackgroundColor="#6B7280" TextColor="White" />
+                        </Grid>
+
+                        <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="10"
+                                BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Label x:Name="MemoryLabel"
+                                   FontFamily="monospace"
+                                   FontSize="12"
+                                   LineBreakMode="NoWrap" />
+                        </Border>
+                        <Button Text="Copy memory as text" Clicked="OnCopyMemory"
+                                BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+
+                    <Label Text="Hold another tag to read it"
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- ===================== WRITE ===================== -->
+            <VerticalStackLayout x:Name="WriteSection" Spacing="12" IsVisible="False">
+
+                <Label Text="What to write" FontAttributes="Bold" />
+                <Picker x:Name="WriteTypePicker" SelectedIndexChanged="OnWriteTypeChanged">
+                    <Picker.Items>
+                        <x:String>Auto (link or text)</x:String>
+                        <x:String>Link</x:String>
+                        <x:String>Plain text</x:String>
+                        <x:String>Contact (vCard)</x:String>
+                        <x:String>Binary dump (Amiibo, backup)</x:String>
+                        <x:String>Erase tag (reset)</x:String>
+                    </Picker.Items>
+                </Picker>
+
+                <!-- Text content: link, text, vCard -->
+                <VerticalStackLayout x:Name="TextPanel" Spacing="12">
+                    <Editor x:Name="WriteEditor"
+                            Placeholder="Type a link, text, or paste a vCard; or load a favorite"
+                            AutoSize="TextChanges"
+                            MinimumHeightRequest="80"
+                            TextChanged="OnWriteTextChanged" />
+
+                    <HorizontalStackLayout Spacing="10">
+                        <Button Text="Load from Saved" Clicked="OnLoadFavorite"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <Button Text="Clear" Clicked="OnClearEditor"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+
+                <!-- Binary dump: restore a saved tag image -->
+                <VerticalStackLayout x:Name="DumpPanel" Spacing="12" IsVisible="False">
+                    <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="12"
+                            BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Label x:Name="DumpLabel"
+                               Text="No dump chosen"
+                               FontSize="14"
+                               LineBreakMode="WordWrap" />
+                    </Border>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10" RowDefinitions="Auto,Auto" RowSpacing="10">
+                        <Button Grid.Row="0" Grid.Column="0" Text="Choose saved dump" Clicked="OnChooseDump" />
+                        <Button Grid.Row="0" Grid.Column="1" Text="Import .bin file" Clicked="OnImportDump"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <Button Grid.Row="1" Grid.Column="0" Text="Paste hex" Clicked="OnPasteHex"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <Button Grid.Row="1" Grid.Column="1" Text="Delete a saved dump" Clicked="OnDeleteDump"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                    </Grid>
+
+                    <Label Text="Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable. An Amiibo dump also gets the Nintendo password set from this tag's serial. Amiibo data is tied to the serial it was made for, so write it back to the same tag."
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+
+                <!-- Erase -->
+                <VerticalStackLayout x:Name="ErasePanel" Spacing="12" IsVisible="False">
+                    <Label Text="Clears every user page of the tag (all zeros with an empty NDEF message) and removes password protection when the tag uses the Amiibo key. The serial number and one-time pages are untouched. Save a dump first if you may want the content back."
+                           FontSize="12" TextColor="Gray"
+                           HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+
+                <Label x:Name="WriteStatus"
+                       Text="Enter content, then hold a writable tag to the back of the phone"
+                       FontSize="14"
+                       HorizontalTextAlignment="Center"
+                       Margin="0,10,0,0" />
+
+                <Label x:Name="WriteHint"
+                       Text="Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written."
+                       FontSize="12" TextColor="Gray"
+                       HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

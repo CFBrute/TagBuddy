@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="TagBuddy.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:pages="clr-namespace:TagBuddy.Pages"
+    Title="Tag Buddy">
+
+    <TabBar>
+        <!-- Generate has two top tabs: QR codes first (most used), then linear barcodes -->
+        <Tab Title="Generate"
+             Icon="tab_generate.png"
+             Route="generate">
+            <ShellContent Title="QR Code"
+                          Route="qr"
+                          ContentTemplate="{DataTemplate pages:QrPage}" />
+            <ShellContent Title="Barcode"
+                          Route="barcode"
+                          ContentTemplate="{DataTemplate pages:GeneratePage}" />
+        </Tab>
+        <ShellContent Title="Saved"
+                      Icon="tab_saved.png"
+                      Route="saved"
+                      ContentTemplate="{DataTemplate pages:SavedPage}" />
+        <ShellContent Title="Scan"
+                      Icon="tab_scan.png"
+                      Route="scan"
+                      ContentTemplate="{DataTemplate pages:ScanPage}" />
+        <ShellContent Title="NFC"
+                      Icon="tab_nfc.png"
+                      Route="nfc"
+                      ContentTemplate="{DataTemplate pages:NfcPage}" />
+    </TabBar>
+
+</Shell>

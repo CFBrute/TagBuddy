@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:TagBuddy.Models"
+             xmlns:controls="clr-namespace:TagBuddy.Controls"
+             x:Class="TagBuddy.Pages.SavedPage"
+             Title="Saved">
+    <Grid RowDefinitions="Auto,*">
+
+        <!-- Filter by kind, and a way to add a text note right here -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="6" Padding="12,10,12,4">
+            <Button Grid.Column="0" x:Name="FilterAll" Text="All" Clicked="OnFilterAll" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button Grid.Column="1" x:Name="FilterCodes" Text="Codes" Clicked="OnFilterCodes" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button Grid.Column="2" x:Name="FilterTexts" Text="Text" Clicked="OnFilterTexts" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button Grid.Column="3" x:Name="FilterDumps" Text="Tags" Clicked="OnFilterDumps" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button Grid.Column="5" Text="+ Text" Clicked="OnNewText" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
+                    ToolTipProperties.Text="Save a piece of text" />
+        </Grid>
+
+        <CollectionView Grid.Row="1" x:Name="List"
+                        SelectionMode="None"
+                        Margin="12,4,12,12">
+            <CollectionView.EmptyView>
+                <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="8" Padding="30">
+                    <Label x:Name="EmptyTitle" Text="Nothing saved yet" FontSize="18" HorizontalTextAlignment="Center" />
+                    <Label x:Name="EmptyHint" Text="Codes you generate or scan, text, and tag dumps you save end up here."
+                           TextColor="Gray" HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:SavedItem">
+                    <SwipeView>
+                        <SwipeView.RightItems>
+                            <SwipeItems>
+                                <SwipeItem Text="Delete"
+                                           BackgroundColor="#DC2626"
+                                           Invoked="OnDeleteInvoked"
+                                           CommandParameter="{Binding .}" />
+                            </SwipeItems>
+                        </SwipeView.RightItems>
+                        <Border Margin="0,0,0,10"
+                                Padding="14,10,6,10"
+                                Stroke="#D1D5DB"
+                                StrokeThickness="1"
+                                BackgroundColor="{AppThemeBinding Light=White, Dark=#1F2937}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="10" />
+                            </Border.StrokeShape>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
+                            </Border.GestureRecognizers>
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10">
+                                <!-- Picture of the code, or a mark for text and tag dumps -->
+                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                        WidthRequest="56" HeightRequest="56"
+                                        Padding="3"
+                                        BackgroundColor="White"
+                                        Stroke="#D1D5DB" StrokeThickness="1"
+                                        VerticalOptions="Center"
+                                        IsVisible="{Binding IsCode}">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="6" />
+                                    </Border.StrokeShape>
+                                    <controls:BarcodeView Item="{Binding .}" InputTransparent="True" />
+                                </Border>
+                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                        WidthRequest="56" HeightRequest="56"
+                                        BackgroundColor="#6B7280"
+                                        StrokeThickness="0"
+                                        VerticalOptions="Center"
+                                        IsVisible="{Binding IsText}">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="6" />
+                                    </Border.StrokeShape>
+                                    <Label Text="Aa" FontSize="22" FontFamily="OpenSansSemibold" TextColor="White"
+                                           HorizontalOptions="Center" VerticalOptions="Center" />
+                                </Border>
+                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                        WidthRequest="56" HeightRequest="56"
+                                        BackgroundColor="#374151"
+                                        StrokeThickness="0"
+                                        VerticalOptions="Center"
+                                        IsVisible="{Binding IsDump}">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="6" />
+                                    </Border.StrokeShape>
+                                    <Label Text="((•))" FontSize="16" FontFamily="OpenSansSemibold" TextColor="White"
+                                           HorizontalOptions="Center" VerticalOptions="Center" />
+                                </Border>
+
+                                <Label Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding DisplayName}"
+                                       FontFamily="OpenSansSemibold"
+                                       FontSize="16"
+                                       LineBreakMode="TailTruncation"
+                                       VerticalOptions="End" />
+                                <Label Grid.Row="1" Grid.Column="1"
+                                       Text="{Binding Subtitle}"
+                                       TextColor="Gray"
+                                       FontSize="13"
+                                       LineBreakMode="TailTruncation"
+                                       VerticalOptions="Start" />
+                                <Label Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
+                                       Text="{Binding FormatLabel}"
+                                       FontSize="11"
+                                       TextColor="#C7780B"
+                                       VerticalOptions="Center" />
+                                <Button Grid.Row="0" Grid.Column="3" Grid.RowSpan="2"
+                                        Text="⋮"
+                                        FontSize="22"
+                                        Padding="8,0"
+                                        BackgroundColor="Transparent"
+                                        TextColor="{AppThemeBinding Light=#374151, Dark=#D1D5DB}"
+                                        VerticalOptions="Center"
+                                        Clicked="OnMenuClicked"
+                                        CommandParameter="{Binding .}" />
+
+                                <!-- Obvious text found inside a tag dump -->
+                                <Label Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
+                                       Text="{Binding DumpText}"
+                                       IsVisible="{Binding HasDumpText}"
+                                       FontSize="13"
+                                       Margin="0,8,8,0"
+                                       LineBreakMode="TailTruncation"
+                                       MaxLines="2" />
+
+                                <controls:LinkPreviewView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
+                                                          Compact="True"
+                                                          Value="{Binding Value}"
+                                                          Margin="0,8,8,0" />
+                            </Grid>
+                        </Border>
+                    </SwipeView>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>

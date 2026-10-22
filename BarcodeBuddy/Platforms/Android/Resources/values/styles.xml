@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Dark splash for Android 11 and older: full window background drawable. -->
-    <style name="BarcodeBuddy.SplashTheme" parent="Maui.SplashTheme">
-        <item name="android:windowBackground">@drawable/splash_window</item>
-    </style>
-</resources>
