@@ -36,6 +36,12 @@
 		<AndroidPackageFormats>apk</AndroidPackageFormats>
 		<AndroidUseAapt2>true</AndroidUseAapt2>
 	</PropertyGroup>
+	<!-- The sideload APK is for 64-bit ARM only: every phone from the last several years. Building all four
+	     processor types (also 32-bit ARM and the emulator-only x86/x64) took about four times as long and made
+	     the APK three times as big. The Play Store bundle keeps all of them; Play sends each phone its own part. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' And '$(PlayStore)' != 'true'">
+		<RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
+	</PropertyGroup>
 	<Import Project="Signing.local.props" Condition="Exists('Signing.local.props')" />
 
 	<!-- Play Store build: dotnet publish -c Release -f net10.0-android -p:PlayStore=true. Defines PLAY_STORE, which
