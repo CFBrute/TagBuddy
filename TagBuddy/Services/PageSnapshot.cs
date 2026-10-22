@@ -46,7 +46,7 @@ public sealed record SnapshotResult(string? Path, bool Sparse, bool Skipped, Pag
 public static class PageSnapshot
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
-    private static readonly string Dir = Path.Combine(FileSystem.CacheDirectory, "link-snapshots");
+    private static string Dir => Path.Combine(FileSystem.CacheDirectory, "link-snapshots");
 
     private const int CssWidth = 412;    // a common phone width in CSS pixels
     private const int CssHeight = 309;   // 4:3

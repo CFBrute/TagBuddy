@@ -4,6 +4,8 @@ using Android.Nfc;
 using Android.Nfc.Tech;
 #endif
 
+using static TagBuddy.Services.Type2Memory;
+
 namespace TagBuddy.Services;
 
 /// <summary>Type 2 tag access (NTAG, Ultralight): READ (0x30) returns 16 bytes = 4 pages of 4 bytes, WRITE
@@ -12,10 +14,6 @@ namespace TagBuddy.Services;
 public sealed partial class NfcReader
 {
 #if ANDROID
-    /// <summary>What GET_VERSION tells about a Type 2 chip. UserEnd is the first page after user memory
-    /// (lock and configuration pages follow); ConfigPage is CFG0, where AUTH0 lives, or -1 if none.</summary>
-    private sealed record Type2Chip(string Name, int TotalPages, int UserEnd, bool HasPassword, int ConfigPage);
-
     private static Type2Chip? GetVersion(Type2Link link)
     {
         byte[]? v;
@@ -26,18 +24,7 @@ public sealed partial class NfcReader
             try { link.Reconnect(); } catch { }
             return null;
         }
-        if (v is not { Length: 8 } || v[0] != 0x00) return null;
-
-        string family = v[2] switch { 0x03 => "MIFARE Ultralight EV1", 0x04 => "NTAG", _ => $"Type 2 chip (product {v[2]:X2})" };
-        return (v[2], v[6]) switch
-        {
-            (0x04, 0x0F) => new("NTAG213", 45, 40, true, 41),
-            (0x04, 0x11) => new("NTAG215", 135, 130, true, 131),
-            (0x04, 0x13) => new("NTAG216", 231, 226, true, 227),
-            (_, 0x0B) => new($"{family} (48 bytes)", 20, 16, true, 16),
-            (_, 0x0E) => new($"{family} (128 bytes)", 41, 36, true, 37),
-            _ => new($"{family}, size code {v[6]:X2}", 0, 0, false, -1),
-        };
+        return ChipFromVersion(v);
     }
 
     /// <summary>Reads every page the chip reports (or until the tag stops answering for unknown chips).</summary>
@@ -76,13 +63,6 @@ public sealed partial class NfcReader
         }
         return buffer.ToArray();
     }
-
-    /// <summary>The password Nintendo tags derive from their 7-byte serial; the PACK is 80:80.</summary>
-    private static byte[] AmiiboPassword(byte[] uid) =>
-        uid.Length < 7
-            ? [0xFF, 0xFF, 0xFF, 0xFF]
-            : [(byte)(0xAA ^ uid[1] ^ uid[3]), (byte)(0x55 ^ uid[2] ^ uid[4]),
-               (byte)(0xAA ^ uid[3] ^ uid[5]), (byte)(0x55 ^ uid[4] ^ uid[6])];
 
     /// <summary>PWD_AUTH with the given password. A wrong password and a tag that moved away during the
     /// handshake both surface as a failed transceive, so one failure is retried once after reconnecting
@@ -130,9 +110,6 @@ public sealed partial class NfcReader
             && !techs.Contains("android.nfc.tech.MifareClassic");
     }
 
-    private static bool SamePage(byte[] memory, int page, byte[] data) =>
-        memory.Length >= (page + 1) * 4 && memory.AsSpan(page * 4, 4).SequenceEqual(data);
-
     /// <summary>Writes one page. On a failure the connection is restored and the page read back (some NFC
     /// stacks report the tag's 4-bit ACK as an error); then, once, the password is tried when one is known.
     /// <paramref name="pwd"/> is null for tags whose password this app must not guess.</summary>
@@ -161,36 +138,6 @@ public sealed partial class NfcReader
             authed = true;
         }
         return false;
-    }
-
-    /// <summary>Which pages the tag's one-time lock bits mark as permanently read-only, by page number up to
-    /// the end of user memory. Static lock bits (page 2, bytes 2-3) cover pages 3-15: byte 2 bit 3 is page 3 and
-    /// bits 4-7 pages 4-7, byte 3 covers pages 8-15. Dynamic lock bits (the page after user memory) cover
-    /// page 16 onwards in blocks: 2 pages per bit on NTAG213 and Ultralight EV1, 16 on NTAG215/216. An
-    /// Amiibo writer typically sets 0F E0 and 01, locking pages 3, 13-15 and 16-31.</summary>
-    private static bool[] LockedPages(byte[] memory, Type2Chip chip)
-    {
-        var locked = new bool[Math.Max(chip.UserEnd, 16)];
-        if (memory.Length >= 12)
-        {
-            byte s0 = memory[10], s1 = memory[11];
-            if ((s0 & 0x08) != 0) locked[3] = true;
-            for (int bit = 4; bit < 8; bit++) if ((s0 & (1 << bit)) != 0) locked[bit] = true;          // pages 4-7
-            for (int bit = 0; bit < 8; bit++) if ((s1 & (1 << bit)) != 0) locked[8 + bit] = true;      // pages 8-15
-        }
-        int dynPage = chip.UserEnd;
-        if (memory.Length >= dynPage * 4 + 2)
-        {
-            int block = chip.Name.Contains("215") || chip.Name.Contains("216") ? 16 : 2;
-            int bits = (memory[dynPage * 4 + 1] << 8) | memory[dynPage * 4];
-            for (int bit = 0; bit < 16; bit++)
-            {
-                if ((bits & (1 << bit)) == 0) continue;
-                for (int page = 16 + bit * block; page < 16 + (bit + 1) * block && page < chip.UserEnd; page++)
-                    locked[page] = true;
-            }
-        }
-        return locked;
     }
 
     /// <summary>Raw page access to a Type 2 tag. Prefers Android's MifareUltralight tech, whose WritePage

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- Unit tests for the app's pure logic. The app itself targets Android only, which a test runner cannot load,
+	     so its platform-neutral source files are compiled in here for plain .NET instead (without the ANDROID
+	     symbol, so Android-only code drops out). MAUI types compile against MAUI's plain .NET build; anything
+	     that needs a phone (files, preferences, the web view) is not exercised. Run: dotnet test -->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<UseMaui>true</UseMaui>
+		<SingleProject>false</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+		<RootNamespace>TagBuddy.Tests</RootNamespace>
+		<!-- The reader's events are only raised on Android. -->
+		<NoWarn>$(NoWarn);CS0067</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Include="..\TagBuddy\Services\**\*.cs" Link="App\Services\%(RecursiveDir)%(Filename)%(Extension)" />
+		<Compile Include="..\TagBuddy\Models\**\*.cs" Link="App\Models\%(RecursiveDir)%(Filename)%(Extension)" />
+		<Compile Include="..\TagBuddy\BuildInfo.cs;..\TagBuddy\Features.cs" Link="App\%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="ZXing.Net.Maui.Controls" Version="0.10.4" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+		<PackageReference Include="xunit" Version="2.9.2" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+
+</Project>

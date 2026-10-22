@@ -5,6 +5,8 @@ using Android.Nfc;
 using Android.Nfc.Tech;
 #endif
 
+using static TagBuddy.Services.Type2Memory;
+
 namespace TagBuddy.Services;
 
 /// <summary>Reads NFC tags (13.56 MHz, the kind a phone reacts to) while a page is in the foreground.</summary>
@@ -45,6 +47,12 @@ public sealed partial class NfcReader
     /// <summary>Success flag and a message, raised after an attempt to write a tag held to the phone.</summary>
     public event Action<bool, string>? TagWritten;
 
+    /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
+    public static bool IsAmiiboDump(byte[] bytes) => Type2Memory.IsAmiiboDump(bytes);
+
+    /// <summary>Formats page memory as "page: hex  ascii" lines, one per 4-byte page.</summary>
+    public static List<string>? FormatDump(byte[] bytes) => Type2Memory.FormatDump(bytes);
+
 #if ANDROID
     private ReaderCallback? _callback;
 
@@ -65,32 +73,7 @@ public sealed partial class NfcReader
     /// a tag as text, but this app shows the bytes as readable text, and it works on tags whose page 3 was
     /// burned for Amiibo use, where NDEF never can.</summary>
     public void ArmRawText(byte[] payload) =>
-        _pendingWrite = tag => WriteRaw(tag, (before, chip) =>
-        {
-            // The text goes into the first stretch of unlocked pages that holds it in one piece, so it
-            // reads back as one run; locked pages keep what they have, every other user page is zeroed.
-            var locked = LockedPages(before, chip);
-            int need = (payload.Length + 3) / 4, bestStart = -1, bestLength = 0;
-            for (int page = 4; page < chip.UserEnd;)
-            {
-                if (locked[page]) { page++; continue; }
-                int start = page;
-                while (page < chip.UserEnd && !locked[page]) page++;
-                int length = page - start;
-                if (length > bestLength) { bestLength = length; bestStart = start; }
-                if (length >= need) { bestStart = start; bestLength = length; break; }
-            }
-            if (bestStart < 0 || bestLength < need)
-                return (null, $"The text needs {payload.Length} bytes in one piece, but the longest unlocked stretch on this " +
-                              $"{chip.Name} is {bestLength * 4} bytes (some pages are permanently locked).");
-
-            var dump = new byte[chip.UserEnd * 4];
-            Array.Copy(before, 0, dump, 0, Math.Min(16, before.Length));   // serial and page 3 stay as they are
-            for (int page = 4; page < chip.UserEnd; page++)
-                if (locked[page] && before.Length >= page * 4 + 4) Array.Copy(before, page * 4, dump, page * 4, 4);
-            Array.Copy(payload, 0, dump, bestStart * 4, payload.Length);
-            return (dump, null);
-        }, "");
+        _pendingWrite = tag => WriteRaw(tag, (before, chip) => PlaceRawText(payload, before, chip), "");
 
     /// <summary>Arms erasing the next tag: user pages are zeroed, an empty NDEF message is left, and any
     /// password protection this app can open is removed.</summary>
@@ -180,9 +163,6 @@ public sealed partial class NfcReader
         return text.All(c => !char.IsControl(c) || char.IsWhiteSpace(c)) ? text : ToHex(payload);
     }
 
-    private static string ToHex(byte[]? bytes) =>
-        bytes is null ? "" : string.Join(":", bytes.Select(b => b.ToString("X2")));
-
     private sealed class ReaderCallback(NfcReader owner) : Java.Lang.Object, NfcAdapter.IReaderCallback
     {
         public void OnTagDiscovered(Tag? tag)
@@ -201,6 +181,6 @@ public sealed partial class NfcReader
     public void ArmRawText(byte[] payload) { }
     public void ArmErase() { }
     public void Disarm() { }
-    public static bool IsAmiiboDump(byte[] bytes) => false;
+    public static string? ContentFromMemory(byte[] memory) => null;
 #endif
 }

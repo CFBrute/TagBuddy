@@ -5,6 +5,8 @@ using Android.Nfc;
 using Android.Nfc.Tech;
 #endif
 
+using static TagBuddy.Services.Type2Memory;
+
 namespace TagBuddy.Services;
 
 /// <summary>Reading: what a tag is (radio, chip, card family), its NDEF content, and its Type 2 memory.
@@ -156,19 +158,6 @@ public sealed partial class NfcReader
         return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName);
     }
 
-    /// <summary>Formats page memory as "page: hex  ascii" lines, one per 4-byte page.</summary>
-    public static List<string>? FormatDump(byte[] bytes)
-    {
-        if (bytes.Length < 4) return null;
-        var lines = new List<string>();
-        for (int page = 0; page * 4 + 4 <= bytes.Length; page++)
-        {
-            var row = bytes[(page * 4)..(page * 4 + 4)];
-            lines.Add($"{page:D3}: {ToHex(row)}  {Ascii(row)}");
-        }
-        return lines;
-    }
-
     /// <summary>Adds what the page layout reveals: Amiibo content, lock bits, password protection.</summary>
     private static void DescribeType2Layout(byte[] bytes, Type2Chip? chip, List<(string, string)> details)
     {
@@ -196,18 +185,6 @@ public sealed partial class NfcReader
                     (Features.Amiibo ? " Amiibo-style tags use a key derived from the serial, which this app knows." : "")));
         }
     }
-
-    /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
-    public static bool IsAmiiboDump(byte[] bytes) =>
-        bytes.Length >= 520 && LooksAmiibo(bytes);
-
-    /// <summary>The Nintendo capability container in page 3; enough to decide that the Amiibo key may be tried,
-    /// even when the rest of the tag could not be read.</summary>
-    private static bool LooksAmiibo(byte[] bytes) =>
-        bytes.Length >= 16 && bytes[12] == 0xF1 && bytes[13] == 0x10 && bytes[14] == 0xFF && bytes[15] == 0xEE;
-
-    private static string Ascii(byte[] bytes) =>
-        new(bytes.Select(b => b >= 0x20 && b < 0x7F ? (char)b : '.').ToArray());
 
     // ------------------------------------------------------------------------------------------------
     // ISO-DEP: identify card family from its public application directory, then try NDEF Type 4.
@@ -375,40 +352,6 @@ public sealed partial class NfcReader
         var buffer = new List<byte>(memory[16..end]);
         TryExtractNdefTlv(buffer, out var result, out _);
         return result;
-    }
-
-    /// <summary>Walks the TLV blocks of a Type 2 data area and returns the NDEF message (type 0x03).</summary>
-    private static bool TryExtractNdefTlv(List<byte> data, out byte[]? ndef, out bool complete)
-    {
-        ndef = null;
-        complete = false;
-        int i = 0;
-        while (i < data.Count)
-        {
-            byte t = data[i];
-            if (t == 0x00) { i++; continue; }          // NULL TLV
-            if (t == 0xFE) return false;               // terminator before any NDEF
-            if (i + 1 >= data.Count) return false;
-
-            int len = data[i + 1];
-            int header = 2;
-            if (len == 0xFF)
-            {
-                if (i + 3 >= data.Count) return false;
-                len = (data[i + 2] << 8) | data[i + 3];
-                header = 4;
-            }
-
-            if (t == 0x03)
-            {
-                int available = Math.Min(len, data.Count - i - header);
-                ndef = data.GetRange(i + header, Math.Max(0, available)).ToArray();
-                complete = available >= len;
-                return true;
-            }
-            i += header + len;                         // skip lock/memory control and proprietary TLVs
-        }
-        return false;
     }
 
     // ------------------------------------------------------------------------------------------------
