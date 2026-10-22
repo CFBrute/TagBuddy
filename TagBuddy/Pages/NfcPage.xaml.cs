@@ -5,23 +5,34 @@ using TagBuddy.Services;
 
 namespace TagBuddy.Pages;
 
-/// <summary>The NFC tab: read a tag (details, content, memory dump), or write text, links, contacts, raw bytes
-/// or a dump to one, or erase it.</summary>
+/// <summary>The NFC tab: read a tag (details, content, memory dump, private text with its passphrase), or write
+/// text, links, contacts, private text, raw bytes or a dump to one, or erase it.</summary>
 [QueryProperty(nameof(IncomingDumpId), AppNavigation.Dump)]
 [QueryProperty(nameof(IncomingText), AppNavigation.Text)]
 public partial class NfcPage : ContentPage
 {
     /// <summary>The write types, in the order of the picker in NfcPage.xaml.</summary>
-    private enum WriteMode { Auto, Link, Text, Contact, Raw, Dump, Erase }
+    private enum WriteMode { Auto, Link, Text, Contact, Private, Raw, Dump, Erase }
 
     private const string NdefHint = "Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written.";
     private static readonly string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back" +
         (Features.Amiibo ? ", and it works on Amiibo-formatted tags where text never can." : ".");
+    private static readonly string PrivateHint = "Encrypts the text with your passphrase on this phone (AES-256) and writes it as a private record. " +
+        "Only Tag Buddy can read it, and only with the passphrase. The passphrase is not stored anywhere: if it is forgotten, the text cannot be recovered. " +
+        $"Room for about {144 - 90} characters on an NTAG213, {504 - 90} on an NTAG215 and {888 - 90} on an NTAG216.";
 
     /// <summary>Readable text found in a tag's raw memory when it carries no NDEF content.</summary>
     private string? _rawText;
 
-    private string? CurrentContent => _last?.Content ?? _rawText;
+    /// <summary>Private text from the tag, once opened with its passphrase. Only kept while the result is shown.</summary>
+    private string? _unlocked;
+
+    private string? CurrentContent => _unlocked ?? _last?.Content ?? _rawText;
+
+    /// <summary>Encrypting private text takes a moment on purpose; a newer request (more typing, another mode, the
+    /// page going away) makes an older one drop its result.</summary>
+    private int _sealGeneration;
+    private bool _active;
 
     /// <summary>Handed over from Saved: a dump to write (by id) or a text to write.</summary>
     public string? IncomingDumpId { get; set; }
@@ -107,12 +118,15 @@ public partial class NfcPage : ContentPage
         _nfc.TagRead += OnTagRead;
         _nfc.TagWritten += OnTagWritten;
         _nfc.Start();
+        _active = true;
         if (_writeMode) ArmWrite();
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        _active = false;
+        _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
         _nfc.TagWritten -= OnTagWritten;
         _nfc.Disarm();
@@ -148,28 +162,21 @@ public partial class NfcPage : ContentPage
         ResultPanel.IsVisible = true;
 
         TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
-        var card = tag.Details.FirstOrDefault(d => d.Label == "Card").Value;
-        var data = tag.Details.FirstOrDefault(d => d.Label == "Data").Value;
 
         // No NDEF content: bytes written raw by this app (or anything else wordy) still count as content.
         _rawText = null;
-        if (!tag.HasContent && tag.HasRawMemory)
+        if (!tag.HasContent && tag.SealedRecord is null && tag.HasRawMemory)
         {
             var raw = DumpText.Describe(tag.RawMemory!);
             if (raw.Length > 0) _rawText = raw;
         }
-        bool hasContent = tag.HasContent || _rawText is not null;
-        var content = CurrentContent;
 
-        ContentLabel.Text = content ?? card ?? data ?? "No readable content on this tag";
-        ContentLabel.TextColor = hasContent ? Palette.Accent : Colors.Gray;
-
-        ContentActions.IsVisible = hasContent;
-        Preview.Value = content;
-        ViewPageButton.IsVisible = Links.IsWebLink(content, out _);
-        Uri? uri = null;
-        OpenLinkButton.IsVisible = hasContent && Links.TryGetOpenable(content, out uri);
-        if (OpenLinkButton.IsVisible && uri is not null) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+        _unlocked = null;
+        UnlockEntry.Text = string.Empty;
+        UnlockStatus.Text = "This tag holds private text. Enter its passphrase to read it.";
+        UnlockStatus.TextColor = Colors.Gray;
+        UnlockPanel.IsVisible = tag.SealedRecord is not null;
+        ShowContent();
 
         Details.Children.Clear();
         AddDetail("Serial number", tag.Id);
@@ -195,9 +202,81 @@ public partial class NfcPage : ContentPage
             AddDetail("Content", "Raw bytes, no NDEF wrapper (only this app reads them as text)");
             AddDetail("Length", $"{_rawText.Length} characters");
         }
+        if (tag.SealedRecord?.Sealed is { } sealedBytes)
+            AddDetail("Private text", $"{sealedBytes.Length - SealedText.Overhead} bytes, encrypted with a passphrase (AES-256-GCM)");
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
         MemoryLabel.Text = tag.HasMemoryDump ? string.Join("\n", tag.MemoryDump!) : string.Empty;
+    }
+
+    /// <summary>The tag's content, or what it is when there is none to show: the private text once unlocked.</summary>
+    private void ShowContent()
+    {
+        if (_last is not { } tag) return;
+        var card = tag.Details.FirstOrDefault(d => d.Label == "Card").Value;
+        var data = tag.Details.FirstOrDefault(d => d.Label == "Data").Value;
+        var content = CurrentContent;
+        bool hasContent = !string.IsNullOrWhiteSpace(content);
+
+        ContentLabel.Text = hasContent ? content
+            : tag.SealedRecord is not null ? "Private text"
+            : card ?? data ?? "No readable content on this tag";
+        ContentLabel.TextColor = hasContent ? Palette.Accent : Colors.Gray;
+
+        ContentActions.IsVisible = hasContent;
+        Preview.Value = content;
+        ViewPageButton.IsVisible = Links.IsWebLink(content, out _);
+        Uri? uri = null;
+        OpenLinkButton.IsVisible = hasContent && Links.TryGetOpenable(content, out uri);
+        if (OpenLinkButton.IsVisible && uri is not null) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+    }
+
+    /// <summary>Opens the tag's private text with the passphrase typed, off the main thread (the key derivation
+    /// is deliberately slow). A wrong passphrase simply does not open it.</summary>
+    private async void OnUnlock(object? sender, EventArgs e)
+    {
+        if (_last is not { SealedRecord.Sealed: { } sealedBytes } tag) return;
+        var passphrase = UnlockEntry.Text ?? string.Empty;
+        if (passphrase.Length == 0)
+        {
+            UnlockStatus.Text = "Enter the passphrase first.";
+            return;
+        }
+
+        UnlockStatus.Text = "Unlocking...";
+        UnlockStatus.TextColor = Colors.Gray;
+        bool ok;
+        string text;
+        try
+        {
+            (ok, text) = await Task.Run(() =>
+            {
+                bool opened = SealedText.TryOpen(sealedBytes, passphrase, out var plain);
+                return (opened, plain);
+            });
+        }
+        catch (Exception ex)
+        {
+            UnlockStatus.Text = "This phone could not decrypt the text: " + ex.Message;
+            UnlockStatus.TextColor = Palette.Error;
+            return;
+        }
+        if (!ReferenceEquals(tag, _last)) return;   // another tag was read meanwhile
+
+        if (!ok)
+        {
+            Feedback.Failure();
+            UnlockStatus.Text = "That passphrase does not open this tag (or the tag was changed).";
+            UnlockStatus.TextColor = Palette.Error;
+            return;
+        }
+
+        Feedback.Success();
+        _unlocked = text;
+        UnlockEntry.Text = string.Empty;
+        UnlockEntry.Unfocus();
+        UnlockPanel.IsVisible = false;
+        ShowContent();
     }
 
     private async void OnCopyMemory(object? sender, EventArgs e)
@@ -245,7 +324,12 @@ public partial class NfcPage : ContentPage
     /// barcode, or be written to another tag.</summary>
     private async void OnSave(object? sender, EventArgs e)
     {
-        if (CurrentContent is { } content) await CodeActions.SaveTextAsync(this, _saved, content);
+        if (CurrentContent is not { } content) return;
+        if (_unlocked is not null)
+            await CodeActions.SaveTextAsync(this, _saved, content,
+                "Saved notes are not encrypted: this keeps the text readable on this phone. Give it a name (optional):");
+        else
+            await CodeActions.SaveTextAsync(this, _saved, content);
     }
 
     private async void OnCopy(object? sender, EventArgs e)
@@ -286,10 +370,16 @@ public partial class NfcPage : ContentPage
         }
 
         TextPanel.IsVisible = WriteType is not (WriteMode.Dump or WriteMode.Erase);
+        PrivatePanel.IsVisible = WriteType == WriteMode.Private;
         DumpPanel.IsVisible = WriteType == WriteMode.Dump;
         ErasePanel.IsVisible = WriteType == WriteMode.Erase;
         WriteHint.IsVisible = TextPanel.IsVisible;
-        WriteHint.Text = WriteType == WriteMode.Raw ? RawHint : NdefHint;
+        WriteHint.Text = WriteType switch
+        {
+            WriteMode.Raw => RawHint,
+            WriteMode.Private => PrivateHint,
+            _ => NdefHint,
+        };
         ArmWrite();
     }
 
@@ -302,6 +392,7 @@ public partial class NfcPage : ContentPage
     /// <summary>Arms the reader for the chosen write type and, unless told otherwise, shows what it is waiting for.</summary>
     private void ArmWrite(bool updateStatus = true)
     {
+        _sealGeneration++;   // an encryption still running for older input must not arm the writer
         switch (WriteType)
         {
             case WriteMode.Erase:
@@ -329,6 +420,12 @@ public partial class NfcPage : ContentPage
             return;
         }
 
+        if (WriteType == WriteMode.Private)
+        {
+            ArmPrivate(text, updateStatus);
+            return;
+        }
+
         if (WriteType == WriteMode.Raw)
         {
             var payload = Encoding.UTF8.GetBytes(text);
@@ -351,15 +448,59 @@ public partial class NfcPage : ContentPage
 
         void ShowStatus(string text, bool? ok)
         {
-            if (!updateStatus) return;
-            WriteStatus.Text = text;
-            WriteStatus.TextColor = ok switch
-            {
-                true => Palette.Accent,
-                false => Palette.Error,
-                null => Colors.Gray,
-            };
+            if (updateStatus) SetWriteStatus(text, ok);
         }
+    }
+
+    private void SetWriteStatus(string text, bool? ok)
+    {
+        WriteStatus.Text = text;
+        WriteStatus.TextColor = ok switch
+        {
+            true => Palette.Accent,
+            false => Palette.Error,
+            null => Colors.Gray,
+        };
+    }
+
+    /// <summary>Encrypts the text with the passphrase once typing pauses, in the background, then arms the writer
+    /// with the private record. Nothing is armed until the two passphrases match and are long enough.</summary>
+    private async void ArmPrivate(string text, bool updateStatus)
+    {
+        _nfc.Disarm();
+        var passphrase = PassphraseEntry.Text ?? string.Empty;
+        if (passphrase.Length < SealedText.MinPassphraseLength)
+        {
+            if (updateStatus) SetWriteStatus($"Choose a passphrase of at least {SealedText.MinPassphraseLength} characters", null);
+            return;
+        }
+        if (passphrase != (RepeatEntry.Text ?? string.Empty))
+        {
+            if (updateStatus) SetWriteStatus("Type the same passphrase twice", null);
+            return;
+        }
+
+        int generation = _sealGeneration;
+        if (updateStatus) SetWriteStatus("Encrypting...", null);
+        await Task.Delay(400);
+        if (generation != _sealGeneration) return;
+
+        byte[] sealedBytes;
+        try
+        {
+            sealedBytes = await Task.Run(() => SealedText.Seal(text, passphrase));
+        }
+        catch (Exception ex)
+        {
+            if (generation == _sealGeneration) SetWriteStatus("Could not encrypt the text: " + ex.Message, false);
+            return;
+        }
+        if (generation != _sealGeneration || !_active || !_writeMode) return;
+
+        _nfc.ArmWrite(NfcReader.BuildSealed(sealedBytes));
+        if (updateStatus)
+            SetWriteStatus($"Ready. Hold a writable tag against the back of the phone to write the encrypted text ({sealedBytes.Length} bytes). " +
+                           "Keep the passphrase: without it the text cannot be read back.", true);
     }
 
     private NdefMessage BuildMessage(string text)
