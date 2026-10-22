@@ -177,7 +177,7 @@ public partial class NfcPage : ContentPage
         if (_last?.MemoryDump is { Count: > 0 } dump)
         {
             await Clipboard.Default.SetTextAsync(string.Join("\n", dump));
-            await DisplayAlertAsync("Copied", $"{dump.Count} pages copied to the clipboard.", "OK");
+            Notice.Show($"{dump.Count} pages copied");
         }
     }
 
@@ -196,7 +196,7 @@ public partial class NfcPage : ContentPage
             if (name is null) return;
 
             var dump = await _saved.AddDumpAsync(name, tag.Id, DumpChipName, tag.RawMemory);
-            await DisplayAlertAsync("Dump saved", $"\"{dump.DisplayName}\" is kept in the app. Choose it under Write a tag, Binary dump, to write it back.", "OK");
+            Notice.Show($"Dump saved: {dump.DisplayName}");
         }
         catch (Exception ex)
         {
@@ -250,7 +250,7 @@ public partial class NfcPage : ContentPage
         if (name is null) return;
 
         await _saved.AddTextAsync(name, content);
-        await DisplayAlertAsync("Saved", "The tag's content is kept as text in Saved.", "OK");
+        Notice.Show("Saved as text");
     }
 
     private async void OnCopy(object? sender, EventArgs e)

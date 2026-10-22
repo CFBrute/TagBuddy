@@ -283,6 +283,6 @@ public partial class QrPage : ContentPage
 
         item.Name = name.Trim();
         await _saved.AddAsync(item);
-        await DisplayAlertAsync("Saved", null, "OK");
+        Notice.Show("Saved");
     }
 }

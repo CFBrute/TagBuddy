@@ -473,7 +473,7 @@ public partial class ScanPage : ContentPage
                 accept: "Save", cancel: "Cancel", placeholder: _last.Value, maxLength: 60);
             if (textName is null) return;
             await _saved.AddTextAsync(textName, _last.Value);
-            await DisplayAlertAsync("Saved", "Kept as text in Saved.", "OK");
+            Notice.Show("Saved as text");
             return;
         }
         if (_saved.ContainsCode(_last.Value, format.Key))
@@ -491,7 +491,7 @@ public partial class ScanPage : ContentPage
             item.QrErrorCorrection = level;
 
         await _saved.AddAsync(item);
-        await DisplayAlertAsync("Saved", null, "OK");
+        Notice.Show("Saved");
     }
 
     private async void OnCopy(object? sender, EventArgs e)

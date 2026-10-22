@@ -25,7 +25,7 @@ public static class CodeActions
             if (where is null)
                 await page.DisplayAlertAsync("Not supported", "Saving to the gallery needs Android 10 or newer. Use Share instead.", "OK");
             else
-                await page.DisplayAlertAsync("Image saved", where, "OK");
+                Notice.Show("Image saved to " + where);
         }
         catch (Exception ex)
         {
@@ -47,6 +47,6 @@ public static class CodeActions
     public static async Task CopyTextAsync(Page page, string value)
     {
         await Clipboard.Default.SetTextAsync(value);
-        await page.DisplayAlertAsync("Copied", value.Length > 120 ? value[..117] + "..." : value, "OK");
+        Notice.Show("Copied");
     }
 }

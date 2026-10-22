@@ -68,6 +68,6 @@ public partial class DumpPage : ContentPage, IQueryAttributable
     {
         if (_data is null) return;
         await Clipboard.Default.SetTextAsync(MemoryLabel.Text);
-        await DisplayAlertAsync("Copied", $"{_data.Length / 4} pages copied to the clipboard.", "OK");
+        Notice.Show($"{_data.Length / 4} pages copied");
     }
 }
