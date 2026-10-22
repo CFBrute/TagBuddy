@@ -35,6 +35,9 @@
                    Text="The only network use is link previews: for a web link you scan, read from a tag or save, the app asks that website for the page's title, picture and icon, saying honestly that it is Tag Buddy. Links that carry a sign-in or one-time code are never opened this way; only the site's icon is fetched. Switch off automatic previews above and nothing is sent until you tap a preview." />
             <Label FontSize="13"
                    Text="The camera is used only while the Scan tab is open. NFC payment cards and passports are identified by type only; their data is never read." />
+            <Button Text="Full privacy policy" Clicked="OnPrivacyPolicy"
+                    BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                    Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
 
             <!-- Feedback -->
             <Label Text="Bugs, feedback and complaints" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />

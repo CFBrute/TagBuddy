@@ -50,6 +50,9 @@ public partial class AboutPage : ContentPage
     private async void OnSendFeedback(object? sender, EventArgs e) =>
         await ComposeAsync("Tag Buddy feedback", $"\n\n--\n{BuildInfo.Label}\n");
 
+    private async void OnPrivacyPolicy(object? sender, EventArgs e) =>
+        await Links.OpenAsync(new Uri(BuildInfo.PrivacyPolicyUrl));
+
     private async void OnCopyAddress(object? sender, EventArgs e) =>
         await CodeActions.CopyTextAsync(this, BuildInfo.SupportEmail);
 
