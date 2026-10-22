@@ -18,6 +18,7 @@ public partial class SavedPage : ContentPage
     private const string ActionWriteNfc = "Write to an NFC tag";
     private const string ActionCopy = "Copy text";
     private const string ActionEditText = "Edit text";
+    private const string ActionTextToDump = "Make a tag dump from this text";
     private const string ActionViewDump = "View memory";
     private const string ActionWriteDump = "Write dump to a tag";
     private const string ActionShareDump = "Share .bin file";
@@ -158,7 +159,7 @@ public partial class SavedPage : ContentPage
         if (item.IsDump) actions.AddRange([ActionViewDump, ActionWriteDump, ActionShareDump]);
         if (item.HasDumpText) actions.Add(ActionCopyDumpText);
         if (!item.IsDump) actions.AddRange([ActionBarcode, ActionQr, ActionWriteNfc, ActionCopy]);
-        if (item.IsText) actions.Add(ActionEditText);
+        if (item.IsText) actions.AddRange([ActionEditText, ActionTextToDump]);
         actions.Add(ActionRename);
 
         var choice = await DisplayActionSheetAsync(item.DisplayName, "Cancel", ActionDelete, actions.ToArray());
@@ -214,6 +215,13 @@ public partial class SavedPage : ContentPage
 
             case ActionEditText:
                 await EditTextAsync(item);
+                break;
+
+            case ActionTextToDump:
+                // Raw UTF-8 bytes from page 4 on, the way "Raw bytes" on the NFC tab writes them; the dump
+                // can then be written to any Type 2 tag, Amiibo-formatted ones included.
+                var dump = await _saved.AddDumpAsync(item.DisplayName, "", "Text", DumpText.FromText(item.Value));
+                Notice.Show($"Dump made: {dump.DumpSize} bytes. Find it under Tags.");
                 break;
 
             case ActionViewDump:

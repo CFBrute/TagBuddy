@@ -32,6 +32,22 @@ public sealed class NfcReader
     public void ArmRawWrite(byte[] dump, string dumpSerial) =>
         _pendingWrite = tag => WriteRaw(tag, dump, dumpSerial);
 
+    /// <summary>Arms writing bytes straight into the next Type 2 tag's user pages, with no NDEF wrapper: the
+    /// rest of the user area is zeroed, the serial and page 3 are left as they are. Phones will not read such
+    /// a tag as text, but this app shows the bytes as readable text, and it works on tags whose page 3 was
+    /// burned for Amiibo use, where NDEF never can.</summary>
+    public void ArmRawText(byte[] payload) =>
+        _pendingWrite = tag => WriteRaw(tag, (before, chip) =>
+        {
+            int capacity = (chip.UserEnd - 4) * 4;
+            if (payload.Length > capacity)
+                return (null, $"The text needs {payload.Length} bytes but this {chip.Name} holds {capacity}.");
+            var dump = new byte[chip.UserEnd * 4];
+            Array.Copy(before, 0, dump, 0, Math.Min(16, before.Length));   // serial and page 3 stay as they are
+            Array.Copy(payload, 0, dump, 16, payload.Length);
+            return (dump, null);
+        }, "");
+
     /// <summary>Arms erasing the next tag: user pages are zeroed, an empty NDEF message is left, and any
     /// password protection this app can open is removed.</summary>
     public void ArmErase() => _pendingWrite = EraseTag;
@@ -790,11 +806,13 @@ public sealed class NfcReader
     /// <summary>Writes a page dump back to a Type 2 tag: page 3 and every user page, never the serial
     /// (pages 0-2) and never the permanent lock bits. An Amiibo dump also gets the Nintendo password set
     /// so a console can write to it; that password is derived from this tag's serial.</summary>
-    private static (bool Ok, string Note) WriteRaw(Tag tag, byte[] dump, string dumpSerial)
-    {
-        if (dump.Length < 16 || dump.Length % 4 != 0)
-            return (false, $"The dump is {dump.Length} bytes; a tag dump is a whole number of 4-byte pages, at least 16 bytes.");
+    private static (bool Ok, string Note) WriteRaw(Tag tag, byte[] dump, string dumpSerial) =>
+        WriteRaw(tag, (_, _) => (dump, null), dumpSerial);
 
+    /// <summary>The dump to write is built once the tag is known (its chip and current memory), so a text
+    /// payload can be sized to the tag and keep its page 3. The builder returns the dump, or an error.</summary>
+    private static (bool Ok, string Note) WriteRaw(Tag tag, Func<byte[], Type2Chip, (byte[]? Dump, string? Error)> build, string dumpSerial)
+    {
         using var link = Type2Link.Open(tag);
         if (link is null) return (false, "Binary dumps can only be written to Type 2 tags (NTAG, Ultralight, Amiibo).");
 
@@ -804,15 +822,20 @@ public sealed class NfcReader
             return (false, $"This chip could not be identified{(chip is null ? "" : " (" + chip.Name + ")")}, so the app cannot tell " +
                            "its user pages from its lock and configuration pages. Dumps are written to NTAG213/215/216 and Ultralight EV1 only.");
 
+        var before = ReadMemory(link, chip);
+        if (before.Length < 16) return (false, "Could not read the tag. Hold it still and try again.");
+
+        var (dump, buildError) = build(before, chip);
+        if (dump is null) return (false, buildError ?? "Nothing to write.");
+        if (dump.Length < 16 || dump.Length % 4 != 0)
+            return (false, $"The dump is {dump.Length} bytes; a tag dump is a whole number of 4-byte pages, at least 16 bytes.");
+
         // Only the user area is written; a dump may carry more (an Amiibo .bin often ends with a signature).
         int dumpPages = dump.Length / 4;
         int endPage = Math.Min(dumpPages, chip.UserEnd);
         bool amiibo = IsAmiiboDump(dump);
         if (amiibo && chip.UserEnd < 130)
             return (false, $"An Amiibo dump needs 130 pages of user memory (NTAG215); this {chip.Name} has {chip.UserEnd - 4}.");
-
-        var before = ReadMemory(link, chip);
-        if (before.Length < 16) return (false, "Could not read the tag. Hold it still and try again.");
 
         var pwd = PasswordFor(link, before, amiibo);
         bool authed = false;
@@ -821,13 +844,17 @@ public sealed class NfcReader
         var notes = new List<string>();
         var oldCc = before[12..16];
         var newCc = dump[12..16];
-        if (oldCc.Zip(newCc).Any(p => (p.First | p.Second) != p.Second))
+        // A dump with an all-zero page 3 (made from text, not read from a tag) means "leave page 3 alone":
+        // it is one-time programmable, so zeros could never be written there anyway.
+        bool keepCc = newCc.All(b => b == 0);
+        if (!keepCc && oldCc.Zip(newCc).Any(p => (p.First | p.Second) != p.Second))
             notes.Add($"Page 3 is one-time programmable and keeps its old bits ({ToHex(oldCc)} cannot become {ToHex(newCc)}).");
 
         int written = 0, skipped = 0;
         for (int page = 3; page < endPage; page++)
         {
             var data = dump[(page * 4)..(page * 4 + 4)];
+            if (page == 3 && keepCc) { skipped++; continue; }
             if (SamePage(before, page, data)) { skipped++; continue; }
             if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
                 return (false, $"Write failed at page {page} ({error}) after {written} pages. " +
@@ -1119,6 +1146,7 @@ public sealed class NfcReader
     public void Stop() { }
     public void OpenSettings() { }
     public void ArmRawWrite(byte[] dump, string dumpSerial) { }
+    public void ArmRawText(byte[] payload) { }
     public void ArmErase() { }
     public void Disarm() { }
     public static bool IsAmiiboDump(byte[] bytes) => false;

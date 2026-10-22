@@ -288,11 +288,12 @@ public static class DumpText
         var ndef = NfcReader.ContentFromMemory(data);
         if (!string.IsNullOrWhiteSpace(ndef)) return ndef.Trim();
 
-        // Encrypted content has no words in it; random bytes would only produce noise that looks like text.
-        if (NfcReader.IsAmiiboDump(data)) return string.Empty;
+        // Encrypted Amiibo content has no words in it, but a tag with the Amiibo page 3 may since have been
+        // loaded with plain text, so look anyway and just demand longer runs there than random bytes produce.
+        int minRun = NfcReader.IsAmiiboDump(data) ? 8 : 4;
 
-        // Printable runs of at least four characters, skipping the serial/lock pages at the start, kept only
-        // when they look like words: mostly letters and digits, with a few letters at least.
+        // Printable runs, skipping the serial/lock pages at the start, kept only when they look like words:
+        // mostly letters and digits, with a few letters at least. Line breaks in the text separate runs.
         var runs = new List<string>();
         var current = new StringBuilder();
         int start = Math.Min(16, data.Length);
@@ -301,16 +302,27 @@ public static class DumpText
             bool printable = i < data.Length && data[i] >= 0x20 && data[i] < 0x7F;
             if (printable) { current.Append((char)data[i]); continue; }
             var run = current.ToString().Trim();
-            if (LooksLikeWords(run)) runs.Add(run);
+            if (LooksLikeWords(run, minRun)) runs.Add(run);
             current.Clear();
         }
         var text = string.Join("  ·  ", runs);
         return text.Length > 160 ? text[..157] + "…" : text;
     }
 
-    private static bool LooksLikeWords(string run)
+    /// <summary>A tag image holding <paramref name="text"/> as plain UTF-8 bytes from page 4 on, with pages
+    /// 0-3 left zero, which the writer reads as "keep the tag's own serial and page 3". Padded to whole pages.</summary>
+    public static byte[] FromText(string text)
     {
-        if (run.Length < 4) return false;
+        var payload = Encoding.UTF8.GetBytes(text);
+        int pages = (payload.Length + 3) / 4;
+        var dump = new byte[16 + pages * 4];
+        Array.Copy(payload, 0, dump, 16, payload.Length);
+        return dump;
+    }
+
+    private static bool LooksLikeWords(string run, int minLength)
+    {
+        if (run.Length < minLength) return false;
         int letters = run.Count(char.IsLetter);
         int wordy = run.Count(c => char.IsLetterOrDigit(c) || c is ' ' or '.' or '-' or '_' or '/' or ':' or '@');
         return letters >= 3 && wordy * 10 >= run.Length * 9;

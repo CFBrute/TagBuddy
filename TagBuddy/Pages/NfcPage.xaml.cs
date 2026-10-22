@@ -9,8 +9,17 @@ namespace TagBuddy.Pages;
 [QueryProperty(nameof(IncomingText), "text")]
 public partial class NfcPage : ContentPage
 {
-    private const int ModeDump = 4;
-    private const int ModeErase = 5;
+    private const int ModeRaw = 4;
+    private const int ModeDump = 5;
+    private const int ModeErase = 6;
+
+    private const string NdefHint = "Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written.";
+    private const string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back, and it works on Amiibo-formatted tags where text never can.";
+
+    /// <summary>Readable text found in a tag's raw memory when it carries no NDEF content.</summary>
+    private string? _rawText;
+
+    private string? CurrentContent => _last?.Content ?? _rawText;
 
     /// <summary>Handed over from Saved: a dump to write (by id) or a text to write.</summary>
     public string? IncomingDumpId { get; set; }
@@ -136,17 +145,26 @@ public partial class NfcPage : ContentPage
         TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
         var card = tag.Details.FirstOrDefault(d => d.Label == "Card").Value;
         var data = tag.Details.FirstOrDefault(d => d.Label == "Data").Value;
-        ContentLabel.Text = tag.Content ?? card ?? data ?? "No readable content on this tag";
-        ContentLabel.TextColor = tag.HasContent ? (Color)Application.Current!.Resources["Primary"] : Colors.Gray;
 
-        ContentActions.IsVisible = tag.HasContent;
-        Preview.Value = tag.HasContent ? tag.Content : null;
-        ViewPageButton.IsVisible = Links.IsWebLink(tag.Content, out _);
-        if (tag.HasContent)
+        // No NDEF content: bytes written raw by this app (or anything else wordy) still count as content.
+        _rawText = null;
+        if (!tag.HasContent && tag.HasRawMemory)
         {
-            OpenLinkButton.IsVisible = Links.TryGetOpenable(tag.Content, out var uri);
-            if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+            var raw = DumpText.Describe(tag.RawMemory!);
+            if (raw.Length > 0) _rawText = raw;
         }
+        bool hasContent = tag.HasContent || _rawText is not null;
+        var content = CurrentContent;
+
+        ContentLabel.Text = content ?? card ?? data ?? "No readable content on this tag";
+        ContentLabel.TextColor = hasContent ? (Color)Application.Current!.Resources["Primary"] : Colors.Gray;
+
+        ContentActions.IsVisible = hasContent;
+        Preview.Value = content;
+        ViewPageButton.IsVisible = Links.IsWebLink(content, out _);
+        Uri? uri = null;
+        OpenLinkButton.IsVisible = hasContent && Links.TryGetOpenable(content, out uri);
+        if (OpenLinkButton.IsVisible && uri is not null) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
 
         Details.Children.Clear();
         AddDetail("Serial number", tag.Id);
@@ -166,6 +184,11 @@ public partial class NfcPage : ContentPage
             AddDetail("Length", $"{tag.Content!.Length} characters, {Encoding.UTF8.GetByteCount(tag.Content)} bytes");
             foreach (var (label, value) in ScanDetails.DescribeStructuredContent(tag.Content))
                 AddDetail(label, value);
+        }
+        else if (_rawText is not null)
+        {
+            AddDetail("Content", "Raw bytes, no NDEF wrapper (only this app reads them as text)");
+            AddDetail("Length", $"{_rawText.Length} characters");
         }
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
@@ -237,7 +260,7 @@ public partial class NfcPage : ContentPage
     /// barcode, or be written to another tag.</summary>
     private async void OnSave(object? sender, EventArgs e)
     {
-        if (_last?.Content is not { } content) return;
+        if (CurrentContent is not { } content) return;
 
         if (_saved.ContainsText(content))
         {
@@ -255,22 +278,22 @@ public partial class NfcPage : ContentPage
 
     private async void OnCopy(object? sender, EventArgs e)
     {
-        if (_last?.Content is { } content) await CodeActions.CopyTextAsync(this, content);
+        if (CurrentContent is { } content) await CodeActions.CopyTextAsync(this, content);
     }
 
     private async void OnOpenLink(object? sender, EventArgs e)
     {
-        if (_last?.Content is { } content) await CodeActions.OpenLinkAsync(this, content);
+        if (CurrentContent is { } content) await CodeActions.OpenLinkAsync(this, content);
     }
 
     private async void OnViewPage(object? sender, EventArgs e)
     {
-        if (_last?.Content is { } content) await WebPage.ShowAsync(content);
+        if (CurrentContent is { } content) await WebPage.ShowAsync(content);
     }
 
     private async void OnUseInGenerator(object? sender, EventArgs e)
     {
-        if (_last?.Content is not { } content) return;
+        if (CurrentContent is not { } content) return;
         await Shell.Current.GoToAsync("//generate/qr", new Dictionary<string, object> { ["value"] = content });
     }
 
@@ -300,6 +323,7 @@ public partial class NfcPage : ContentPage
         DumpPanel.IsVisible = WriteType == ModeDump;
         ErasePanel.IsVisible = WriteType == ModeErase;
         WriteHint.IsVisible = TextPanel.IsVisible;
+        WriteHint.Text = WriteType == ModeRaw ? RawHint : NdefHint;
         ArmWrite();
     }
 
@@ -336,6 +360,14 @@ public partial class NfcPage : ContentPage
         {
             _nfc.Disarm();
             ShowStatus("Enter content, then hold a writable tag to the back of the phone", ok: null);
+            return;
+        }
+
+        if (WriteType == ModeRaw)
+        {
+            var payload = Encoding.UTF8.GetBytes(text);
+            _nfc.ArmRawText(payload);
+            ShowStatus($"Ready. Hold a Type 2 tag against the back of the phone to write {payload.Length} bytes raw", ok: true);
             return;
         }
 

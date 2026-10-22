@@ -113,6 +113,7 @@
                         <x:String>Link</x:String>
                         <x:String>Plain text</x:String>
                         <x:String>Contact (vCard)</x:String>
+                        <x:String>Raw bytes (no NDEF)</x:String>
                         <x:String>Binary dump (Amiibo, backup)</x:String>
                         <x:String>Erase tag (reset)</x:String>
                     </Picker.Items>
