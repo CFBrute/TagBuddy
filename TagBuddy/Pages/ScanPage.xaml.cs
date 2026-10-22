@@ -315,6 +315,11 @@ public partial class ScanPage : ContentPage
 
     private async void OnPickImage(object? sender, EventArgs e)
     {
+        // The camera goes off while the picker is open; coming back without a picture turns it on again, but only
+        // if it was scanning before (not when a result was on show).
+        bool wasScanning = _camera is not null;
+        StopCamera();
+
         byte[] bytes;
         try
         {
@@ -324,7 +329,11 @@ public partial class ScanPage : ContentPage
                 SelectionLimit = 1,
             });
             var file = files?.FirstOrDefault();
-            if (file is null) return;
+            if (file is null)
+            {
+                if (wasScanning) StartCamera();
+                return;
+            }
 
             await using var stream = await file.OpenReadAsync();
             using var buffer = new MemoryStream();
@@ -334,12 +343,12 @@ public partial class ScanPage : ContentPage
         catch (Exception ex)
         {
             await DisplayAlertAsync("Could not open the picture", ex.Message, "OK");
+            if (wasScanning) StartCamera();
             return;
         }
 
-        // Show the picture itself while it is analysed; the camera is released meanwhile.
+        // Show the picture itself while it is analysed.
         _last = null;
-        StopCamera();
         PickedImage.Source = ImageSource.FromStream(() => new MemoryStream(bytes));
         ShowCameraLayout(cameraOn: false, picture: true, pictureLarge: true);
         ResultLabel.Text = string.Empty;
