@@ -26,10 +26,6 @@ public partial class SavedPage : ContentPage
     private const string ActionRename = "Rename";
     private const string ActionDelete = "Delete";
 
-    private static readonly Color Active = Color.FromArgb("#F5A623");
-    private static readonly Color ActiveText = Color.FromArgb("#1C1200");
-    private static readonly Color Inactive = Color.FromArgb("#6B7280");
-
     private readonly SavedService _saved;
     private readonly ObservableCollection<SavedItem> _shown = [];
     private SavedKind? _filter;
@@ -63,10 +59,10 @@ public partial class SavedPage : ContentPage
 
     private void ApplyFilter()
     {
-        Highlight(FilterAll, _filter is null);
-        Highlight(FilterCodes, _filter == SavedKind.Code);
-        Highlight(FilterTexts, _filter == SavedKind.Text);
-        Highlight(FilterDumps, _filter == SavedKind.Dump);
+        Palette.Select(FilterAll, _filter is null);
+        Palette.Select(FilterCodes, _filter == SavedKind.Code);
+        Palette.Select(FilterTexts, _filter == SavedKind.Text);
+        Palette.Select(FilterDumps, _filter == SavedKind.Dump);
         EmptyTitle.Text = _filter switch
         {
             SavedKind.Code => "No saved codes",
@@ -82,12 +78,6 @@ public partial class SavedPage : ContentPage
             _ => "Codes you generate or scan, text, and tag dumps you save end up here.",
         };
         Refill();
-    }
-
-    private static void Highlight(Button button, bool on)
-    {
-        button.BackgroundColor = on ? Active : Inactive;
-        button.TextColor = on ? ActiveText : Colors.White;
     }
 
     private void Refill()
@@ -189,24 +179,16 @@ public partial class SavedPage : ContentPage
                 break;
 
             case ActionBarcode:
-                await Shell.Current.GoToAsync("//generate/barcode", new Dictionary<string, object>
-                {
-                    ["value"] = item.Value,
-                    ["format"] = item.IsCode && !item.IsQr ? item.Format : "Code128",
-                });
+                await AppNavigation.ToBarcodeGeneratorAsync(item.Value,
+                    item.IsCode && !item.IsQr ? item.Format : BarcodeTypes.Linear[0].Key);
                 break;
 
             case ActionQr:
-                await Shell.Current.GoToAsync("//generate/qr", new Dictionary<string, object>
-                {
-                    ["value"] = item.Value,
-                    ["ecc"] = item.QrErrorCorrection,
-                    ["margin"] = item.QrMargin.ToString(),
-                });
+                await AppNavigation.ToQrGeneratorAsync(item.Value, item.QrErrorCorrection, item.QrMargin);
                 break;
 
             case ActionWriteNfc:
-                await Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { ["text"] = item.Value });
+                await AppNavigation.ToNfcWriteTextAsync(item.Value);
                 break;
 
             case ActionCopy:
@@ -229,7 +211,7 @@ public partial class SavedPage : ContentPage
                 break;
 
             case ActionWriteDump:
-                await Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { ["dump"] = item.Id.ToString() });
+                await AppNavigation.ToNfcWriteDumpAsync(item);
                 break;
 
             case ActionShareDump:
@@ -269,20 +251,14 @@ public partial class SavedPage : ContentPage
 
     private async Task ShareDumpAsync(SavedItem item)
     {
-        try
-        {
-            var data = await _saved.ReadDumpAsync(item);
-            var path = await SavedService.ExportTempAsync(item.DumpFile, data);
-            await Share.Default.RequestAsync(new ShareFileRequest
-            {
-                Title = item.DisplayName,
-                File = new ShareFile(path, "application/octet-stream"),
-            });
-        }
+        byte[] data;
+        try { data = await _saved.ReadDumpAsync(item); }
         catch (Exception ex)
         {
             await DisplayAlertAsync("Could not share", ex.Message, "OK");
+            return;
         }
+        await CodeActions.ShareDumpAsync(this, item.DumpFile, data, item.DisplayName);
     }
 
     private async void OnDeleteInvoked(object? sender, EventArgs e)

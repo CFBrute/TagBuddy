@@ -5,13 +5,14 @@ using TagBuddy.Services;
 
 namespace TagBuddy.Pages;
 
-[QueryProperty(nameof(IncomingDumpId), "dump")]
-[QueryProperty(nameof(IncomingText), "text")]
+/// <summary>The NFC tab: read a tag (details, content, memory dump), or write text, links, contacts, raw bytes
+/// or a dump to one, or erase it.</summary>
+[QueryProperty(nameof(IncomingDumpId), AppNavigation.Dump)]
+[QueryProperty(nameof(IncomingText), AppNavigation.Text)]
 public partial class NfcPage : ContentPage
 {
-    private const int ModeRaw = 4;
-    private const int ModeDump = 5;
-    private const int ModeErase = 6;
+    /// <summary>The write types, in the order of the picker in NfcPage.xaml.</summary>
+    private enum WriteMode { Auto, Link, Text, Contact, Raw, Dump, Erase }
 
     private const string NdefHint = "Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written.";
     private const string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back, and it works on Amiibo-formatted tags where text never can.";
@@ -54,7 +55,7 @@ public partial class NfcPage : ContentPage
             {
                 IncomingText = null;
                 SetMode(write: true);
-                WriteTypePicker.SelectedIndex = 0;
+                WriteTypePicker.SelectedIndex = (int)WriteMode.Auto;
                 WriteEditor.Text = text;
                 ArmWrite();
             }
@@ -66,7 +67,7 @@ public partial class NfcPage : ContentPage
                 if (dump is null) return;
                 var data = await _saved.ReadDumpAsync(dump);
                 SetMode(write: true);
-                WriteTypePicker.SelectedIndex = ModeDump;
+                WriteTypePicker.SelectedIndex = (int)WriteMode.Dump;
                 UseDump(data, dump.DisplayName, dump.DumpSerial);
             }
         }
@@ -123,12 +124,8 @@ public partial class NfcPage : ContentPage
         ReadSection.IsVisible = !write;
         WriteSection.IsVisible = write;
 
-        var accent = (Color)Application.Current!.Resources["Primary"];
-        var grey = Color.FromArgb("#6B7280");
-        ReadModeButton.BackgroundColor = write ? grey : accent;
-        ReadModeButton.TextColor = write ? Colors.White : (Color)Application.Current!.Resources["PrimaryDarkText"];
-        WriteModeButton.BackgroundColor = write ? accent : grey;
-        WriteModeButton.TextColor = write ? (Color)Application.Current!.Resources["PrimaryDarkText"] : Colors.White;
+        Palette.Select(ReadModeButton, !write);
+        Palette.Select(WriteModeButton, write);
 
         if (write) ArmWrite();
         else _nfc.Disarm();
@@ -157,7 +154,7 @@ public partial class NfcPage : ContentPage
         var content = CurrentContent;
 
         ContentLabel.Text = content ?? card ?? data ?? "No readable content on this tag";
-        ContentLabel.TextColor = hasContent ? (Color)Application.Current!.Resources["Primary"] : Colors.Gray;
+        ContentLabel.TextColor = hasContent ? Palette.Accent : Colors.Gray;
 
         ContentActions.IsVisible = hasContent;
         Preview.Value = content;
@@ -229,51 +226,18 @@ public partial class NfcPage : ContentPage
 
     private async void OnShareDump(object? sender, EventArgs e)
     {
-        if (_last is not { HasRawMemory: true } tag) return;
-        try
-        {
-            var file = $"{DumpChipName}_{tag.SerialForFileName}.bin".Replace(' ', '-');
-            var path = await SavedService.ExportTempAsync(file, tag.RawMemory!);
-            await Share.Default.RequestAsync(new ShareFileRequest
-            {
-                Title = "Share tag dump",
-                File = new ShareFile(path, "application/octet-stream"),
-            });
-        }
-        catch (Exception ex)
-        {
-            await DisplayAlertAsync("Could not share", ex.Message, "OK");
-        }
+        if (_last is { HasRawMemory: true } tag)
+            await CodeActions.ShareDumpAsync(this, $"{DumpChipName}_{tag.SerialForFileName}.bin".Replace(' ', '-'),
+                tag.RawMemory!, "Share tag dump");
     }
 
-    private void AddDetail(string label, string value)
-    {
-        var row = new Grid { ColumnDefinitions = [new ColumnDefinition(120), new ColumnDefinition(GridLength.Star)], ColumnSpacing = 8 };
-        row.Add(new Label { Text = label, FontSize = 13, TextColor = Colors.Gray });
-        var v = new Label { Text = value, FontSize = 13, LineBreakMode = LineBreakMode.WordWrap };
-        Grid.SetColumn(v, 1);
-        row.Add(v);
-        Details.Children.Add(row);
-    }
+    private void AddDetail(string label, string value) => DetailRows.Add(Details, label, value, labelWidth: 120);
 
     /// <summary>Keeps the tag's link or text as a text note in Saved. From there it can become a QR code, a
     /// barcode, or be written to another tag.</summary>
     private async void OnSave(object? sender, EventArgs e)
     {
-        if (CurrentContent is not { } content) return;
-
-        if (_saved.ContainsText(content))
-        {
-            await DisplayAlertAsync("Already saved", "This content is already saved as text.", "OK");
-            return;
-        }
-
-        var name = await DisplayPromptAsync("Save as text", "Give it a name (optional):",
-            accept: "Save", cancel: "Cancel", placeholder: content, maxLength: 60);
-        if (name is null) return;
-
-        await _saved.AddTextAsync(name, content);
-        Notice.Show("Saved as text");
+        if (CurrentContent is { } content) await CodeActions.SaveTextAsync(this, _saved, content);
     }
 
     private async void OnCopy(object? sender, EventArgs e)
@@ -293,13 +257,13 @@ public partial class NfcPage : ContentPage
 
     // ---------------------------------------------------------------- write
 
-    private int WriteType => Math.Max(0, WriteTypePicker.SelectedIndex);
+    private WriteMode WriteType => (WriteMode)Math.Max(0, WriteTypePicker.SelectedIndex);
 
     private void OnWriteTextChanged(object? sender, TextChangedEventArgs e) => ArmWrite();
 
     private async void OnWriteTypeChanged(object? sender, EventArgs e)
     {
-        if (WriteType == ModeErase)
+        if (WriteType == WriteMode.Erase)
         {
             // Erasing is destructive and stays armed for every tag held to the phone, so ask once first.
             _nfc.Disarm();
@@ -308,16 +272,16 @@ public partial class NfcPage : ContentPage
                 "Erase mode", "Cancel");
             if (!ok)
             {
-                WriteTypePicker.SelectedIndex = 0;
+                WriteTypePicker.SelectedIndex = (int)WriteMode.Auto;
                 return;
             }
         }
 
-        TextPanel.IsVisible = WriteType is not (ModeDump or ModeErase);
-        DumpPanel.IsVisible = WriteType == ModeDump;
-        ErasePanel.IsVisible = WriteType == ModeErase;
+        TextPanel.IsVisible = WriteType is not (WriteMode.Dump or WriteMode.Erase);
+        DumpPanel.IsVisible = WriteType == WriteMode.Dump;
+        ErasePanel.IsVisible = WriteType == WriteMode.Erase;
         WriteHint.IsVisible = TextPanel.IsVisible;
-        WriteHint.Text = WriteType == ModeRaw ? RawHint : NdefHint;
+        WriteHint.Text = WriteType == WriteMode.Raw ? RawHint : NdefHint;
         ArmWrite();
     }
 
@@ -332,12 +296,12 @@ public partial class NfcPage : ContentPage
     {
         switch (WriteType)
         {
-            case ModeErase:
+            case WriteMode.Erase:
                 _nfc.ArmErase();
                 ShowStatus("Ready. Hold the tag to erase against the back of the phone", ok: true);
                 return;
 
-            case ModeDump:
+            case WriteMode.Dump:
                 if (_dumpData is null)
                 {
                     _nfc.Disarm();
@@ -357,7 +321,7 @@ public partial class NfcPage : ContentPage
             return;
         }
 
-        if (WriteType == ModeRaw)
+        if (WriteType == WriteMode.Raw)
         {
             var payload = Encoding.UTF8.GetBytes(text);
             _nfc.ArmRawText(payload);
@@ -383,8 +347,8 @@ public partial class NfcPage : ContentPage
             WriteStatus.Text = text;
             WriteStatus.TextColor = ok switch
             {
-                true => (Color)Application.Current!.Resources["Primary"],
-                false => Color.FromArgb("#DC2626"),
+                true => Palette.Accent,
+                false => Palette.Error,
                 null => Colors.Gray,
             };
         }
@@ -392,12 +356,11 @@ public partial class NfcPage : ContentPage
 
     private NdefMessage BuildMessage(string text)
     {
-        // 0 Auto, 1 Link, 2 Text, 3 Contact
         return WriteType switch
         {
-            1 => NfcReader.BuildUri(Links.TryGetOpenable(text, out var u) ? u.ToString() : text),
-            2 => NfcReader.BuildText(text),
-            3 => text.StartsWith("BEGIN:VCARD", StringComparison.OrdinalIgnoreCase)
+            WriteMode.Link => NfcReader.BuildUri(Links.TryGetOpenable(text, out var u) ? u.ToString() : text),
+            WriteMode.Text => NfcReader.BuildText(text),
+            WriteMode.Contact => text.StartsWith("BEGIN:VCARD", StringComparison.OrdinalIgnoreCase)
                     ? NfcReader.BuildVCard(text)
                     : throw new InvalidOperationException("A contact must be a vCard starting with BEGIN:VCARD."),
             _ => Links.TryGetOpenable(text, out var uri)
@@ -412,7 +375,7 @@ public partial class NfcPage : ContentPage
 
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;
-        WriteStatus.TextColor = ok ? (Color)Application.Current!.Resources["Primary"] : Color.FromArgb("#DC2626");
+        WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
 
         if (_writeMode) ArmWrite(updateStatus: false);
     }
@@ -525,16 +488,13 @@ public partial class NfcPage : ContentPage
             await stream.CopyToAsync(buffer);
             var data = buffer.ToArray();
 
-            if (!IsPlausibleDump(data, out var why))
+            if (Type2Dump.Problem(data) is { } problem)
             {
-                await DisplayAlertAsync("Not a tag dump", why, "OK");
+                await DisplayAlertAsync("Not a tag dump", problem, "OK");
                 return;
             }
 
-            var serial = SerialFromDump(data);
-            var name = Path.GetFileNameWithoutExtension(result.FileName);
-            var saved = await _saved.AddDumpAsync(name, serial, NfcReader.IsAmiiboDump(data) ? "Amiibo" : "Type2", data);
-            UseDump(data, saved.DisplayName, serial);
+            await SaveAndUseDumpAsync(Path.GetFileNameWithoutExtension(result.FileName), data);
         }
         catch (Exception ex)
         {
@@ -548,23 +508,20 @@ public partial class NfcPage : ContentPage
         {
             var text = await Clipboard.Default.GetTextAsync();
             var data = SavedService.ParseHex(text);
-            string why = "";
-            if (data is null || !IsPlausibleDump(data, out why))
+            var problem = data is null
+                ? "Copy a dump as hex first: either this app's page listing, or plain hex bytes with or without spaces or colons."
+                : Type2Dump.Problem(data);
+            if (data is null || problem is not null)
             {
-                await DisplayAlertAsync("Nothing usable on the clipboard",
-                    data is null
-                        ? "Copy a dump as hex first: either this app's page listing, or plain hex bytes with or without spaces or colons."
-                        : why, "OK");
+                await DisplayAlertAsync("Nothing usable on the clipboard", problem, "OK");
                 return;
             }
 
-            var serial = SerialFromDump(data);
             var name = await DisplayPromptAsync("Pasted dump", $"{data.Length} bytes ({data.Length / 4} pages). Name it:",
                 accept: "Use", cancel: "Cancel", initialValue: $"Pasted {DateTime.Now:yyyy-MM-dd HH:mm}", maxLength: 60);
             if (name is null) return;
 
-            var saved = await _saved.AddDumpAsync(name, serial, NfcReader.IsAmiiboDump(data) ? "Amiibo" : "Type2", data);
-            UseDump(data, saved.DisplayName, serial);
+            await SaveAndUseDumpAsync(name, data);
         }
         catch (Exception ex)
         {
@@ -572,20 +529,11 @@ public partial class NfcPage : ContentPage
         }
     }
 
-    private static bool IsPlausibleDump(byte[] data, out string why)
+    /// <summary>Keeps an imported or pasted dump in Saved and chooses it for writing.</summary>
+    private async Task SaveAndUseDumpAsync(string name, byte[] data)
     {
-        why = "";
-        if (data.Length < 16) why = $"Only {data.Length} bytes; a tag dump is at least 16 bytes (4 pages).";
-        else if (data.Length % 4 != 0) why = $"{data.Length} bytes is not a whole number of 4-byte pages.";
-        else if (data.Length > 4096) why = $"{data.Length} bytes is far more than any Type 2 tag holds.";
-        return why.Length == 0;
-    }
-
-    /// <summary>The 7-byte serial stored in pages 0-2 of a Type 2 dump (byte 3 and byte 8 are check bytes).</summary>
-    private static string SerialFromDump(byte[] data)
-    {
-        if (data.Length < 9 || data[0] == 0 && data[1] == 0) return "";
-        byte[] uid = [data[0], data[1], data[2], data[4], data[5], data[6], data[7]];
-        return string.Join(":", uid.Select(b => b.ToString("X2")));
+        var serial = Type2Dump.Serial(data);
+        var saved = await _saved.AddDumpAsync(name, serial, Type2Dump.ChipLabel(data), data);
+        UseDump(data, saved.DisplayName, serial);
     }
 }
