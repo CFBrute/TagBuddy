@@ -4,6 +4,8 @@ using Android.Nfc;
 using Android.Nfc.Tech;
 #endif
 
+using static TagBuddy.Services.Type2Memory;
+
 namespace TagBuddy.Services;
 
 /// <summary>Writing: NDEF content, raw page dumps and erasing. Serial numbers are never written and lock bits
@@ -80,23 +82,6 @@ public sealed partial class NfcReader
     // Type 2 writes
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>"13-15, 16-31" from a list of page numbers.</summary>
-    private static string Ranges(List<int> pages)
-    {
-        var parts = new List<string>();
-        int i = 0;
-        while (i < pages.Count)
-        {
-            int start = pages[i], end = start;
-            while (i + 1 < pages.Count && pages[i + 1] == end + 1) { end = pages[++i]; }
-            parts.Add(start == end ? start.ToString() : $"{start}-{end}");
-            i++;
-        }
-        return string.Join(", ", parts);
-    }
-
-    private static string Pluralise(int n, string noun) => n == 1 ? noun[..1].ToUpperInvariant() + noun[1..] : $"{char.ToUpperInvariant(noun[0])}{noun[1..]}s";
-
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
     /// Amiibo-style, otherwise none. Guessing on other tags would count against their failed-attempt limit.</summary>
     private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
@@ -130,13 +115,7 @@ public sealed partial class NfcReader
         using var link = Type2Link.Open(tag);
         if (link is null) return (false, "This tag cannot be written page by page.");
 
-        // TLV: 03, length (1 or 3 bytes), message, FE terminator, padded to whole pages.
-        var tlv = new List<byte> { 0x03 };
-        if (ndef.Length < 0xFF) tlv.Add((byte)ndef.Length);
-        else tlv.AddRange([0xFF, (byte)(ndef.Length >> 8), (byte)(ndef.Length & 0xFF)]);
-        tlv.AddRange(ndef);
-        tlv.Add(0xFE);
-        while (tlv.Count % 4 != 0) tlv.Add(0x00);
+        var data = NdefTlv(ndef);
 
         link.Connect();
         var chip = GetVersion(link);
@@ -172,11 +151,10 @@ public sealed partial class NfcReader
         }
 
         int capacity = Math.Min(cc[2] * 8, (userEnd - 4) * 4);
-        if (tlv.Count > capacity)
-            return (false, $"The content needs {tlv.Count} bytes but this tag holds only {capacity}.");
+        if (data.Length > capacity)
+            return (false, $"The content needs {data.Length} bytes but this tag holds only {capacity}.");
 
         int written = 0;
-        var data = tlv.ToArray();
         for (int i = 0; i < data.Length; i += 4)
         {
             int page = 4 + i / 4;

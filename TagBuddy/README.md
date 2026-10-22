@@ -196,6 +196,23 @@ Release builds are signed with a self-signed keystore that lives outside the rep
 Or by hand, `dotnet publish -c Release -f net10.0-android`; the signed APK then lands in
 `bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
 
+## Tests
+
+`TagBuddy.Tests` holds unit tests for the logic where a mistake does real harm: Type 2 tag memory (lock bits,
+NDEF TLV, where raw text goes, the Amiibo key), dump checks and hex parsing, barcode validation and encoding,
+what counts as a link and which links are single-use, known sites and icon addresses, reading previews from
+HTML, and judging snapshot pictures. Run them from the repository root:
+
+```bash
+dotnet test TagBuddy.Tests
+```
+
+The app targets Android only, which a test runner cannot load, so the test project compiles the app's
+`Services`, `Models`, `BuildInfo.cs` and `Features.cs` for plain .NET instead. Code inside `#if ANDROID` drops
+out there; that is why the byte-level tag rules live in `Services/Type2Memory.cs`, apart from the radio code in
+`NfcReader`. Keep new logic that can be tested out of Android-only code and add tests for it. Screens, the
+camera and real tags are tested by hand (see `../PUBLISHING.md`).
+
 ## Privacy policy
 
 `docs/privacy.html` is the privacy policy Google Play asks for, with a small `docs/index.html` next to it.

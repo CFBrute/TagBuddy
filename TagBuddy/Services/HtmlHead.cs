@@ -30,11 +30,13 @@ internal static class HtmlHead
     {
         // Both attribute orders: <meta property="og:title" content="..."> and <meta content="..." property="og:title">
         var escaped = Regex.Escape(name);
+        // The value stops at its own closing quote: with ".*?" a content-first tag could run on into the tag before.
+        const string content = @"\bcontent\s*=\s*(?:""(?<v>[^""]*)""|'(?<v>[^']*)')";
         var m = Regex.Match(head,
-            $@"<meta\b[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\1[^>]*?\bcontent\s*=\s*([""'])(?<v>.*?)\2", Options);
+            $@"<meta\b[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\1[^>]*?{content}", Options);
         if (!m.Success)
             m = Regex.Match(head,
-                $@"<meta\b[^>]*?\bcontent\s*=\s*([""'])(?<v>.*?)\1[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\2", Options);
+                $@"<meta\b[^>]*?{content}[^>]*?\b{attribute}\s*=\s*([""'])\s*{escaped}\s*\1", Options);
         if (!m.Success) return null;
         var value = WebUtility.HtmlDecode(m.Groups["v"].Value).Trim();
         return value.Length == 0 ? null : value;
@@ -92,5 +94,35 @@ internal static class HtmlHead
         var text = Regex.Replace(html, @"<br\s*/?>", " ", Options);
         text = Regex.Replace(text, @"<[^>]+>", "", Options);
         return Clean(WebUtility.HtmlDecode(text));
+    }
+
+    /// <summary>Picks the preview fields out of the page's head, plus its link tags (for the icon) and the
+    /// oEmbed link it advertises, if any.</summary>
+    internal static (LinkPreview Preview, IReadOnlyList<LinkTag> LinkTags, string? OEmbedHref) ReadPreview(string html, Uri pageUri)
+    {
+        var head = Head(html);
+        var tags = LinkTags(head);
+
+        var title = Property(head, "og:title") ?? Property(head, "twitter:title") ?? TitleTag(head);
+        var description = Property(head, "og:description") ?? Meta(head, "name", "description")
+                          ?? Property(head, "twitter:description");
+        var image = Property(head, "og:image:secure_url") ?? Property(head, "og:image")
+                    ?? Property(head, "og:image:url") ?? Property(head, "twitter:image")
+                    ?? Property(head, "twitter:image:src")
+                    ?? tags.FirstOrDefault(t => HasRel(t, "image_src")).Href;
+        var siteName = Property(head, "og:site_name") ?? Meta(head, "name", "application-name");
+        var oembed = tags.FirstOrDefault(t => HasRel(t, "alternate")
+                                              && string.Equals(t.Type, "application/json+oembed", StringComparison.OrdinalIgnoreCase)).Href;
+
+        if (description is { Length: > 220 }) description = description[..217].TrimEnd() + "...";
+        if (title is { Length: > 120 }) title = title[..117].TrimEnd() + "...";
+
+        string? imageUrl = null;
+        if (!string.IsNullOrWhiteSpace(image) && Uri.TryCreate(pageUri, image.Trim(), out var abs) && abs.Scheme is "http" or "https")
+            imageUrl = abs.AbsoluteUri;
+
+        var preview = new LinkPreview(pageUri.AbsoluteUri, pageUri.Host, Clean(title), Clean(description),
+            imageUrl, DateTime.UtcNow, SiteName: Clean(siteName));
+        return (preview, tags, string.IsNullOrWhiteSpace(oembed) ? null : oembed);
     }
 }

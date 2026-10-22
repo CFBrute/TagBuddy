@@ -70,34 +70,28 @@ public static class LinkPreviews
     private static readonly SemaphoreSlim NetGate = new(4, 4);
 
     private static readonly ConcurrentDictionary<string, Task<LinkPreview?>> Memory = new(StringComparer.Ordinal);
-    internal static readonly string CacheDir = Path.Combine(FileSystem.CacheDirectory, "link-previews-v2");
-
-    private static readonly Regex SingleUseQuery = new(
-        @"[?&#](code|token|otp|ticket|nonce|auth|session|sig|key|access_token|id_token|state|signature|hash|t|magic|confirm)=",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex SingleUsePath = new(
-        @"/(unsubscribe|confirm|verify|activate|reset|magic|invite/accept)(?![a-z])",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    internal static string CacheDir => Path.Combine(FileSystem.CacheDirectory, "link-previews-v2");
 
     static LinkPreviews()
     {
         // Version 1 previews have no icons and may hold blank snapshots; drop them once so everything is
         // fetched afresh. In the background: it may be many small files and the first caller is the UI.
-        var old = Path.Combine(FileSystem.CacheDirectory, "link-previews");
         _ = Task.Run(() =>
         {
-            try { if (Directory.Exists(old)) Directory.Delete(old, true); } catch { /* best effort */ }
+            try
+            {
+                var old = Path.Combine(FileSystem.CacheDirectory, "link-previews");
+                if (Directory.Exists(old)) Directory.Delete(old, true);
+            }
+            catch { /* best effort */ }
         });
     }
 
     /// <summary>True for values that are web links, the only kind a page preview makes sense for.</summary>
     public static bool IsPreviewable(string? value, out Uri uri) => Links.IsWebLink(value, out uri);
 
-    /// <summary>True for a sign-in, one-time or side-effect link (unsubscribe, confirm, password reset). A GET on
-    /// it would use the code up or do the thing, so only the page itself, opened by the person, may request it.</summary>
-    public static bool IsSingleUse(Uri uri) =>
-        SingleUseQuery.IsMatch(uri.Query + uri.Fragment) || SingleUsePath.IsMatch(uri.AbsolutePath);
+    /// <summary>A sign-in, one-time or side-effect link, never requested for a preview (<see cref="Links.IsSingleUse"/>).</summary>
+    public static bool IsSingleUse(Uri uri) => Links.IsSingleUse(uri);
 
     /// <summary>A preview already on the phone, or null; never touches the network. Used while automatic previews
     /// are switched off.</summary>
@@ -523,7 +517,7 @@ public static class LinkPreviews
             }
 
             var html = await ReadTextAsync(response, MaxHtmlBytes, token);
-            var (preview, tags, oembed) = Parse(html, finalUri);
+            var (preview, tags, oembed) = HtmlHead.ReadPreview(html, finalUri);
             return new PageResult(PageKind.Html, finalUri, preview, tags, oembed);
         });
     }
@@ -561,36 +555,6 @@ public static class LinkPreviews
             try { encoding = Encoding.GetEncoding(charset); } catch { /* unknown name: keep UTF-8 */ }
         }
         return encoding.GetString(bytes);
-    }
-
-    /// <summary>Picks the preview fields out of the page's head, plus its link tags (for the icon) and the
-    /// oEmbed link it advertises, if any.</summary>
-    internal static (LinkPreview Preview, IReadOnlyList<LinkTag> LinkTags, string? OEmbedHref) Parse(string html, Uri pageUri)
-    {
-        var head = HtmlHead.Head(html);
-        var tags = HtmlHead.LinkTags(head);
-
-        var title = HtmlHead.Property(head, "og:title") ?? HtmlHead.Property(head, "twitter:title") ?? HtmlHead.TitleTag(head);
-        var description = HtmlHead.Property(head, "og:description") ?? HtmlHead.Meta(head, "name", "description")
-                          ?? HtmlHead.Property(head, "twitter:description");
-        var image = HtmlHead.Property(head, "og:image:secure_url") ?? HtmlHead.Property(head, "og:image")
-                    ?? HtmlHead.Property(head, "og:image:url") ?? HtmlHead.Property(head, "twitter:image")
-                    ?? HtmlHead.Property(head, "twitter:image:src")
-                    ?? tags.FirstOrDefault(t => HtmlHead.HasRel(t, "image_src")).Href;
-        var siteName = HtmlHead.Property(head, "og:site_name") ?? HtmlHead.Meta(head, "name", "application-name");
-        var oembed = tags.FirstOrDefault(t => HtmlHead.HasRel(t, "alternate")
-                                              && string.Equals(t.Type, "application/json+oembed", StringComparison.OrdinalIgnoreCase)).Href;
-
-        if (description is { Length: > 220 }) description = description[..217].TrimEnd() + "...";
-        if (title is { Length: > 120 }) title = title[..117].TrimEnd() + "...";
-
-        string? imageUrl = null;
-        if (!string.IsNullOrWhiteSpace(image) && Uri.TryCreate(pageUri, image.Trim(), out var abs) && abs.Scheme is "http" or "https")
-            imageUrl = abs.AbsoluteUri;
-
-        var preview = new LinkPreview(pageUri.AbsoluteUri, pageUri.Host, HtmlHead.Clean(title), HtmlHead.Clean(description),
-            imageUrl, DateTime.UtcNow, SiteName: HtmlHead.Clean(siteName));
-        return (preview, tags, string.IsNullOrWhiteSpace(oembed) ? null : oembed);
     }
 
     private static string DescribeMediaType(string mediaType) => mediaType.ToLowerInvariant() switch
