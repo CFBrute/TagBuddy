@@ -305,7 +305,7 @@ public partial class ScanPage : ContentPage
         _finder.State = ViewfinderState.Read;
         new Animation(v => { _finder.Pulse = (float)v; Viewfinder.Invalidate(); }, 0, 1)
             .Commit(this, "ViewfinderPulse", length: 250, easing: Easing.CubicOut);
-        try { Vibration.Default.Vibrate(80); } catch { /* not supported on every device */ }
+        Feedback.Success(vibrateMilliseconds: 80);
 
         await Task.Delay(150);
         _resultPending = false;

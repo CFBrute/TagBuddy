@@ -6,7 +6,7 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
 
 - **Generate / Barcode** tab: pick a linear type, type text, and the barcode renders live.
   Types: Code 128, Code 39, Code 93, EAN-13, EAN-8, UPC-A, ITF, Codabar. Input is validated per type.
-  Tap the code to open it full screen at maximum brightness for scanning.
+  Tap the code to open it full screen, brighter than the phone's own level (or at maximum, a setting), for scanning.
 - **Everywhere a code is shown** (both Generate tabs, full screen, Saved menu): icon buttons (long-press for a label): share sends a PNG
   of the code through the Android share sheet, save stores it under Pictures/Tag Buddy in the
   gallery, and an open-link button appears when the value is a web link, mail address, phone number, SMS or
@@ -45,7 +45,7 @@ encoder in `Services/BarcodeRenderer.cs`), which is what makes the QR options po
 
 Web links get a preview card (Scan and NFC results, Saved rows). By default it loads on its own as soon as the
 link is shown, and saving anything with a link prefetches it. With "Load link previews automatically" switched
-off on the About tab (`Services/AppSettings.cs`), nothing goes over the network until the card is tapped
+off on the Settings tab (`Services/AppSettings.cs`), nothing goes over the network until the card is tapped
 ("Tap to load preview"); previews and icons already on the phone still show.
 
 Every request identifies itself honestly as `TagBuddy/<version> (Android; link preview)`; the app never poses
@@ -90,7 +90,7 @@ SVG skipped), `/apple-touch-icon.png` and `/favicon.ico`, the icons the site's h
 itself was not read, as for single-use links), and the parent domain's well-known files (`m.example.com` →
 `example.com`; country suffixes such as `co.uk` are never treated as a site). A site without an icon of its
 own borrows its parent site's stored one (`en.wikipedia.org` from `wikipedia.org`). Without an icon the blue
-link glyph is shown. "Clear stored previews and icons" on the About tab empties the cache.
+link glyph is shown. "Clear stored previews and icons" on the Settings tab empties the cache.
 
 Previews are cached for 7 days; one without a real picture is retried after 6 hours (`RetryAfter`).
 
@@ -135,7 +135,7 @@ things about them decide what the app can do, and they are documented at the top
 - `Pages/ShowBarcodePage` - full-screen display with a brightness slider.
 - `Pages/SavedPage`, `Pages/DumpPage` - the Saved list, and one saved tag dump.
 - `Pages/ScanPage` - camera scanner with details; `Pages/WebPage` - in-app view of a link.
-- `Pages/NfcPage` - NFC tab; `Pages/AboutPage` - About tab with settings and feedback.
+- `Pages/NfcPage` - NFC tab; `Pages/SettingsPage` and `Pages/AboutPage` - the Settings and About top tabs under More (settings; build, privacy and feedback).
 - `Pages/AppNavigation.cs` - hands content from one tab to another (generators, NFC writing).
 - `Pages/Palette.cs`, `Pages/DetailRows.cs`, `Pages/IconButtons.cs` - small UI helpers shared by pages.
 - `Services/BarcodeRenderer.cs` - text to module matrix via the ZXing encoder.
@@ -149,7 +149,8 @@ things about them decide what the app can do, and they are documented at the top
 - `Services/Type2Dump.cs` - checks on a dump's bytes (size, serial, chip label) before it goes near a tag.
 - `Services/SavedService.cs` - loads/saves everything in Saved; `DumpText` finds the readable text in a dump.
 - `Services/KnownSites.cs` - well-known sites, their other addresses, and link shorteners.
-- `Services/AppSettings.cs` - the person's settings (automatic link previews).
+- `Services/AppSettings.cs` - the person's settings (automatic link previews, vibration, beep, full-screen brightness).
+- `Services/Feedback.cs` - the vibration and beep after a scan or an NFC read or write, as set on the Settings tab.
 - `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
 - `Services/CodeActions.cs` - the shared share / save / open / copy actions and save prompts.
 - `Services/LinkPreviews.cs`, `OEmbed.cs`, `HtmlHead.cs`, `PageSnapshot.cs`, `Favicons.cs` - link previews and site icons.

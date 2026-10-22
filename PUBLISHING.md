@@ -39,7 +39,7 @@ phone and, if possible, an older one (the minimum is Android 7.0, API 24), in li
       write, erase. Confirm a written tag stays rewritable (no lock bits set) and a phone reads NDEF tags.
 - [ ] **Link previews**: with automatic previews on and off ("Tap to load preview"), single-use links (no preview),
       page snapshots for pages without a picture, opening a page in the in-app viewer and seeing its card update.
-- [ ] **Saved and About tabs**: filters, menus, rename, delete; the preview setting, clearing stored previews,
+- [ ] **Saved, Settings and About tabs**: filters, menus, rename, delete; the preview setting, clearing stored previews,
       "Report a bug" (opens the mail app with build details), "Full privacy policy".
 - [ ] **Play Store edition**: build with `publish.ps1 -PlayStore` and check there is no Amiibo wording and that
       Amiibo dumps are refused. Install the bundle through an internal test track or `bundletool`.
