@@ -30,6 +30,10 @@
                       Icon="tab_nfc.png"
                       Route="nfc"
                       ContentTemplate="{DataTemplate pages:NfcPage}" />
+        <ShellContent Title="About"
+                      Icon="tab_about.png"
+                      Route="about"
+                      ContentTemplate="{DataTemplate pages:AboutPage}" />
     </TabBar>
 
 </Shell>

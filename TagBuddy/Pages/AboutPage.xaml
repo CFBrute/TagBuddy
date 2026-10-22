@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="TagBuddy.Pages.AboutPage"
+             Title="About">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="14">
+
+            <!-- Which build this is, for bug reports: version, commit, edition and build time -->
+            <VerticalStackLayout Spacing="2">
+                <Label Text="Tag Buddy" FontSize="24" FontFamily="OpenSansSemibold" />
+                <Label x:Name="VersionLabel" FontSize="13" TextColor="Gray" />
+                <Label x:Name="BuildLabel" FontSize="12" TextColor="Gray" />
+            </VerticalStackLayout>
+            <Label Text="Barcodes, QR codes and NFC tags. No ads, no account, no tracking."
+                   FontSize="14" />
+
+            <!-- Settings -->
+            <Label Text="Settings" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Load link previews automatically" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="AutoPreviewSwitch" Toggled="OnAutoPreviewToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Label x:Name="AutoPreviewHint" FontSize="12" TextColor="Gray" />
+            <Button Text="Clear stored previews and icons" Clicked="OnClearCache"
+                    BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                    Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+
+            <!-- What leaves the phone -->
+            <Label Text="Privacy" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Label FontSize="13"
+                   Text="Everything you save stays on this phone. The app has no account, no ads and no analytics, and sends nothing about you anywhere." />
+            <Label FontSize="13"
+                   Text="The only network use is link previews: for a web link you scan, read from a tag or save, the app asks that website for the page's title, picture and icon, saying honestly that it is Tag Buddy. Links that carry a sign-in or one-time code are never opened this way; only the site's icon is fetched. Switch off automatic previews above and nothing is sent until you tap a preview." />
+            <Label FontSize="13"
+                   Text="The camera is used only while the Scan tab is open. NFC payment cards and passports are identified by type only; their data is never read." />
+
+            <!-- Feedback -->
+            <Label Text="Bugs, feedback and complaints" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Label FontSize="13"
+                   Text="Something broken, confusing or missing? Write, and say what you did and what happened. A bug report already includes the version and phone model." />
+            <Label x:Name="EmailLabel" FontSize="14" TextColor="{AppThemeBinding Light={StaticResource Tertiary}, Dark={StaticResource Primary}}" />
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="Report a bug" Clicked="OnReportBug" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                <Button Text="Send feedback" Clicked="OnSendFeedback"
+                        BackgroundColor="#6B7280" TextColor="White" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                <Button Text="Copy address" Clicked="OnCopyAddress"
+                        BackgroundColor="#6B7280" TextColor="White" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+            </HorizontalStackLayout>
+
+            <!-- Credits -->
+            <Label Text="Open-source components" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
+            <Label FontSize="12" TextColor="Gray"
+                   Text="ZXing.Net (Apache License 2.0) and ZXing.Net.MAUI (MIT) for reading and drawing codes. .NET MAUI (MIT). Open Sans font (SIL Open Font License). Material icons (Apache License 2.0)." />
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

@@ -10,7 +10,7 @@ internal sealed record OEmbedProvider(string Name, Func<string, bool> HostMatch,
 /// <summary>oEmbed: the JSON description that big sites hand out for embedding a post or video. It is the most
 /// reliable source for those sites, because their pages answer a plain request with a consent page, a login
 /// wall or an empty app shell. Instagram, Facebook and Threads need a Meta access token for this and are not in
-/// the table; their pages are read with a crawler user agent instead (see <see cref="LinkPreviews"/>).</summary>
+/// the table; their links usually get just the site icon, since the app does not pose as a crawler.</summary>
 internal static class OEmbed
 {
     internal static readonly OEmbedProvider[] Providers =

@@ -29,6 +29,9 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   the link, share or save the image, use the text in a generator, write it to a tag, make a dump from text,
   share a dump's .bin file, rename, delete). Stored as `saved.json` in the app's private data folder, with dump
   bytes as .bin files next to it; older `favorites.json` files are taken over on first start.
+- **About** tab: version and build, the link-preview setting, what the app sends over the network, and "Report
+  a bug" / "Send feedback", which open an email to `BuildInfo.SupportEmail`. That address is a placeholder
+  (`@example.com` never receives mail): set a real one before publishing.
 - **Scan** tab: camera scanner (ZXing), plus "From image" to decode a code from a picture on the phone.
   Shows what the code contains (web link, Wi-Fi, contact card, ...),
   its length, and decoder details such as the QR error-correction level, structured-append parts and byte
@@ -40,15 +43,19 @@ encoder in `Services/BarcodeRenderer.cs`), which is what makes the QR options po
 
 ## Link previews and site icons
 
-Web links get a preview card (Scan and NFC results, Saved rows). It loads on its own as soon as the link is
-shown, and saving anything with a link prefetches it. Sources, lightest first (`Services/LinkPreviews.cs`):
+Web links get a preview card (Scan and NFC results, Saved rows). By default it loads on its own as soon as the
+link is shown, and saving anything with a link prefetches it. With "Load link previews automatically" switched
+off on the About tab (`Services/AppSettings.cs`), nothing goes over the network until the card is tapped
+("Tap to load preview"); previews and icons already on the phone still show.
+
+Every request identifies itself honestly as `TagBuddy/<version> (Android; link preview)`; the app never poses
+as a browser or a crawler. Sources, lightest first (`Services/LinkPreviews.cs`):
 
 1. oEmbed for known sites (`Services/OEmbed.cs`): YouTube, Vimeo, TikTok, X/Twitter, Reddit, Spotify,
    SoundCloud, Flickr, Dailymotion and Bluesky. Posts without a thumbnail (X, Bluesky) show their text.
 2. The page's head: Open Graph, Twitter cards, `image_src`, title and description, plus the oEmbed link the page
-   advertises. Instagram, Facebook and Threads are requested with the Facebook crawler's user agent
-   (`facebookexternalhit`), because they show crawlers their preview tags and everyone else a login wall.
-   This is unofficial and may stop working.
+   advertises. Instagram, Facebook and Threads show such a request a login wall, so their links usually get
+   just the site's icon.
 3. A rendered picture of the page (`Services/PageSnapshot.cs`), the heavy last resort. The web view is attached
    behind the app's content so the page counts as visible, uses a phone-width viewport, waits until the page
    stops changing, and a picture with (almost) nothing on it is never kept.
@@ -57,9 +64,12 @@ Single-use links (sign-in codes, tokens, unsubscribe/confirm/reset paths) are ne
 site's icon is shown.
 
 Site icons (`Services/Favicons.cs`) are kept once per site in `cache/link-previews-v2/icons/` as PNG files of at
-most 128 px and reused for every link to that site. Order: apple-touch-icon, the largest declared icon (SVG
-skipped), `/apple-touch-icon.png`, `/favicon.ico`, and Google's favicon service as a last resort
-(`Favicons.UseGoogleFallback`). Without an icon the blue link glyph is shown.
+most 128 px and reused for every link to that site. Only the site itself is asked, never a third-party icon
+service. Order, stopping at the first icon of 64 px or more: the icons the page declares (apple-touch-icon first,
+SVG skipped), `/apple-touch-icon.png` and `/favicon.ico`, the icons the site's homepage declares (when the page
+itself was not read, as for single-use links), and the parent domain's well-known files (`m.example.com` →
+`example.com`; country suffixes such as `co.uk` are never treated as a site). Without an icon the blue link
+glyph is shown. "Clear stored previews and icons" on the About tab empties the cache.
 
 Previews are cached for 7 days; one without a real picture is retried after 6 hours (`RetryAfter`).
 
@@ -104,7 +114,7 @@ things about them decide what the app can do, and they are documented at the top
 - `Pages/ShowBarcodePage` - full-screen display with a brightness slider.
 - `Pages/SavedPage`, `Pages/DumpPage` - the Saved list, and one saved tag dump.
 - `Pages/ScanPage` - camera scanner with details; `Pages/WebPage` - in-app view of a link.
-- `Pages/NfcPage` - NFC tab.
+- `Pages/NfcPage` - NFC tab; `Pages/AboutPage` - About tab with settings and feedback.
 - `Pages/AppNavigation.cs` - hands content from one tab to another (generators, NFC writing).
 - `Pages/Palette.cs`, `Pages/DetailRows.cs`, `Pages/IconButtons.cs` - small UI helpers shared by pages.
 - `Services/BarcodeRenderer.cs` - text to module matrix via the ZXing encoder.
@@ -117,6 +127,7 @@ things about them decide what the app can do, and they are documented at the top
   (`.Read.cs`), Type 2 page access and passwords (`.Type2.cs`), writing (`.Write.cs`).
 - `Services/Type2Dump.cs` - checks on a dump's bytes (size, serial, chip label) before it goes near a tag.
 - `Services/SavedService.cs` - loads/saves everything in Saved; `DumpText` finds the readable text in a dump.
+- `Services/AppSettings.cs` - the person's settings (automatic link previews).
 - `Services/Links.cs` - detects openable values (web, mail, tel, sms, geo).
 - `Services/CodeActions.cs` - the shared share / save / open / copy actions and save prompts.
 - `Services/LinkPreviews.cs`, `OEmbed.cs`, `HtmlHead.cs`, `PageSnapshot.cs`, `Favicons.cs` - link previews and site icons.
@@ -177,10 +188,8 @@ The Play Store edition leaves out what Google Play's policies object to:
 - **Amiibo support.** Nintendo-protected tags are treated like any other password-protected tag (the app never
   guesses a password), Amiibo dumps are refused for writing, and the app does not name Amiibo content.
   Reading tags, plain NTAG backups, raw text and erasing unprotected tags work as before.
-- **The Facebook crawler user agent** for Instagram, Facebook and Threads previews; those links get the normal
-  request, which usually yields just the site's icon.
 
-The sideload build (the default) keeps both. The Saved tab names the edition under the version, so a bug report
+The sideload build (the default) keeps it. The About tab names the edition under the version, so a bug report
 says which build it came from.
 
 ## Versions
@@ -188,8 +197,8 @@ says which build it came from.
 The version is `1.0.<git commit count>`: the first two numbers are `VersionPrefix` in the project file,
 bumped by hand; the third is filled in at build time by the `StampBuildVersion` target, which also uses the
 count as the Android `versionCode` and stamps the short commit (with `*` when there were uncommitted
-changes) and the build time into the assembly. `BuildInfo` reads them and the Saved tab shows them at the
-bottom of the list, which is what to quote in a bug report. Releases are tagged `v1.0.<n>`.
+changes) and the build time into the assembly. `BuildInfo` reads them and the About tab shows them, which is
+what to quote in a bug report; "Report a bug" there puts them into the email by itself. Releases are tagged `v1.0.<n>`.
 A Release APK and a Debug APK use different signing keys, so switching between them on a phone needs an
 uninstall first (`adb uninstall com.barcodebuddy.app`).
 

@@ -5,7 +5,9 @@ namespace TagBuddy.Controls;
 
 /// <summary>A card with a web page's picture, title and description. Give it any value: it stays hidden unless
 /// the value is a web link (or plain text with <see cref="ShowText"/> on), and loads the preview on its own as
-/// soon as the value is set. Tapping the card opens the link. Single-use links are never requested.</summary>
+/// soon as the value is set. Tapping the card opens the link. Single-use links are never requested. With automatic
+/// previews switched off (<see cref="AppSettings.AutoPreviews"/>) only a preview already on the phone shows; otherwise
+/// the card says "Tap to load preview" and the first tap loads it.</summary>
 public sealed class LinkPreviewView : ContentView
 {
     public static readonly BindableProperty ValueProperty = BindableProperty.Create(
@@ -58,6 +60,9 @@ public sealed class LinkPreviewView : ContentView
     private Uri? _uri;
     private int _generation;
 
+    /// <summary>Automatic previews are off and this card waits for a tap before it loads anything.</summary>
+    private bool _awaitingTap;
+
     public LinkPreviewView()
     {
         IsVisible = false;
@@ -99,6 +104,14 @@ public sealed class LinkPreviewView : ContentView
         {
             // A plain text card has no link; the row around it handles its own taps.
             if (_uri is null) return;
+            if (_awaitingTap)
+            {
+                _awaitingTap = false;
+                _description.Text = "Loading preview...";
+                _host.Text = _uri.Host;
+                await LoadAsync(_generation);
+                return;
+            }
             if (!await Pages.WebPage.ShowAsync(_uri.AbsoluteUri)) await Links.OpenAsync(_uri);
         };
         _card.GestureRecognizers.Add(tap);
@@ -156,6 +169,7 @@ public sealed class LinkPreviewView : ContentView
     private async void Reload()
     {
         int generation = ++_generation;
+        _awaitingTap = false;
 
         if (!LinkPreviews.IsPreviewable(Value, out var uri))
         {
@@ -195,6 +209,23 @@ public sealed class LinkPreviewView : ContentView
             return;
         }
 
+        if (!AppSettings.AutoPreviews)
+        {
+            var cached = await LinkPreviews.GetCachedAsync(uri);
+            if (generation != _generation) return;
+            if (cached is not null)
+            {
+                Show(cached);
+                return;
+            }
+            _awaitingTap = true;
+            _description.Text = "Previews load only when asked (see About). Tap to load this one.";
+            _host.Text = uri.Host + "  ·  tap to load preview";
+            if (await LinkPreviews.GetIconAsync(uri) is { } known && generation == _generation)
+                ShowIcon(known, inFrame: Compact);
+            return;
+        }
+
         _description.Text = "Loading preview...";
         await LoadAsync(generation);
     }
@@ -227,7 +258,11 @@ public sealed class LinkPreviewView : ContentView
             _description.Text = "The site did not answer and the page could not be rendered, so there is no preview. Tap to open the page.";
             return;
         }
+        Show(preview);
+    }
 
+    private void Show(LinkPreview preview)
+    {
         _title.Text = preview.TitleOrHost;
         _description.Text = preview.Text ?? preview.Description ?? "This page has no preview text. Tap to open it.";
         _description.IsVisible = !Compact;

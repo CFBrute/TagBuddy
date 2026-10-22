@@ -65,6 +65,7 @@ public class SavedService
     /// is opened without competing with the rows on screen (the request gate bounds it anyway).</summary>
     private void WarmPreviews()
     {
+        if (!AppSettings.AutoPreviews) return;
         var values = Items.Where(i => i.IsLink).Select(i => i.Value).ToList();
         if (values.Count == 0) return;
         _ = Task.Run(async () =>
