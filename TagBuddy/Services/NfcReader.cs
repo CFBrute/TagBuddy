@@ -39,12 +39,28 @@ public sealed class NfcReader
     public void ArmRawText(byte[] payload) =>
         _pendingWrite = tag => WriteRaw(tag, (before, chip) =>
         {
-            int capacity = (chip.UserEnd - 4) * 4;
-            if (payload.Length > capacity)
-                return (null, $"The text needs {payload.Length} bytes but this {chip.Name} holds {capacity}.");
+            // The text goes into the first stretch of unlocked pages that holds it in one piece, so it
+            // reads back as one run; locked pages keep what they have, every other user page is zeroed.
+            var locked = LockedPages(before, chip);
+            int need = (payload.Length + 3) / 4, bestStart = -1, bestLength = 0;
+            for (int page = 4; page < chip.UserEnd;)
+            {
+                if (locked[page]) { page++; continue; }
+                int start = page;
+                while (page < chip.UserEnd && !locked[page]) page++;
+                int length = page - start;
+                if (length > bestLength) { bestLength = length; bestStart = start; }
+                if (length >= need) { bestStart = start; bestLength = length; break; }
+            }
+            if (bestStart < 0 || bestLength < need)
+                return (null, $"The text needs {payload.Length} bytes in one piece, but the longest unlocked stretch on this " +
+                              $"{chip.Name} is {bestLength * 4} bytes (some pages are permanently locked).");
+
             var dump = new byte[chip.UserEnd * 4];
             Array.Copy(before, 0, dump, 0, Math.Min(16, before.Length));   // serial and page 3 stay as they are
-            Array.Copy(payload, 0, dump, 16, payload.Length);
+            for (int page = 4; page < chip.UserEnd; page++)
+                if (locked[page] && before.Length >= page * 4 + 4) Array.Copy(before, page * 4, dump, page * 4, 4);
+            Array.Copy(payload, 0, dump, bestStart * 4, payload.Length);
             return (dump, null);
         }, "");
 
@@ -730,6 +746,53 @@ public sealed class NfcReader
         return false;
     }
 
+    /// <summary>Which pages the tag's one-time lock bits mark as permanently read-only, by page number up to
+    /// the end of user memory. Static lock bits (page 2, bytes 2-3) cover pages 3-15: byte 2 bit 3 is page 3 and
+    /// bits 4-7 pages 4-7, byte 3 covers pages 8-15. Dynamic lock bits (the page after user memory) cover
+    /// page 16 onwards in blocks: 2 pages per bit on NTAG213 and Ultralight EV1, 16 on NTAG215/216. An
+    /// Amiibo writer typically sets 0F E0 and 01, locking pages 3, 13-15 and 16-31.</summary>
+    private static bool[] LockedPages(byte[] memory, Type2Chip chip)
+    {
+        var locked = new bool[Math.Max(chip.UserEnd, 16)];
+        if (memory.Length >= 12)
+        {
+            byte s0 = memory[10], s1 = memory[11];
+            if ((s0 & 0x08) != 0) locked[3] = true;
+            for (int bit = 4; bit < 8; bit++) if ((s0 & (1 << bit)) != 0) locked[bit] = true;          // pages 4-7
+            for (int bit = 0; bit < 8; bit++) if ((s1 & (1 << bit)) != 0) locked[8 + bit] = true;      // pages 8-15
+        }
+        int dynPage = chip.UserEnd;
+        if (memory.Length >= dynPage * 4 + 2)
+        {
+            int block = chip.Name.Contains("215") || chip.Name.Contains("216") ? 16 : 2;
+            int bits = (memory[dynPage * 4 + 1] << 8) | memory[dynPage * 4];
+            for (int bit = 0; bit < 16; bit++)
+            {
+                if ((bits & (1 << bit)) == 0) continue;
+                for (int page = 16 + bit * block; page < 16 + (bit + 1) * block && page < chip.UserEnd; page++)
+                    locked[page] = true;
+            }
+        }
+        return locked;
+    }
+
+    /// <summary>"13-15, 16-31" from a list of page numbers.</summary>
+    private static string Ranges(List<int> pages)
+    {
+        var parts = new List<string>();
+        int i = 0;
+        while (i < pages.Count)
+        {
+            int start = pages[i], end = start;
+            while (i + 1 < pages.Count && pages[i + 1] == end + 1) { end = pages[++i]; }
+            parts.Add(start == end ? start.ToString() : $"{start}-{end}");
+            i++;
+        }
+        return string.Join(", ", parts);
+    }
+
+    private static string Pluralise(int n, string noun) => n == 1 ? noun[..1].ToUpperInvariant() + noun[1..] : $"{char.ToUpperInvariant(noun[0])}{noun[1..]}s";
+
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
     /// Amiibo-style, otherwise none. Guessing on other tags would count against their failed-attempt limit.</summary>
     private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
@@ -875,17 +938,28 @@ public sealed class NfcReader
         if (!keepCc && oldCc.Zip(newCc).Any(p => (p.First | p.Second) != p.Second))
             notes.Add($"Page 3 is one-time programmable and keeps its old bits ({ToHex(oldCc)} cannot become {ToHex(newCc)}).");
 
+        // Pages the lock bits mark as permanently read-only are left alone rather than failing the write:
+        // an Amiibo writer locks a handful of them, and a tag can still take text around them.
+        var locked = LockedPages(before, chip);
+        var lockedPages = new List<int>();
+
         int written = 0, skipped = 0;
         for (int page = 3; page < endPage; page++)
         {
             var data = dump[(page * 4)..(page * 4 + 4)];
             if (page == 3 && keepCc) { skipped++; continue; }
             if (SamePage(before, page, data)) { skipped++; continue; }
+            if (locked[page]) { lockedPages.Add(page); continue; }
             if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
-                return (false, $"Write failed at page {page} ({error}) after {written} pages. " +
-                    "The page may be permanently locked, or the tag moved away.");
+            {
+                // Refused but still answering: a lock the lock bits did not reveal. Gone: it moved away.
+                if (link.Read(page) is not null) { lockedPages.Add(page); locked[page] = true; continue; }
+                return (false, $"Write failed at page {page} ({error}) after {written} pages: the tag moved away. Hold it still and try again.");
+            }
             written++;
         }
+        if (lockedPages.Count > 0)
+            notes.Add($"{Pluralise(lockedPages.Count, "page")} {Ranges(lockedPages)} {(lockedPages.Count == 1 ? "is" : "are")} permanently locked and kept {(lockedPages.Count == 1 ? "its" : "their")} old content.");
 
         if (amiibo && pwd is not null && chip is { HasPassword: true, ConfigPage: > 0 })
             notes.Add(SetAmiiboPassword(link, chip, pwd, before, ref authed));
@@ -893,7 +967,7 @@ public sealed class NfcReader
         var after = ReadMemory(link, chip);
         int mismatched = 0;
         for (int page = 4; page < endPage; page++)
-            if (!SamePage(after, page, dump[(page * 4)..(page * 4 + 4)])) mismatched++;
+            if (!locked[page] && !SamePage(after, page, dump[(page * 4)..(page * 4 + 4)])) mismatched++;
 
         var serial = ToHex(link.Uid);
         if (dumpSerial.Length > 0 && !string.Equals(dumpSerial, serial, StringComparison.OrdinalIgnoreCase))
@@ -972,17 +1046,25 @@ public sealed class NfcReader
         if (OpenProtection(link, chip, userEnd, pwd, ref authed) is { } blocked) return (false, blocked);
 
         int written = 0;
+        // Permanently locked pages (set by an Amiibo writer, say) cannot be cleared; they are left alone.
+        var locked = LockedPages(before, chip);
+        var lockedPages = new List<int>();
         for (int page = 4; page < userEnd; page++)
         {
             byte[] data = page == 4 ? [0x03, 0x00, 0xFE, 0x00] : [0x00, 0x00, 0x00, 0x00];
             if (SamePage(before, page, data)) continue;
+            if (locked[page]) { lockedPages.Add(page); continue; }
             if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
-                return (false, $"Erase stopped at page {page} ({error}) after clearing {written} pages. " +
-                    "The page may be permanently locked, or the tag moved away.");
+            {
+                if (link.Read(page) is not null) { lockedPages.Add(page); continue; }
+                return (false, $"Erase stopped at page {page} ({error}) after clearing {written} pages: the tag moved away. Hold it still and try again.");
+            }
             written++;
         }
 
         var notes = new List<string>();
+        if (lockedPages.Count > 0)
+            notes.Add($"{Pluralise(lockedPages.Count, "page")} {Ranges(lockedPages)} {(lockedPages.Count == 1 ? "is" : "are")} permanently locked and could not be cleared.");
         if (chip is { HasPassword: true, ConfigPage: > 0 } && auth0 >= 0 && auth0 < chip.TotalPages && authed)
         {
             // Switch protection off (AUTH0 = FF) first; only then reset the password. The other way round, a
