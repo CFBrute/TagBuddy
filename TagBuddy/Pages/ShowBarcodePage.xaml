@@ -42,18 +42,14 @@
                     Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
         </HorizontalStackLayout>
 
-        <!-- Shown when the phone was dim on opening: the page went to half brightness instead of full -->
-        <Button Grid.Row="5"
-                x:Name="BrighterButton"
-                Text="Full brightness"
-                Clicked="OnBrighter"
-                IsVisible="False"
-                HorizontalOptions="Center"
-                Margin="0,12,0,0"
-                Padding="18,6"
-                FontSize="13"
-                BackgroundColor="#6B7280"
-                TextColor="White" />
+        <!-- Screen brightness while the code is shown: starts at double the phone's own level (at least
+             20 %, at most 100 %) and can be dragged either way -->
+        <Grid Grid.Row="5" ColumnDefinitions="Auto,*,44" ColumnSpacing="8" Margin="24,12,24,0">
+            <Label Grid.Column="0" Text="Brightness" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
+            <Slider Grid.Column="1" x:Name="BrightnessSlider" Minimum="0.05" Maximum="1" ValueChanged="OnBrightnessChanged"
+                    MinimumTrackColor="{StaticResource Primary}" ThumbColor="{StaticResource Primary}" VerticalOptions="Center" />
+            <Label Grid.Column="2" x:Name="BrightnessLabel" FontSize="12" TextColor="Gray" VerticalOptions="Center" HorizontalTextAlignment="End" />
+        </Grid>
 
         <Label Grid.Row="6"
                Text="Tap anywhere to close"

@@ -48,9 +48,8 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
     protected override void OnAppearing()
     {
         base.OnAppearing();
-        bool dim = ScreenBrightness.Current() < ScreenBrightness.DimThreshold;
-        if (dim) ScreenBrightness.SetHalf(); else ScreenBrightness.SetMax();
-        BrighterButton.IsVisible = dim;
+        // Setting the slider applies the brightness through OnBrightnessChanged.
+        BrightnessSlider.Value = ScreenBrightness.StartLevel(ScreenBrightness.Current());
         DeviceDisplay.Current.KeepScreenOn = true;
     }
 
@@ -61,10 +60,10 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
         DeviceDisplay.Current.KeepScreenOn = false;
     }
 
-    private void OnBrighter(object? sender, EventArgs e)
+    private void OnBrightnessChanged(object? sender, ValueChangedEventArgs e)
     {
-        ScreenBrightness.SetMax();
-        BrighterButton.IsVisible = false;
+        ScreenBrightness.Set((float)e.NewValue);
+        BrightnessLabel.Text = $"{Math.Round(e.NewValue * 100)} %";
     }
 
     private async void OnTapped(object? sender, TappedEventArgs e) =>
@@ -86,14 +85,13 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
     }
 }
 
-/// <summary>Pushes the screen up so scanners can read the code reliably. In a bright place that means full
-/// brightness; in the dark, where the phone is already dimmed, a sudden full-brightness screen hurts, so
-/// the page goes to half and offers a button for the rest.</summary>
+/// <summary>Pushes the screen up so scanners can read the code reliably, without the jump from a dimmed
+/// phone to a blinding screen: the page starts at double the phone's own level and a slider does the rest.</summary>
 static class ScreenBrightness
 {
-    /// <summary>Below this system brightness the page opens at half instead of full.</summary>
-    public const float DimThreshold = 0.30f;
-    public const float Half = 0.5f;
+    /// <summary>Where the page starts for a given phone brightness: double it, but never under 20 % and
+    /// never over 100 %. So 0 → 20, 20 → 40, 40 → 80, and 50 or more → 100.</summary>
+    public static float StartLevel(float current) => Math.Clamp(current * 2f, 0.2f, 1f);
 
     /// <summary>The phone's current screen brightness, 0..1, or 1 when it cannot be read.</summary>
     public static float Current()
@@ -114,13 +112,10 @@ static class ScreenBrightness
 #endif
     }
 
-    public static void SetMax() => Set(1f);
-    public static void SetHalf() => Set(Half);
-
     // -1 means "follow the system brightness setting".
     public static void Restore() => Set(-1f);
 
-    private static void Set(float brightness)
+    public static void Set(float brightness)
     {
 #if ANDROID
         var window = Platform.CurrentActivity?.Window;
