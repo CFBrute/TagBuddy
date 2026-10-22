@@ -12,8 +12,14 @@
 
 		<ApplicationTitle>Tag Buddy</ApplicationTitle>
 		<ApplicationId>com.barcodebuddy.app</ApplicationId>
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+
+		<!-- Bumped by hand for a new version; the third number is the git commit count, filled in by
+		     StampBuildVersion below, which also sets the Android versionCode to that count. -->
+		<VersionPrefix>1.0</VersionPrefix>
+		<ApplicationDisplayVersion>$(VersionPrefix).0</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
+		<!-- The version text is built below, with the short commit instead of the full one. -->
+		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
 		<SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
 
@@ -31,6 +37,36 @@
 		<AndroidUseAapt2>true</AndroidUseAapt2>
 	</PropertyGroup>
 	<Import Project="Signing.local.props" Condition="Exists('Signing.local.props')" />
+
+	<!-- Stamps the version (1.0.<commit count>) into the APK's versionName, the commit count into its
+	     versionCode, and the commit it was built from (with "*" when the working tree had uncommitted
+	     changes) plus the build time into the assembly, where BuildInfo reads them for the Saved tab.
+	     Without git the version is 1.0.0 and there is no commit. -->
+	<Target Name="StampBuildVersion" BeforeTargets="GetAssemblyVersion;_GetAndroidPackageName">
+		<Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+			<Output TaskParameter="ConsoleOutput" PropertyName="TagBuddyCommitCount" />
+			<Output TaskParameter="ExitCode" PropertyName="TagBuddyGitExitCode" />
+		</Exec>
+		<Exec Command="git rev-parse --short=7 HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" Condition="'$(TagBuddyGitExitCode)' == '0'" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+			<Output TaskParameter="ConsoleOutput" PropertyName="TagBuddyCommit" />
+		</Exec>
+		<Exec Command="git status --porcelain" ConsoleToMSBuild="true" IgnoreExitCode="true" Condition="'$(TagBuddyGitExitCode)' == '0'" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+			<Output TaskParameter="ConsoleOutput" PropertyName="TagBuddyDirty" />
+		</Exec>
+		<PropertyGroup>
+			<TagBuddyCommitCount Condition="'$(TagBuddyGitExitCode)' != '0' Or '$(TagBuddyCommitCount)' == ''">0</TagBuddyCommitCount>
+			<TagBuddyCommit Condition="'$(TagBuddyCommit)' != '' And '$(TagBuddyDirty)' != ''">$(TagBuddyCommit)*</TagBuddyCommit>
+			<Version>$(VersionPrefix).$(TagBuddyCommitCount)</Version>
+			<ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+			<ApplicationVersion Condition="'$(TagBuddyCommitCount)' != '0'">$(TagBuddyCommitCount)</ApplicationVersion>
+			<FileVersion>$(Version).0</FileVersion>
+			<InformationalVersion>$(Version)</InformationalVersion>
+			<InformationalVersion Condition="'$(TagBuddyCommit)' != ''">$(Version)+$(TagBuddyCommit)</InformationalVersion>
+		</PropertyGroup>
+		<ItemGroup>
+			<AssemblyMetadata Include="BuildTime" Value="$([System.DateTime]::Now.ToString('yyyy-MM-dd HH:mm'))" />
+		</ItemGroup>
+	</Target>
 
 	<ItemGroup>
 		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" ForegroundScale="1.0" Color="#FFFFFF" />

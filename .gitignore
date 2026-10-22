@@ -16,3 +16,4 @@ Thumbs.db
 
 # Local signing secrets (keystore passwords)
 *.local.props
+publish/

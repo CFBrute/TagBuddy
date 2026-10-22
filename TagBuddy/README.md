@@ -125,11 +125,21 @@ Release builds are signed with a self-signed keystore that lives outside the rep
 `Signing.local.props` (git-ignored) when it exists; it sets `AndroidKeyStore`, `AndroidSigningKeyStore`,
 `AndroidSigningKeyAlias`, `AndroidSigningKeyPass` and `AndroidSigningStorePass`.
 
-```bash
-dotnet publish -c Release -f net10.0-android
+```powershell
+..\publish.ps1          # signed APK as ..\publish\TagBuddy_1_0_<n>.apk
+..\publish.ps1 -Tag     # also creates and pushes the git tag v1.0.<n>
 ```
 
-The signed APK lands in `bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
+Or by hand, `dotnet publish -c Release -f net10.0-android`; the signed APK then lands in
+`bin/Release/net10.0-android/publish/com.barcodebuddy.app-Signed.apk`.
+
+## Versions
+
+The version is `1.0.<git commit count>`: the first two numbers are `VersionPrefix` in the project file,
+bumped by hand; the third is filled in at build time by the `StampBuildVersion` target, which also uses the
+count as the Android `versionCode` and stamps the short commit (with `*` when there were uncommitted
+changes) and the build time into the assembly. `BuildInfo` reads them and the Saved tab shows them at the
+bottom of the list, which is what to quote in a bug report. Releases are tagged `v1.0.<n>`.
 A Release APK and a Debug APK use different signing keys, so switching between them on a phone needs an
 uninstall first (`adb uninstall com.barcodebuddy.app`).
 

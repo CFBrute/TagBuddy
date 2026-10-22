@@ -38,6 +38,8 @@ public partial class SavedPage : ContentPage
         InitializeComponent();
         _saved = saved;
         List.ItemsSource = _shown;
+        VersionLabel.Text = BuildInfo.Label;
+        BuildLabel.Text = BuildInfo.Details;
         _saved.Items.CollectionChanged += OnItemsChanged;
         ApplyFilter();
     }
