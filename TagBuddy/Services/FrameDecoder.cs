@@ -126,25 +126,37 @@ public sealed class FrameDecoder
 
             long n = _frame++;
             Result? result;
-            if (n % 4 == 3)
+            bool harder = DateTime.UtcNow - _started > HarderAfter;
+            var normal = harder ? _harder : _fast;
+            var inverted = harder ? _harderInverted : _inverted;
+
+            // A six-frame cycle over the centre square, with one look at the whole picture. Measured on photos
+            // of a dense QR code shown on a screen and a laser-etched Data Matrix: the half-size, lightly
+            // blurred pass reads both in a few milliseconds, where the raw frame reads neither (pixel-grid
+            // moire and noise), and both were light-on-dark, so the inverted reader runs on every other pass.
+            // The raw passes stay for small codes that need every pixel.
+            switch (n % 6)
             {
-                // The whole picture at half size: codes outside the square still read.
-                Copy(buffer, stride, bytesPerPixel, 0, 0, width, height);
-                var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, width, height);
-                result = Decode(_fast, half, hw, hh);
-            }
-            else
-            {
-                int side = (int)Math.Round(CropFraction * Math.Min(width, height));
-                int left = (width - side) / 2, top = (height - side) / 2;
-                Copy(buffer, stride, bytesPerPixel, left, top, side, side);
-                // Light-on-dark codes (laser-etched labels, dark stickers) are common enough to try on every
-                // other frame; the inverted pass costs about the same as the normal one.
-                bool inverted = n % 2 == 1;
-                var reader = DateTime.UtcNow - _started > HarderAfter
-                    ? (inverted ? _harderInverted : _harder)
-                    : (inverted ? _inverted : _fast);
-                result = Decode(reader, _buffer, side, side);
+                case 3:
+                    // The whole picture at half size: codes outside the square still read.
+                    Copy(buffer, stride, bytesPerPixel, 0, 0, width, height);
+                    var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, width, height);
+                    result = Decode((n / 6) % 2 == 0 ? normal : inverted, GrayDecoder.BoxBlur(half, hw, hh, 1), hw, hh);
+                    break;
+
+                default:
+                    int side = (int)Math.Round(CropFraction * Math.Min(width, height));
+                    int left = (width - side) / 2, top = (height - side) / 2;
+                    Copy(buffer, stride, bytesPerPixel, left, top, side, side);
+                    result = (n % 6) switch
+                    {
+                        0 => DecodeHalfBlurred(normal, side),
+                        1 => DecodeHalfBlurred(inverted, side),
+                        2 => Decode(normal, _buffer, side, side),
+                        4 => Decode(inverted, _buffer, side, side),
+                        _ => Decode(normal, GrayDecoder.BoxBlur(_buffer, side, side, 2), side, side),
+                    };
+                    break;
             }
 
             _badFrames = 0;
@@ -186,6 +198,14 @@ public sealed class FrameDecoder
             return (capacity - width) / (height - 1);
         if (capacity >= pixels * 3 / 2) return width;
         return 0;
+    }
+
+    /// <summary>The centre square at half size with a light blur: a dense code photographed off a screen is
+    /// mostly moire at full size, and halving it averages the screen's pixel grid away.</summary>
+    private Result? DecodeHalfBlurred(BarcodeReaderGeneric reader, int side)
+    {
+        var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, side, side);
+        return Decode(reader, GrayDecoder.BoxBlur(half, hw, hh, 1), hw, hh);
     }
 
     private Result? Decode(BarcodeReaderGeneric reader, byte[] luminance, int width, int height)
