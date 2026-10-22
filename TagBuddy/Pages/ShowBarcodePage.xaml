@@ -6,7 +6,7 @@
              BackgroundColor="White"
              Shell.NavBarIsVisible="False"
              Shell.TabBarIsVisible="False">
-    <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,Auto" Padding="16">
+    <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" Padding="16">
         <Grid.GestureRecognizers>
             <TapGestureRecognizer Tapped="OnTapped" />
         </Grid.GestureRecognizers>
@@ -42,11 +42,24 @@
                     Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
         </HorizontalStackLayout>
 
-        <Label Grid.Row="5"
+        <!-- Shown when the phone was dim on opening: the page went to half brightness instead of full -->
+        <Button Grid.Row="5"
+                x:Name="BrighterButton"
+                Text="Full brightness"
+                Clicked="OnBrighter"
+                IsVisible="False"
+                HorizontalOptions="Center"
+                Margin="0,12,0,0"
+                Padding="18,6"
+                FontSize="13"
+                BackgroundColor="#6B7280"
+                TextColor="White" />
+
+        <Label Grid.Row="6"
                Text="Tap anywhere to close"
                FontSize="12"
                TextColor="Gray"
-               Margin="0,16,0,0"
+               Margin="0,12,0,0"
                HorizontalTextAlignment="Center" />
     </Grid>
 </ContentPage>
