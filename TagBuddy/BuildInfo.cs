@@ -6,6 +6,11 @@ namespace TagBuddy;
 /// target in TagBuddy.csproj).</summary>
 public static class BuildInfo
 {
+    /// <summary>Where bug reports, feedback and complaints go (the About tab).
+    /// PLACEHOLDER: example.com is reserved and never receives mail. Replace it with a real address before
+    /// publishing.</summary>
+    public const string SupportEmail = "tagbuddy-support@example.com";
+
     private static readonly Assembly App = typeof(BuildInfo).Assembly;
 
     private static readonly (string Version, string Commit) Parts =
@@ -21,7 +26,7 @@ public static class BuildInfo
     public static string BuildTime =>
         App.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "BuildTime")?.Value ?? string.Empty;
 
-    /// <summary>Shown at the foot of the Saved tab: "Tag Buddy v1.0.14 · 5be6c14".</summary>
+    /// <summary>Shown on the About tab and in bug reports: "Tag Buddy v1.0.14 · 5be6c14".</summary>
     public static string Label => Describe(Version, Commit);
 
     /// <summary>The second line: when the build was made, and what a "*" means.</summary>

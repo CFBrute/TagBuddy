@@ -28,13 +28,6 @@
                            TextColor="Gray" HorizontalTextAlignment="Center" />
                 </VerticalStackLayout>
             </CollectionView.EmptyView>
-            <!-- Which build this is, for bug reports: version, commit and build time -->
-            <CollectionView.Footer>
-                <VerticalStackLayout Padding="0,16,0,8" Spacing="2">
-                    <Label x:Name="VersionLabel" FontSize="12" TextColor="Gray" HorizontalTextAlignment="Center" />
-                    <Label x:Name="BuildLabel" FontSize="11" TextColor="Gray" HorizontalTextAlignment="Center" />
-                </VerticalStackLayout>
-            </CollectionView.Footer>
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="models:SavedItem">
                     <SwipeView>

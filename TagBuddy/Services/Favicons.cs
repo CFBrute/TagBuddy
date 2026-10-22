@@ -3,14 +3,15 @@ using System.Collections.Concurrent;
 namespace TagBuddy.Services;
 
 /// <summary>A bank of site icons: one small PNG per site, fetched once and reused for every link to that site.
-/// Only the site's origin is ever requested (its icon files), never the link itself, so this is safe even for
-/// one-time links whose page must not be opened by a preview.</summary>
+/// Only the site itself is asked (its homepage and icon files, and those of its parent domain), never the link,
+/// so this is safe even for one-time links whose page must not be opened by a preview. No third-party icon
+/// service is used: a site without an icon of its own gets the app's link glyph.</summary>
 public static class Favicons
 {
-    /// <summary>Whether Google's favicon service is asked as a last resort when the site itself offers no usable
-    /// icon. It sends the site's host name to Google; the person agreed to this. Set to false to keep icon
-    /// requests between the phone and the site only.</summary>
-    public const bool UseGoogleFallback = true;
+    /// <summary>Second-level labels that are part of a country's suffix (co.uk, com.au, ne.jp): the parent of
+    /// shop.example.co.uk is example.co.uk, never co.uk.</summary>
+    private static readonly HashSet<string> SuffixLabels =
+        new(StringComparer.OrdinalIgnoreCase) { "co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go", "gob", "nic" };
 
     private const int MaxBytes = 256 * 1024;
     private const int MinSize = 16;
@@ -60,7 +61,7 @@ public static class Favicons
             bool reachedServer = false;
             int bestSide = 0, n = 0;
             string? best = null;
-            foreach (var candidate in Candidates(pageUri, linkTags))
+            await foreach (var candidate in CandidatesAsync(pageUri, linkTags))
             {
                 var (bytes, answered) = await DownloadAsync(candidate);
                 reachedServer |= answered;
@@ -105,38 +106,109 @@ public static class Favicons
         }
     }
 
-    /// <summary>Where to look, best first: the touch icon (usually 180 px and opaque), the largest declared
-    /// icon, the two well-known file names, and finally Google's service. SVG icons are skipped, because the
-    /// image control cannot draw a remote SVG.</summary>
-    internal static IEnumerable<Uri> Candidates(Uri pageUri, IReadOnlyList<LinkTag>? linkTags)
+    /// <summary>The site's icon if it is already on the phone, without any request; null otherwise.</summary>
+    public static string? GetCached(Uri pageUri)
+    {
+        try
+        {
+            if (pageUri.Scheme is not ("http" or "https") || !Directory.Exists(Dir)) return null;
+            var existing = Directory.GetFiles(Dir, SiteKey(pageUri) + ".*.png").FirstOrDefault();
+            return existing is not null && new FileInfo(existing).Length > 0 ? existing : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Drops the remembered lookups, for when the cache folder is cleared.</summary>
+    internal static void ForgetAll() => Memory.Clear();
+
+    /// <summary>Where to look, best first, asking for more only while nothing good enough was found: the icons the
+    /// page declares (touch icon first, usually 180 px and opaque), the two well-known file names, the icons the
+    /// site's homepage declares when the page itself was not read, and last the parent domain's well-known
+    /// files (m.example.com and shop.example.com usually share example.com's icon). SVG icons are skipped,
+    /// because the image control cannot draw a remote SVG.</summary>
+    private static async IAsyncEnumerable<Uri> CandidatesAsync(Uri pageUri, IReadOnlyList<LinkTag>? linkTags)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var origin = new Uri(pageUri.GetLeftPart(UriPartial.Authority) + "/");
 
-        if (linkTags is { Count: > 0 })
-        {
-            var touch = linkTags
-                .Where(t => HtmlHead.HasRel(t, "apple-touch-icon") || HtmlHead.HasRel(t, "apple-touch-icon-precomposed"))
-                .Where(t => !IsSvg(t))
-                .OrderByDescending(t => LargestSize(t.Sizes));
-            var icons = linkTags
-                .Where(t => HtmlHead.HasRel(t, "icon"))
-                .Where(t => !IsSvg(t))
-                .OrderByDescending(t => LargestSize(t.Sizes));
-
-            foreach (var tag in touch.Concat(icons))
-            {
-                if (!Uri.TryCreate(pageUri, tag.Href, out var u) || u.Scheme is not ("http" or "https")) continue;
-                if (seen.Add(u.AbsoluteUri)) yield return u;
-            }
-        }
-
-        foreach (var u in new[] { new Uri(origin, "apple-touch-icon.png"), new Uri(origin, "favicon.ico") })
+        foreach (var u in Declared(pageUri, linkTags))
             if (seen.Add(u.AbsoluteUri)) yield return u;
 
-        if (UseGoogleFallback)
-            yield return new Uri($"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(pageUri.Host)}&sz=128");
+        foreach (var u in WellKnown(origin))
+            if (seen.Add(u.AbsoluteUri)) yield return u;
+
+        if (linkTags is not { Count: > 0 })
+        {
+            var (homepage, tags) = await HomepageLinkTagsAsync(origin);
+            foreach (var u in Declared(homepage, tags))
+                if (seen.Add(u.AbsoluteUri)) yield return u;
+        }
+
+        if (ParentSite(pageUri) is { } parent)
+            foreach (var u in WellKnown(parent))
+                if (seen.Add(u.AbsoluteUri)) yield return u;
     }
+
+    private static IEnumerable<Uri> Declared(Uri pageUri, IReadOnlyList<LinkTag>? linkTags)
+    {
+        if (linkTags is not { Count: > 0 }) yield break;
+        var touch = linkTags
+            .Where(t => HtmlHead.HasRel(t, "apple-touch-icon") || HtmlHead.HasRel(t, "apple-touch-icon-precomposed"))
+            .Where(t => !IsSvg(t))
+            .OrderByDescending(t => LargestSize(t.Sizes));
+        var icons = linkTags
+            .Where(t => HtmlHead.HasRel(t, "icon"))
+            .Where(t => !IsSvg(t))
+            .OrderByDescending(t => LargestSize(t.Sizes));
+
+        foreach (var tag in touch.Concat(icons))
+            if (Uri.TryCreate(pageUri, tag.Href, out var u) && u.Scheme is "http" or "https")
+                yield return u;
+    }
+
+    private static Uri[] WellKnown(Uri origin) => [new Uri(origin, "apple-touch-icon.png"), new Uri(origin, "favicon.ico")];
+
+    /// <summary>The origin of the domain one level up (shop.example.com → example.com), or null when the host is
+    /// already a site of its own (example.com, www.example.com, example.co.uk) or an IP address.</summary>
+    internal static Uri? ParentSite(Uri uri)
+    {
+        if (uri.HostNameType != UriHostNameType.Dns) return null;
+        var labels = uri.Host.ToLowerInvariant().Split('.');
+        if (labels.Length < 3 || labels[0] == "www") return null;
+        var parent = labels[1..];
+        // example.co.uk has three labels but is a site of its own: its parent would be the suffix co.uk.
+        if (parent.Length == 2 && parent[1].Length == 2 && SuffixLabels.Contains(parent[0])) return null;
+        return new Uri($"{uri.Scheme}://{string.Join('.', parent)}/");
+    }
+
+    /// <summary>The link tags of the site's homepage and the address they are relative to (after redirects), or
+    /// none. Only the origin is requested, so this is safe for single-use links too.</summary>
+    private static async Task<(Uri BaseUri, IReadOnlyList<LinkTag>? Tags)> HomepageLinkTagsAsync(Uri origin)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, origin);
+            return await LinkPreviews.SendAsync(request, async (response, token) =>
+            {
+                var finalUri = response.RequestMessage?.RequestUri ?? origin;
+                var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
+                if (!response.IsSuccessStatusCode || !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
+                    return (finalUri, (IReadOnlyList<LinkTag>?)null);
+                var html = await LinkPreviews.ReadTextAsync(response, HomepageBytes, token);
+                return (finalUri, HtmlHead.LinkTags(HtmlHead.Head(html)));
+            });
+        }
+        catch
+        {
+            return (origin, null);
+        }
+    }
+
+    /// <summary>Icon links sit in the head, near the top of the page; this much is plenty.</summary>
+    private const int HomepageBytes = 128 * 1024;
 
     private static bool IsSvg(LinkTag tag) =>
         (tag.Type?.Contains("svg", StringComparison.OrdinalIgnoreCase) ?? false)

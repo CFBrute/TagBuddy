@@ -41,14 +41,13 @@ public static class LinkPreviews
     /// slow, blank or not yet rendered, which says little about the next attempt.</summary>
     private static readonly TimeSpan RetryLifetime = TimeSpan.FromHours(6);
 
-    /// <summary>Instagram, Facebook and Threads show a login wall to browsers but serve their Open Graph tags to
-    /// link crawlers. Their pages are requested with the Facebook crawler's user agent first. Unofficial: it can
-    /// stop working at any time, and then the normal request is used.</summary>
-    private static readonly string[] CrawlerUaHosts = ["instagram.com", "facebook.com", "fb.com", "fb.watch", "threads.net", "threads.com"];
-    private const string CrawlerUserAgent = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
-
     /// <summary>Sites whose rendered page is a login wall or an app shell, not a preview of anything.</summary>
-    private static readonly string[] SnapshotExcludedHosts = [.. CrawlerUaHosts, "x.com", "twitter.com"];
+    private static readonly string[] SnapshotExcludedHosts =
+        ["instagram.com", "facebook.com", "fb.com", "fb.watch", "threads.net", "threads.com", "x.com", "twitter.com"];
+
+    /// <summary>Every request says what it is: this app fetching a preview. No browser or crawler is imitated,
+    /// so a site that only shows its preview to those gets an honest request and the app shows less.</summary>
+    private static string UserAgent => $"TagBuddy/{BuildInfo.Version} (Android; link preview)";
 
     internal static readonly HttpClient Http = CreateClient();
 
@@ -86,6 +85,31 @@ public static class LinkPreviews
     public static bool IsSingleUse(Uri uri) =>
         SingleUseQuery.IsMatch(uri.Query + uri.Fragment) || SingleUsePath.IsMatch(uri.AbsolutePath);
 
+    /// <summary>A preview already on the phone, or null; never touches the network. Used while automatic previews
+    /// are switched off.</summary>
+    public static async Task<LinkPreview?> GetCachedAsync(Uri uri)
+    {
+        try
+        {
+            if (Memory.TryGetValue(uri.AbsoluteUri, out var task) && task.IsCompletedSuccessfully && task.Result is { } known)
+                return known;
+            var cached = await ReadDiskAsync(uri);
+            return cached is not null && FilesPresent(cached) ? cached : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Forgets every preview and icon, in memory and on disk. Settings offers it.</summary>
+    public static void ClearCache()
+    {
+        Memory.Clear();
+        Favicons.ForgetAll();
+        try { if (Directory.Exists(CacheDir)) Directory.Delete(CacheDir, true); } catch { /* best effort */ }
+    }
+
     /// <summary>The preview for a web link, or null when the page could not be reached or read, or when the link
     /// is single-use (never requested).</summary>
     public static Task<LinkPreview?> GetAsync(Uri uri)
@@ -100,7 +124,7 @@ public static class LinkPreviews
     {
         try
         {
-            if (!IsPreviewable(value, out var uri)) return;
+            if (!AppSettings.AutoPreviews || !IsPreviewable(value, out var uri)) return;
             Forget(IsSingleUse(uri) ? Favicons.GetAsync(uri, null) : GetAsync(uri));
         }
         catch
@@ -110,11 +134,16 @@ public static class LinkPreviews
     }
 
     /// <summary>The site icon for a link: the one found while reading its page when there is a preview,
-    /// otherwise the site's usual icon files.</summary>
+    /// otherwise the site's usual icon files. With automatic previews off, only an icon already on the phone.</summary>
     public static async Task<string?> GetIconAsync(Uri uri)
     {
         try
         {
+            if (!AppSettings.AutoPreviews)
+            {
+                var cached = IsSingleUse(uri) ? null : await GetCachedAsync(uri);
+                return cached is { HasIcon: true } && File.Exists(cached.IconUrl) ? cached.IconUrl : Favicons.GetCached(uri);
+            }
             if (!IsSingleUse(uri))
             {
                 var preview = await GetAsync(uri);
@@ -142,8 +171,7 @@ public static class LinkPreviews
         {
             Timeout = TimeSpan.FromSeconds(8),
         };
-        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent",
-            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36 TagBuddy/1.0");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", UserAgent);
         client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
         client.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", "en,*;q=0.5");
         return client;
@@ -249,11 +277,7 @@ public static class LinkPreviews
         bool persist = true;
         try
         {
-            var page = await GetPageAsync(uri, UsesCrawlerUa(uri));
-            if (page.Kind == PageKind.Html && UsesCrawlerUa(uri) && page.Preview is { HasImage: false })
-                page = await GetPageAsync(uri, crawler: false);   // the crawler answer was empty: try as a browser
-            else if (page.Kind == PageKind.Failed && UsesCrawlerUa(uri))
-                page = await GetPageAsync(uri, crawler: false);
+            var page = await GetPageAsync(uri);
 
             finalUri = page.FinalUri;
             preview = page.Preview;
@@ -331,18 +355,15 @@ public static class LinkPreviews
     private static Task<(string? Path, bool Sparse, bool Skipped)> CaptureSnapshotAsync(Uri uri) =>
         PageSnapshot.CaptureAsync(uri, CacheKey(uri));
 
-    private static bool UsesCrawlerUa(Uri uri) => Features.CrawlerUserAgent && OEmbed.HostIs(uri.Host, CrawlerUaHosts);
-
     private static bool IsSnapshotExcluded(Uri uri) => OEmbed.HostIs(uri.Host, SnapshotExcludedHosts);
 
     private enum PageKind { Html, Text, File, Failed }
 
     private sealed record PageResult(PageKind Kind, Uri FinalUri, LinkPreview Preview, IReadOnlyList<LinkTag>? LinkTags, string? OEmbedHref);
 
-    private static Task<PageResult> GetPageAsync(Uri uri, bool crawler)
+    private static Task<PageResult> GetPageAsync(Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        if (crawler) request.Headers.TryAddWithoutValidation("User-Agent", CrawlerUserAgent);
 
         return SendAsync(request, async (response, token) =>
         {
@@ -393,7 +414,7 @@ public static class LinkPreviews
     internal static string CacheKey(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..32];
 
-    private static async Task<string> ReadTextAsync(HttpResponseMessage response, int maxBytes, CancellationToken token)
+    internal static async Task<string> ReadTextAsync(HttpResponseMessage response, int maxBytes, CancellationToken token)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(token);
         using var buffer = new MemoryStream();
