@@ -6,7 +6,7 @@
              Shell.TabBarIsVisible="False">
     <Grid RowDefinitions="Auto,Auto,*">
 
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6" Padding="12,8"
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="6" Padding="12,8"
               BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
             <Label x:Name="UrlLabel"
                    Grid.Column="0"
@@ -14,9 +14,7 @@
                    TextColor="Gray"
                    VerticalOptions="Center"
                    LineBreakMode="MiddleTruncation" />
-            <Button Grid.Column="1" Text="Reload" Clicked="OnReload" FontSize="12" Padding="10,4"
-                    BackgroundColor="#6B7280" TextColor="White" />
-            <Button Grid.Column="2" Text="Browser" Clicked="OnOpenExternal" FontSize="12" Padding="10,4"
+            <Button Grid.Column="1" Text="Open in browser" Clicked="OnOpenExternal" FontSize="12" Padding="10,4"
                     BackgroundColor="#6B7280" TextColor="White" />
         </Grid>
 

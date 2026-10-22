@@ -54,17 +54,42 @@ public static class Links
         _ => "Open",
     };
 
+    /// <summary>Opens the link in the app that handles it: the browser, mail, phone, SMS or maps.</summary>
     public static async Task<bool> OpenAsync(Uri uri)
     {
         try
         {
-            if (uri.Scheme is "http" or "https")
-                return await Browser.Default.OpenAsync(uri, BrowserLaunchMode.External);
-            return await Launcher.Default.TryOpenAsync(uri);
+            bool opened = uri.Scheme is "http" or "https"
+                ? await Browser.Default.OpenAsync(uri, BrowserLaunchMode.External)
+                : await Launcher.Default.TryOpenAsync(uri);
+            if (opened) return true;
+        }
+        catch
+        {
+            // Refused or failed: try handing it to Android directly below.
+        }
+        return OpenWithAndroid(uri);
+    }
+
+    /// <summary>MAUI first checks that some app can take the link, and that check fails when Android hides the
+    /// other apps (see the queries in AndroidManifest.xml). Starting the intent directly lets Android pick the
+    /// app itself; only when there truly is none does this fail.</summary>
+    private static bool OpenWithAndroid(Uri uri)
+    {
+#if ANDROID
+        try
+        {
+            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(uri.AbsoluteUri));
+            intent.AddFlags(Android.Content.ActivityFlags.NewTask);
+            Platform.AppContext.StartActivity(intent);
+            return true;
         }
         catch
         {
             return false;
         }
+#else
+        return false;
+#endif
     }
 }

@@ -14,6 +14,9 @@ public partial class WebPage : ContentPage, IQueryAttributable
 
     /// <summary>The first page that loaded from the link (after redirects); learning is done once per opening.</summary>
     private Uri? _landed;
+
+    /// <summary>The page on show now, which may be further along than the link the person came in with.</summary>
+    private Uri? _current;
     private bool _visible;
 
     public WebPage()
@@ -35,6 +38,7 @@ public partial class WebPage : ContentPage, IQueryAttributable
         {
             _uri = uri;
             _landed = null;
+            _current = uri;
             Title = uri.Host;
             UrlLabel.Text = uri.AbsoluteUri;
             Web.Source = new UrlWebViewSource { Url = uri.AbsoluteUri };
@@ -77,6 +81,7 @@ public partial class WebPage : ContentPage, IQueryAttributable
             UrlLabel.Text = $"{e.Url}  ({e.Result})";
             return;
         }
+        if (Uri.TryCreate(e.Url, UriKind.Absolute, out var shown) && shown.Scheme is "http" or "https") _current = shown;
         if (_landed is null && _uri is { } link && Uri.TryCreate(e.Url, UriKind.Absolute, out var landed))
         {
             _landed = landed;
@@ -107,10 +112,9 @@ public partial class WebPage : ContentPage, IQueryAttributable
         }
     }
 
-    private void OnReload(object? sender, EventArgs e) => Web.Reload();
-
     private async void OnOpenExternal(object? sender, EventArgs e)
     {
-        if (_uri is not null) await Links.OpenAsync(_uri);
+        if ((_current ?? _uri) is { } current && !await Links.OpenAsync(current))
+            await DisplayAlertAsync("No browser", "No app on this phone can open web pages.", "OK");
     }
 }
