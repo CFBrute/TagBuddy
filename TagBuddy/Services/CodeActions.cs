@@ -49,4 +49,58 @@ public static class CodeActions
         await Clipboard.Default.SetTextAsync(value);
         Notice.Show("Copied");
     }
+
+    /// <summary>Asks for an optional name and keeps the code in Saved, unless the same code is there already.</summary>
+    public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage)
+    {
+        if (saved.ContainsCode(item.Value, item.Format))
+        {
+            await page.DisplayAlertAsync("Already saved", alreadySavedMessage, "OK");
+            return;
+        }
+
+        var name = await page.DisplayPromptAsync("Save", "Give it a name (optional):",
+            accept: "Save", cancel: "Cancel", placeholder: item.Value, maxLength: 60);
+        if (name is null) return;
+
+        item.Name = name.Trim();
+        await saved.AddAsync(item);
+        Notice.Show("Saved");
+    }
+
+    /// <summary>Asks for an optional name and keeps the text in Saved as a text note, unless it is there already.
+    /// From there it can become a QR code, a barcode, or be written to a tag.</summary>
+    public static async Task SaveTextAsync(Page page, SavedService saved, string text, string prompt = "Give it a name (optional):")
+    {
+        if (saved.ContainsText(text))
+        {
+            await page.DisplayAlertAsync("Already saved", "This content is already saved as text.", "OK");
+            return;
+        }
+
+        var name = await page.DisplayPromptAsync("Save as text", prompt,
+            accept: "Save", cancel: "Cancel", placeholder: text, maxLength: 60);
+        if (name is null) return;
+
+        await saved.AddTextAsync(name, text);
+        Notice.Show("Saved as text");
+    }
+
+    /// <summary>Shares a tag dump as a .bin file through the Android share sheet.</summary>
+    public static async Task ShareDumpAsync(Page page, string fileName, byte[] data, string title)
+    {
+        try
+        {
+            var path = await SavedService.ExportTempAsync(fileName, data);
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = title,
+                File = new ShareFile(path, "application/octet-stream"),
+            });
+        }
+        catch (Exception ex)
+        {
+            await page.DisplayAlertAsync("Could not share", ex.Message, "OK");
+        }
+    }
 }
