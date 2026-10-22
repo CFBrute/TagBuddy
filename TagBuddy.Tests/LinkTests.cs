@@ -133,4 +133,18 @@ public class LinkTests
     [InlineData(null, 0)]
     public void LargestSize_reads_the_sizes_attribute(string? sizes, int expected) =>
         Assert.Equal(expected, Favicons.LargestSize(sizes));
+
+    [Theory]
+    [InlineData("https://youtube.com/watch?v=x", "YouTube", "Open in YouTube")]
+    [InlineData("https://example.com", "Chrome", "Open in Chrome")]
+    [InlineData("https://example.com", null, "Open link")]
+    [InlineData("https://example.com", " ", "Open link")]
+    [InlineData("tel:+46700000000", "Phone", "Call number")]
+    [InlineData("mailto:someone@example.com", "Gmail", "Send email")]
+    public void OpenLabel_names_the_app_for_web_links_only(string link, string? app, string expected) =>
+        Assert.Equal(expected, Links.OpenLabel(new Uri(link), app));
+
+    [Fact]
+    public void HandlerName_is_unknown_off_Android() =>
+        Assert.Null(Links.HandlerName(new Uri("https://example.com")));
 }
