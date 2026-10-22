@@ -324,7 +324,7 @@ public sealed partial class NfcReader
             var ndefBytes = ExtractType2Ndef(memory, []);
             if (ndefBytes is null || ndefBytes.Length == 0) return null;
             var message = new NdefMessage(ndefBytes);
-            var records = message.GetRecords()?.Select(DescribeRecord).ToList() ?? [];
+            var records = message.GetRecords()?.Select(DescribeRecord).Where(r => !r.IsSealed).ToList() ?? [];
             return records.FirstOrDefault(r => r.Kind.StartsWith("Link"))?.Text
                 ?? records.FirstOrDefault(r => r.Kind.StartsWith("Text"))?.Text
                 ?? records.FirstOrDefault(r => r.Text.Length > 0)?.Text;
@@ -390,6 +390,8 @@ public sealed partial class NfcReader
         if (record.Tnf == NdefRecord.TnfMimeMedia)
         {
             var mime = record.ToMimeType() ?? Encoding.ASCII.GetString(type);
+            if (mime == SealedText.MimeType && SealedText.LooksSealed(payload))
+                return new("Private text", "Encrypted with a passphrase", payload);
             var text = mime.StartsWith("text/") || mime.Contains("json") || mime.Contains("xml") || mime.Contains("vcard")
                 ? Encoding.UTF8.GetString(payload)
                 : $"{payload.Length} bytes of binary data";

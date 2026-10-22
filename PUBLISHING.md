@@ -37,6 +37,9 @@ phone and, if possible, an older one (the minimum is Android 7.0, API 24), in li
       check the README's notes on `ScanPage.CentreFirstDecoding`), torch, tap to focus, "From image".
 - [ ] **NFC tab** with real NTAG213/215/216 tags: read, write link/text/vCard, raw bytes, dump save/import/paste/
       write, erase. Confirm a written tag stays rewritable (no lock bits set) and a phone reads NDEF tags.
+- [ ] **Private text** on each tag size: write with a passphrase, read it back and unlock, try a wrong passphrase,
+      check that another phone or NFC app shows nothing readable, and that text too long for the tag is refused.
+      If the Play Console asks about encryption, the app uses standard AES from .NET for the person's own data only.
 - [ ] **Link previews**: with automatic previews on and off ("Tap to load preview"), single-use links (no preview),
       page snapshots for pages without a picture, opening a page in the in-app viewer and seeing its card update.
 - [ ] **Saved, Settings and About tabs**: filters, menus, rename, delete; the preview setting, clearing stored previews,

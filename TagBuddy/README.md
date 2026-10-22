@@ -19,6 +19,12 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   decodes NDEF records (text, links, MIME, external) and offers the same actions as a scanned code for the content.
   For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII).
 - **NFC** tab, Write: type a link, text or vCard (or load one from Saved) and hold a writable tag to write it as NDEF.
+  **Private text** encrypts the text with a passphrase first (`Services/SealedText.cs`): PBKDF2-SHA256 with a
+  random salt for the key, AES-256-GCM for the text, stored as an NDEF record of type
+  `application/vnd.tagbuddy.sealed`. Other phones see nothing readable; Tag Buddy asks for the passphrase when it
+  reads the tag, and a wrong passphrase or a changed tag does not open. The passphrase is never stored, so a
+  forgotten one means the text is gone. About 90 bytes of the tag go to the record and the encryption, which
+  leaves roughly 54 characters on an NTAG213, 414 on an NTAG215 and 798 on an NTAG216.
   Writable NDEF tags only; the serial number is never changed and locked cards cannot be written.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),

@@ -75,6 +75,10 @@ public sealed partial class NfcReader
     public static NdefMessage BuildVCard(string vcard) =>
         new([NdefRecord.CreateMime("text/vcard", Encoding.UTF8.GetBytes(vcard))!]);
 
+    /// <summary>A private-text record: bytes from <see cref="SealedText.Seal"/>, under the app's own type.</summary>
+    public static NdefMessage BuildSealed(byte[] sealedBytes) =>
+        new([NdefRecord.CreateMime(SealedText.MimeType, sealedBytes)!]);
+
     public static NdefMessage BuildEmpty() =>
         new([new NdefRecord(NdefRecord.TnfEmpty, [], [], [])]);
 

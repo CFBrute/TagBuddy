@@ -47,6 +47,15 @@
                            HorizontalTextAlignment="Center"
                            LineBreakMode="WordWrap" />
 
+                    <!-- Private text on the tag: opened with its passphrase, on this phone -->
+                    <VerticalStackLayout x:Name="UnlockPanel" Spacing="8" IsVisible="False">
+                        <Label x:Name="UnlockStatus" FontSize="13" TextColor="Gray" HorizontalTextAlignment="Center" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Entry x:Name="UnlockEntry" Placeholder="Passphrase" IsPassword="True" Completed="OnUnlock" />
+                            <Button Grid.Column="1" Text="Unlock" Clicked="OnUnlock" />
+                        </Grid>
+                    </VerticalStackLayout>
+
                     <VerticalStackLayout x:Name="ContentActions" Spacing="12" IsVisible="False">
                         <HorizontalStackLayout HorizontalOptions="Center">
                             <Button Style="{StaticResource PrimaryIconButton}" ImageSource="ic_bookmark.png"
@@ -110,6 +119,7 @@
                         <x:String>Link</x:String>
                         <x:String>Plain text</x:String>
                         <x:String>Contact (vCard)</x:String>
+                        <x:String>Private text (passphrase)</x:String>
                         <x:String>Raw bytes (no NDEF)</x:String>
                         <x:String>Binary dump (Amiibo, backup)</x:String>
                         <x:String>Erase tag (reset)</x:String>
@@ -130,6 +140,14 @@
                         <Button Text="Clear" Clicked="OnClearEditor"
                                 BackgroundColor="#6B7280" TextColor="White" />
                     </HorizontalStackLayout>
+
+                    <!-- Private text: the passphrase it is encrypted with, typed twice; never stored -->
+                    <VerticalStackLayout x:Name="PrivatePanel" Spacing="8" IsVisible="False">
+                        <Entry x:Name="PassphraseEntry" Placeholder="Passphrase (at least 8 characters)" IsPassword="True"
+                               TextChanged="OnWriteTextChanged" />
+                        <Entry x:Name="RepeatEntry" Placeholder="The same passphrase again" IsPassword="True"
+                               TextChanged="OnWriteTextChanged" />
+                    </VerticalStackLayout>
                 </VerticalStackLayout>
 
                 <!-- Binary dump: restore a saved tag image -->
