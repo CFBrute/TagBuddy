@@ -56,7 +56,7 @@ public partial class SavedPage : ContentPage
         EmptyHint.Text = _filter switch
         {
             SavedKind.Code => "Generate or scan a code and tap Save.",
-            SavedKind.Text => "Tap + Text here, or save the content of a scanned code or an NFC tag as text.",
+            SavedKind.Text => "Save the content of a scanned code or an NFC tag as text.",
             SavedKind.Dump => "Read a tag on the NFC tab and tap Save dump, or import a .bin file there.",
             _ => "Codes you generate or scan, text, and tag dumps you save end up here.",
         };
@@ -70,32 +70,97 @@ public partial class SavedPage : ContentPage
             if (_filter is null || item.Kind == _filter) _shown.Add(item);
     }
 
-    // ---------------------------------------------------------------- add text
+    // ---------------------------------------------------------------- select mode (long press)
 
-    private async void OnNewText(object? sender, EventArgs e)
+    private bool _selecting;
+
+    private static SavedItem? ItemOf(object? row) => (row as BindableObject)?.BindingContext as SavedItem;
+
+    private void OnRowLongPressed(object? sender, EventArgs e)
     {
+        if (ItemOf(sender) is not { } item) return;
+        if (!_selecting)
+        {
+            _selecting = true;
+            FilterBar.IsVisible = false;
+            SelectBar.IsVisible = true;
+        }
+        Toggle(item);
+    }
+
+    private void Toggle(SavedItem item)
+    {
+        item.IsSelected = !item.IsSelected;
+        int count = _saved.Items.Count(i => i.IsSelected);
+        if (count == 0)
+        {
+            StopSelecting();
+            return;
+        }
+        SelectCount.Text = $"{count} selected";
+        SelectAllButton.IsVisible = _shown.Any(i => !i.IsSelected);
+    }
+
+    private void StopSelecting()
+    {
+        _selecting = false;
+        foreach (var item in _saved.Items) item.IsSelected = false;
+        SelectBar.IsVisible = false;
+        FilterBar.IsVisible = true;
+    }
+
+    private void OnCancelSelect(object? sender, EventArgs e) => StopSelecting();
+
+    /// <summary>Picks every item the filter shows.</summary>
+    private void OnSelectAll(object? sender, EventArgs e)
+    {
+        foreach (var item in _shown) item.IsSelected = true;
+        SelectCount.Text = $"{_shown.Count} selected";
+        SelectAllButton.IsVisible = false;
+    }
+
+    private async void OnDeleteSelected(object? sender, EventArgs e)
+    {
+        var picked = _saved.Items.Where(i => i.IsSelected).ToList();
+        if (picked.Count == 0) return;
+        var what = picked.Count == 1 ? $"\"{picked[0].DisplayName}\"" : $"these {picked.Count} items";
+        if (!await DisplayAlertAsync("Delete", $"Remove {what} from Saved? This cannot be undone.", "Delete", "Cancel"))
+            return;
         try
         {
-            var text = await DisplayPromptAsync("Save text", "The text to keep:", accept: "Next", cancel: "Cancel", maxLength: 4000);
-            if (string.IsNullOrWhiteSpace(text)) return;
-            var name = await DisplayPromptAsync("Name", "Give it a name (optional):", accept: "Save", cancel: "Cancel",
-                placeholder: text.Trim(), maxLength: 60);
-            if (name is null) return;
-            await _saved.AddTextAsync(name, text.Trim());
-            _filter = _filter == SavedKind.Text ? _filter : null;
-            ApplyFilter();
+            await _saved.RemoveManyAsync(picked);
         }
         catch (Exception ex)
         {
-            await DisplayAlertAsync("Could not save", ex.Message, "OK");
+            await DisplayAlertAsync("Could not delete", ex.Message, "OK");
         }
+        StopSelecting();
+    }
+
+    /// <summary>Back leaves select mode before it leaves the page.</summary>
+    protected override bool OnBackButtonPressed()
+    {
+        if (!_selecting) return base.OnBackButtonPressed();
+        StopSelecting();
+        return true;
+    }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        if (_selecting) StopSelecting();
     }
 
     // ---------------------------------------------------------------- tap and menu
 
-    private async void OnItemTapped(object? sender, TappedEventArgs e)
+    private async void OnRowPressed(object? sender, EventArgs e)
     {
-        if (e.Parameter is not SavedItem item) return;
+        if (ItemOf(sender) is not { } item) return;
+        if (_selecting)
+        {
+            Toggle(item);
+            return;
+        }
         try
         {
             if (item.IsCode || item.IsDump) await _saved.MarkUsedAsync(item);
@@ -113,6 +178,11 @@ public partial class SavedPage : ContentPage
     {
         if (sender is Button { CommandParameter: SavedItem item })
         {
+            if (_selecting)
+            {
+                Toggle(item);
+                return;
+            }
             try { await ShowMenuAsync(item); }
             catch (Exception ex) { await DisplayAlertAsync("Could not do that", ex.Message, "OK"); }
         }
@@ -243,12 +313,6 @@ public partial class SavedPage : ContentPage
             return;
         }
         await CodeActions.ShareDumpAsync(this, item.DumpFile, data, item.DisplayName);
-    }
-
-    private async void OnDeleteInvoked(object? sender, EventArgs e)
-    {
-        if (sender is SwipeItem { CommandParameter: SavedItem item })
-            await DeleteAsync(item);
     }
 
     private async Task DeleteAsync(SavedItem item)

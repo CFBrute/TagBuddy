@@ -204,6 +204,21 @@ public class SavedService
         await SaveAsync();
     }
 
+    /// <summary>Removes several items (and their dump files) with one write of the list.</summary>
+    public async Task RemoveManyAsync(IReadOnlyList<SavedItem> items)
+    {
+        await LoadAsync();
+        foreach (var item in items)
+        {
+            Items.Remove(item);
+            if (item.IsDump)
+            {
+                try { File.Delete(DumpPath(item)); } catch { /* already gone */ }
+            }
+        }
+        await SaveAsync();
+    }
+
     /// <summary>Notes that the item was just used (shown, opened, shared, copied, written). It moves to the top the
     /// next time the list is sorted (<see cref="SortByUse"/>), not now, so a row never jumps away while looked at.</summary>
     public async Task MarkUsedAsync(SavedItem item)
