@@ -109,6 +109,8 @@
                         <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
                                 Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
                     </HorizontalStackLayout>
+                    <!-- What another app can do with it, in words: "Sign in with passkey", "Join Wi-Fi network", ... (not for web links, which have the icon and View page) -->
+                    <Button x:Name="HandoffButton" Clicked="OnOpenLink" IsVisible="False" HorizontalOptions="Center" />
                     <HorizontalStackLayout HorizontalOptions="Center" Spacing="10">
                         <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False" />
                         <Button Text="Open in generator" Clicked="OnUseInGenerator"

@@ -118,7 +118,7 @@ public partial class SavedPage : ContentPage
     /// <summary>The item's menu (<see cref="SavedMenu"/>). A group opens a second menu whose "Back" returns here.</summary>
     private async Task ShowMenuAsync(SavedItem item)
     {
-        var appName = Links.IsWebLink(item.Value, out var web) ? Links.HandlerName(web) : null;
+        var appName = Handoff.TryDetect(item.Value, out var handoff) ? HandoffLauncher.AppName(handoff) : null;
         var menu = SavedMenu.For(item, appName);
         while (true)
         {

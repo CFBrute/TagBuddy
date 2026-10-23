@@ -168,7 +168,7 @@ public partial class NfcPage : ContentPage
     private void OnTagRead(NfcTagInfo tag)
     {
         _last = tag;
-        Feedback.Success();
+        Feedback.Tag(ok: true);
 
         WaitingPanel.IsVisible = false;
         ResultPanel.IsVisible = true;
@@ -238,9 +238,7 @@ public partial class NfcPage : ContentPage
         ContentActions.IsVisible = hasContent;
         Preview.Value = content;
         ViewPageButton.IsVisible = Links.IsWebLink(content, out _);
-        Uri? uri = null;
-        OpenLinkButton.IsVisible = hasContent && Links.TryGetOpenable(content, out uri);
-        if (OpenLinkButton.IsVisible && uri is not null) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+        HandoffButtons.Show(hasContent ? content : null, OpenLinkButton, HandoffButton);
     }
 
     /// <summary>Opens the tag's private text with the passphrase typed, off the main thread (the key derivation
@@ -277,13 +275,13 @@ public partial class NfcPage : ContentPage
 
         if (!ok)
         {
-            Feedback.Failure();
+            Feedback.Tag(ok: false);
             UnlockStatus.Text = "That passphrase does not open this tag (or the tag was changed).";
             UnlockStatus.TextColor = Palette.Error;
             return;
         }
 
-        Feedback.Success();
+        Feedback.Tag(ok: true);
         _unlocked = text;
         UnlockEntry.Text = string.Empty;
         UnlockEntry.Unfocus();
@@ -532,8 +530,7 @@ public partial class NfcPage : ContentPage
 
     private void OnTagWritten(bool ok, string note)
     {
-        if (ok) Feedback.Success();
-        else Feedback.Failure();
+        Feedback.Tag(ok);
 
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;

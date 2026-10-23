@@ -22,6 +22,9 @@ public static class ScanDetails
         if (v.StartsWith("geo:", StringComparison.OrdinalIgnoreCase)) return "Location";
         if (v.StartsWith("otpauth://", StringComparison.OrdinalIgnoreCase)) return "One-time password secret (authenticator)";
         if (v.StartsWith("bitcoin:", StringComparison.OrdinalIgnoreCase)) return "Bitcoin payment";
+        if (v.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)) return "Lightning payment";
+        if (v.StartsWith("FIDO:/", StringComparison.OrdinalIgnoreCase)) return "Passkey sign-in request (FIDO) from another device";
+        if (v.StartsWith("market://", StringComparison.OrdinalIgnoreCase)) return "Google Play link";
         if (Regex.IsMatch(v, @"^[A-Za-z][A-Za-z0-9+.-]*://")) return "App link (" + v[..v.IndexOf(':')] + ")";
         if (v.All(char.IsAsciiDigit)) return "Numeric";
         if (Regex.IsMatch(v, @"^[0-9A-Z $%*+\-./:]+$")) return "Alphanumeric (QR compact mode)";

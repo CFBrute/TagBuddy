@@ -23,7 +23,8 @@ public static class SavedMenu
 {
     public const string Delete = "Delete";
 
-    /// <param name="appName">The app a web link opens in ("YouTube"), when known, for the open line's label.</param>
+    /// <param name="appName">The app the value opens in ("YouTube", an authenticator), when known, for the open
+    /// line's label.</param>
     public static IReadOnlyList<MenuEntry> For(SavedItem item, string? appName = null)
     {
         var menu = new List<MenuEntry>();
@@ -37,8 +38,8 @@ public static class SavedMenu
             return menu;
         }
 
-        if (Links.TryGetOpenable(item.Value, out var uri))
-            menu.Add(new(Links.OpenLabel(uri, appName), SavedAction.Open));
+        if (Handoff.TryDetect(item.Value, out var handoff))
+            menu.Add(new(handoff.Label(appName), SavedAction.Open));
         if (Links.IsWebLink(item.Value, out _))
             menu.Add(new("View page in app", SavedAction.ViewPage));
 
