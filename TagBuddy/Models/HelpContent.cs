@@ -88,6 +88,9 @@ public static class HelpContent
                 new HelpText("Its size, distance from the code and maximum width are measured against the code itself, so the picture looks the same however large it is printed. The text is only in the picture; the code itself does not change."),
                 new HelpText("Pick a font for it too: sans, condensed, serif or monospace, regular or bold.")),
             new HelpTip("The QR and Barcode tabs remember how you left them: the advanced options, the barcode type, and the position, font, size, distance and width of the text under the image. Each tab keeps its own."),
+            new HelpMore("Saving versions of the same code",
+                new HelpText("Saving a code that is already in Saved with exactly the same look just tells you so. If the same code is saved with a different look, such as other text under the image or other QR options, the app says what differs and asks whether to keep this version too."),
+                new HelpText("In Saved, a version with its own text under the image shows that text after the content, so the versions are easy to tell apart.")),
             new HelpSeeAlso("show", "barcodes", "saved"),
         ]),
 

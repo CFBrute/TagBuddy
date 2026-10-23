@@ -53,10 +53,22 @@ public static class CodeActions
     /// <summary>Asks for an optional name and keeps the code in Saved, unless the same code is there already.</summary>
     public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage)
     {
-        if (saved.ContainsCode(item.Value, item.Format))
+        // The same code may be saved already, with the same picture (nothing to do) or a different one (text under
+        // the image, QR options): then saving this one too is a choice, since both are worth keeping.
+        var same = saved.SameCodes(item);
+        if (same.FirstOrDefault(s => s.ImageDifferences(item).Count == 0) is { } identical)
         {
-            await page.DisplayAlertAsync("Already saved", alreadySavedMessage, "OK");
+            await page.DisplayAlertAsync("Already saved", $"{alreadySavedMessage} It looks exactly the same, as \"{identical.DisplayName}\".", "OK");
             return;
+        }
+        if (same.Count > 0)
+        {
+            var closest = same.OrderBy(s => s.ImageDifferences(item).Count).First();
+            var differs = string.Join(", ", closest.ImageDifferences(item));
+            if (!await page.DisplayAlertAsync("Saved with a different look",
+                    $"{alreadySavedMessage} As \"{closest.DisplayName}\", but its picture differs in {differs}.\n\nSave this version too?",
+                    "Save this version", "Cancel"))
+                return;
         }
 
         var name = await page.DisplayPromptAsync("Save", "Give it a name (optional):",

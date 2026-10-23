@@ -225,8 +225,9 @@ public class SavedService
         await JsonSerializer.SerializeAsync(stream, Items.ToList(), JsonOptions);
     }
 
-    public bool ContainsCode(string value, string format) =>
-        Items.Any(i => i.IsCode && i.Value == value && i.Format == format);
+    /// <summary>Saved codes a scanner would read the same as <paramref name="item"/>, whatever their picture looks like.</summary>
+    public IReadOnlyList<SavedItem> SameCodes(SavedItem item) =>
+        Items.Where(i => i.IsSameCode(item)).ToList();
 
     public bool ContainsText(string value) =>
         Items.Any(i => i.IsText && i.Value == value);

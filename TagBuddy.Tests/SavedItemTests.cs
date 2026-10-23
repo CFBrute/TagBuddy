@@ -20,7 +20,7 @@ public class SavedItemTests
             .ToHashSet();
         var written = json.RootElement.EnumerateObject().Select(p => p.Name);
 
-        Assert.Empty(written.Where(name => !stored.Contains(name)));
+        Assert.DoesNotContain(written, name => !stored.Contains(name));
     }
 
     [Fact]
