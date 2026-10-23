@@ -39,8 +39,8 @@ public partial class ShowBarcodePage : ContentPage, IQueryAttributable
             ValueLabel.Text = item.Value;
             NameLabel.Text = string.IsNullOrWhiteSpace(item.Name) ? format.Label : $"{item.Name}  -  {format.Label}";
 
-            OpenLinkButton.IsVisible = Links.TryGetOpenable(item.Value, out var uri);
-            if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+            OpenLinkButton.IsVisible = Handoff.TryDetect(item.Value, out var handoff);
+            if (handoff is not null) IconButtons.SetLabel(OpenLinkButton, HandoffLauncher.Label(handoff));
             Preview.Value = item.Value;
         }
     }

@@ -65,6 +65,8 @@
                             <Button x:Name="OpenLinkButton" Style="{StaticResource LinkIconButton}" ImageSource="ic_open.png"
                                     Clicked="OnOpenLink" SemanticProperties.Description="Open link" ToolTipProperties.Text="Open link" IsVisible="False" />
                         </HorizontalStackLayout>
+                        <!-- What another app can do with it, in words (not for web links) -->
+                        <Button x:Name="HandoffButton" Clicked="OnOpenLink" IsVisible="False" HorizontalOptions="Center" />
                         <Button x:Name="ViewPageButton" Text="View page" Clicked="OnViewPage" IsVisible="False"
                                 HorizontalOptions="Center" />
                         <controls:LinkPreviewView x:Name="Preview" />

@@ -44,24 +44,12 @@ public static class Links
     public static bool IsWebLink(string? value, out Uri uri) =>
         TryGetOpenable(value, out uri) && uri.Scheme is "http" or "https";
 
-    /// <summary>The button text for opening a link outside the app. Web links name the app that will take them
-    /// ("Open in YouTube", "Open in Chrome") when Android has one picked, so nobody expects a browser and lands in
-    /// another app.</summary>
-    public static string OpenLabel(Uri uri) => OpenLabel(uri, HandlerName(uri));
-
-    public static string OpenLabel(Uri uri, string? appName) => uri.Scheme.ToLowerInvariant() switch
-    {
-        "http" or "https" => string.IsNullOrWhiteSpace(appName) ? "Open link" : $"Open in {appName}",
-        "mailto" => "Send email",
-        "tel" => "Call number",
-        "sms" or "smsto" => "Send SMS",
-        "geo" => "Show on map",
-        _ => "Open",
-    };
-
     /// <summary>The name of the app Android will open the link in, such as "YouTube" or "Chrome". Null when
     /// Android will ask the person to choose (no default app), when no app can take it, or off Android.</summary>
-    public static string? HandlerName(Uri uri)
+    public static string? HandlerName(Uri uri) => HandlerName(uri.AbsoluteUri);
+
+    /// <summary>The same for a link given as text, with its scheme spelled as written (see <see cref="OpenText"/>).</summary>
+    public static string? HandlerName(string link)
     {
 #if ANDROID
         try
@@ -69,7 +57,7 @@ public static class Links
             var context = Platform.AppContext;
             var pm = context.PackageManager;
             if (pm is null) return null;
-            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(uri.AbsoluteUri));
+            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(link));
             var info = OperatingSystem.IsAndroidVersionAtLeast(33)
                 ? pm.ResolveActivity(intent, Android.Content.PM.PackageManager.ResolveInfoFlags.Of((long)Android.Content.PM.PackageInfoFlags.MatchDefaultOnly))
                 : pm.ResolveActivity(intent, Android.Content.PM.PackageInfoFlags.MatchDefaultOnly);
@@ -107,18 +95,20 @@ public static class Links
         {
             // Refused or failed: try handing it to Android directly below.
         }
-        return OpenWithAndroid(uri);
+        return OpenText(uri.AbsoluteUri);
     }
 
-    /// <summary>MAUI first checks that some app can take the link, and that check fails when Android hides the
-    /// other apps (see the queries in AndroidManifest.xml). Starting the intent directly lets Android pick the
-    /// app itself; only when there truly is none does this fail.</summary>
-    private static bool OpenWithAndroid(Uri uri)
+    /// <summary>Hands a link straight to Android, which picks the app itself; only when there truly is none does this
+    /// fail. MAUI's own launchers first check that some app can take the link, and that check fails when Android
+    /// hides the other apps (see the queries in AndroidManifest.xml).
+    /// <para>The link is passed as text, not as a parsed Uri, because Android matches schemes case-sensitively and
+    /// .NET lower-cases them: a passkey request must arrive as "FIDO:/...", which is how it is registered.</para></summary>
+    public static bool OpenText(string link)
     {
 #if ANDROID
         try
         {
-            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(uri.AbsoluteUri));
+            var intent = new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse(link));
             intent.AddFlags(Android.Content.ActivityFlags.NewTask);
             Platform.AppContext.StartActivity(intent);
             return true;

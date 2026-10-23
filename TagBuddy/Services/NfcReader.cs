@@ -100,10 +100,11 @@ public sealed partial class NfcReader
 
         // SkipNdefCheck: Android's own NDEF probe makes payment and access cards drop before the app
         // ever sees them. The app reads NDEF itself instead (Type 2 and Type 4 tags).
-        adapter.EnableReaderMode(activity, _callback,
-            NfcReaderFlags.NfcA | NfcReaderFlags.NfcB | NfcReaderFlags.NfcF | NfcReaderFlags.NfcV |
-            NfcReaderFlags.NfcBarcode | NfcReaderFlags.SkipNdefCheck,
-            extras);
+        // NoPlatformSounds: the person can switch off Android's own "tag found" sound (Settings).
+        var flags = NfcReaderFlags.NfcA | NfcReaderFlags.NfcB | NfcReaderFlags.NfcF | NfcReaderFlags.NfcV |
+                    NfcReaderFlags.NfcBarcode | NfcReaderFlags.SkipNdefCheck;
+        if (!AppSettings.NfcSound) flags |= NfcReaderFlags.NoPlatformSounds;
+        adapter.EnableReaderMode(activity, _callback, flags, extras);
     }
 
     public void Stop()

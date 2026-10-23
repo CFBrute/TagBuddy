@@ -387,8 +387,7 @@ public partial class ScanPage : ContentPage
         StatusLabel.Text = $"{result.FormatLabel}, {source}";
         ResultLabel.Text = result.Value;
         ShowDetails(result);
-        OpenLinkButton.IsVisible = Links.TryGetOpenable(result.Value, out var uri);
-        if (OpenLinkButton.IsVisible) IconButtons.SetLabel(OpenLinkButton, Links.OpenLabel(uri));
+        HandoffButtons.Show(result.Value, OpenLinkButton, HandoffButton);
         ViewPageButton.IsVisible = Links.IsWebLink(result.Value, out _);
         Preview.Value = result.Value;
         ResultButtons.IsVisible = true;
@@ -405,6 +404,8 @@ public partial class ScanPage : ContentPage
 
         AddDetail("Format", result.FormatLabel);
         AddDetail("Content", ScanDetails.DescribeContent(result.Value));
+        if (Handoff.TryDetect(result.Value, out var handoff) && !handoff.IsWeb)
+            AddDetail("Action", HandoffLauncher.Label(handoff));
         AddDetail("Length", $"{result.Value.Length} characters, {Encoding.UTF8.GetByteCount(result.Value)} bytes");
 
         foreach (var (label, value) in ScanDetails.DescribeMetadata(result))

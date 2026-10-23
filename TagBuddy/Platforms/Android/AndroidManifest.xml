@@ -44,6 +44,32 @@
 			<action android:name="android.intent.action.VIEW" />
 			<data android:scheme="geo" />
 		</intent>
+		<!-- Apps for app links a code can carry: passkey sign-in (Google Play services registers upper-case FIDO), authenticators,
+		     wallets and Google Play, so the open button can name them -->
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="FIDO" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="fido" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="otpauth" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="bitcoin" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="lightning" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:scheme="market" />
+		</intent>
 		<!-- Apps that take links to their own site (YouTube, Instagram, ...). Without these Android hides them, and the
 		     viewer's open button could name a browser for a link that opens in the app. One host per entry: Android
 		     matches each entry as a single address. -->

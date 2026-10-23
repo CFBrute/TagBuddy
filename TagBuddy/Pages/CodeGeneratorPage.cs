@@ -61,9 +61,9 @@ public abstract class CodeGeneratorPage : ContentPage
         ActionRow.IsVisible = valid;
         Caption.Follow(value);
 
-        var isLink = Links.TryGetOpenable(value, out var uri);
-        OpenLink.IsVisible = valid && isLink;
-        if (isLink) IconButtons.SetLabel(OpenLink, Links.OpenLabel(uri));
+        var canOpen = Handoff.TryDetect(value, out var handoff);
+        OpenLink.IsVisible = valid && canOpen;
+        if (canOpen) IconButtons.SetLabel(OpenLink, HandoffLauncher.Label(handoff!));
 
         if (valid) RenderPreview();
         else CodePreview.Clear();

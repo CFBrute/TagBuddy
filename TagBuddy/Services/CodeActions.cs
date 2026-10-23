@@ -33,15 +33,19 @@ public static class CodeActions
         }
     }
 
+    /// <summary>Hands the value to the app that takes it (<see cref="Handoff"/>): a link, a passkey sign-in, a Wi-Fi
+    /// network, a contact, an event. Requests with consequences are confirmed first.</summary>
     public static async Task OpenLinkAsync(Page page, string value)
     {
-        if (!Links.TryGetOpenable(value, out var uri))
+        if (!Handoff.TryDetect(value, out var handoff))
         {
-            await page.DisplayAlertAsync("Not a link", "This value is not something the phone can open.", "OK");
+            await page.DisplayAlertAsync("Nothing to open", "No app on the phone knows what to do with this.", "OK");
             return;
         }
-        if (!await Links.OpenAsync(uri))
-            await page.DisplayAlertAsync("Could not open", uri.ToString(), "OK");
+        if (handoff.Confirmation is { } ask && !await page.DisplayAlertAsync(ask.Title, ask.Message, ask.Accept, "Cancel"))
+            return;
+        if (!await HandoffLauncher.OpenAsync(handoff))
+            await page.DisplayAlertAsync("Could not open", handoff.NoAppMessage, "OK");
     }
 
     public static async Task CopyTextAsync(Page page, string value)

@@ -14,6 +14,7 @@ public partial class SettingsPage : ContentPage
         _loading = true;
         VibrateSwitch.IsToggled = AppSettings.Vibrate;
         SoundSwitch.IsToggled = AppSettings.Sound;
+        NfcSoundSwitch.IsToggled = AppSettings.NfcSound;
         MaxBrightnessSwitch.IsToggled = AppSettings.MaxBrightness;
         AutoPreviewSwitch.IsToggled = AppSettings.AutoPreviews;
         _loading = false;
@@ -34,6 +35,13 @@ public partial class SettingsPage : ContentPage
         if (_loading) return;
         AppSettings.Sound = e.Value;
         if (e.Value) Feedback.Success();
+    }
+
+    /// <summary>Takes effect the next time the NFC tab starts reading, which is whenever it is opened.</summary>
+    private void OnNfcSoundToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_loading) return;
+        AppSettings.NfcSound = e.Value;
     }
 
     private void OnMaxBrightnessToggled(object? sender, ToggledEventArgs e)

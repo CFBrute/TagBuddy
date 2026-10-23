@@ -16,6 +16,9 @@ public class ManifestTests
     [InlineData("android.intent.action.VIEW", "sms")]
     [InlineData("android.intent.action.VIEW", "smsto")]
     [InlineData("android.intent.action.VIEW", "geo")]
+    [InlineData("android.intent.action.VIEW", "FIDO")]
+    [InlineData("android.intent.action.VIEW", "otpauth")]
+    [InlineData("android.intent.action.VIEW", "market")]
     public void Manifest_can_see_the_apps_it_opens(string action, string scheme)
     {
         var intents = LoadManifest().Root!.Element("queries")?.Elements("intent") ?? [];
