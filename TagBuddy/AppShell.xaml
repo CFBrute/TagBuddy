@@ -31,7 +31,8 @@
                       Route="nfc"
                       ContentTemplate="{DataTemplate pages:NfcPage}" />
         <!-- More has three top tabs: Settings first (used more often), then Help, then About -->
-        <Tab Title="More"
+        <Tab x:Name="MoreTab"
+             Title="More"
              Icon="tab_more.png"
              Route="more">
             <ShellContent Title="Settings"

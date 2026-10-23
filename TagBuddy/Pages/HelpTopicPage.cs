@@ -7,8 +7,10 @@ public class HelpTopicPage : ContentPage, IQueryAttributable
 {
     public const string Route = "helptopic";
 
-    public static Task ShowAsync(string topicId) =>
-        Shell.Current.GoToAsync(Route, new Dictionary<string, object> { ["id"] = topicId });
+    /// <summary>Opens a topic. <paramref name="replace"/> swaps the topic on show for the new one (See also links),
+    /// so following links never builds a long trail of pages to go back through: back always leads to the list.</summary>
+    public static Task ShowAsync(string topicId, bool replace = false) =>
+        Shell.Current.GoToAsync(replace ? $"../{Route}" : Route, new Dictionary<string, object> { ["id"] = topicId });
 
     public void ApplyQueryAttributes(IDictionary<string, object> query)
     {
@@ -138,7 +140,7 @@ internal static class HelpViews
             if (HelpContent.Find(id) is not { } topic) continue;
             var link = new Label { Text = $"{topic.Title}  ›", FontSize = 15, Padding = new Thickness(0, 4) };
             link.SetAppThemeColor(Label.TextColorProperty, Color.FromArgb("#C7780B"), Palette.Accent);
-            link.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(async () => await HelpTopicPage.ShowAsync(topic.Id)) });
+            link.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(async () => await HelpTopicPage.ShowAsync(topic.Id, replace: true)) });
             stack.Add(link);
         }
         return stack;
