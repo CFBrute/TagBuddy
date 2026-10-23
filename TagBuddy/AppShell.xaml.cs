@@ -11,6 +11,7 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(ShowBarcodePage.Route, typeof(ShowBarcodePage));
         Routing.RegisterRoute(WebPage.Route, typeof(WebPage));
         Routing.RegisterRoute(DumpPage.Route, typeof(DumpPage));
+        Routing.RegisterRoute(HelpTopicPage.Route, typeof(HelpTopicPage));
 
 #if ANDROID
         // A private tag Android handed the app: go to the NFC tab, which shows it with the passphrase box. The tag
