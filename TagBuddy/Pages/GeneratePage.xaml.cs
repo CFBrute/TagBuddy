@@ -12,11 +12,16 @@ public partial class GeneratePage : CodeGeneratorPage
     public string? IncomingValue { get; set; }
     public string? IncomingFormat { get; set; }
 
+    /// <summary>Set while a code handed over from another tab is put in place: its type is shown, not remembered.</summary>
+    private bool _incoming;
+
     public GeneratePage(SavedService saved) : base(saved)
     {
         InitializeComponent();
         FormatPicker.ItemsSource = BarcodeTypes.Linear.Select(f => f.Label).ToList();
-        FormatPicker.SelectedIndex = 0;
+        var last = BarcodeTypes.Linear.ToList().FindIndex(f => f.Key == GeneratorSettings.BarcodeFormat);
+        FormatPicker.SelectedIndex = Math.Max(0, last);
+        CaptionArea.Remember(GeneratorSettings.Barcode);
     }
 
     protected override InputView ValueInput => ValueEntry;
@@ -37,7 +42,9 @@ public partial class GeneratePage : CodeGeneratorPage
 
         var format = BarcodeTypes.Get(IncomingFormat ?? BarcodeTypes.Linear[0].Key);
         var index = BarcodeTypes.Linear.ToList().IndexOf(format);
+        _incoming = true;
         FormatPicker.SelectedIndex = index < 0 ? 0 : index;
+        _incoming = false;
         ValueEntry.Text = IncomingValue;
         IncomingValue = null;
         IncomingFormat = null;
@@ -51,6 +58,7 @@ public partial class GeneratePage : CodeGeneratorPage
     private void OnFormatChanged(object? sender, EventArgs e)
     {
         HintLabel.Text = CurrentFormat.Hint;
+        if (!_incoming) GeneratorSettings.BarcodeFormat = CurrentFormat.Key;
         Refresh();
     }
 

@@ -20,7 +20,26 @@ public partial class QrPage : CodeGeneratorPage
     {
         InitializeComponent();
         EccPicker.ItemsSource = QrOptions.Levels.Select(l => l.Label).ToList();
-        EccPicker.SelectedIndex = QrOptions.Levels.ToList().FindIndex(l => l.Level == QrOptions.DefaultErrorCorrection);
+        _restoring = true;
+        var level = QrOptions.Levels.ToList().FindIndex(l => l.Level == GeneratorSettings.QrErrorCorrection);
+        EccPicker.SelectedIndex = level >= 0 ? level : QrOptions.Levels.ToList().FindIndex(l => l.Level == QrOptions.DefaultErrorCorrection);
+        MarginStepper.Value = Math.Clamp(GeneratorSettings.QrMargin, (int)MarginStepper.Minimum, (int)MarginStepper.Maximum);
+        _restoring = false;
+        CaptionArea.Remember(GeneratorSettings.Qr);
+    }
+
+    /// <summary>Set while the options are put in place, from what was remembered or from a code handed over by
+    /// another tab: those are shown, not remembered as the person's own choice. True from the start, because the
+    /// margin's starting value in the XAML already raises a change during InitializeComponent.</summary>
+    private bool _restoring = true;
+
+    /// <summary>The person changed an option: keep it for next time.</summary>
+    private void RememberOptions()
+    {
+        if (_restoring) return;
+        var options = CurrentOptions;
+        GeneratorSettings.QrErrorCorrection = options.ErrorCorrection;
+        GeneratorSettings.QrMargin = options.Margin;
     }
 
     protected override InputView ValueInput => ValueEditor;
@@ -39,6 +58,7 @@ public partial class QrPage : CodeGeneratorPage
         base.OnNavigatedTo(args);
         if (IncomingValue is null) return;
 
+        _restoring = true;
         if (IncomingErrorCorrection is not null)
         {
             var i = QrOptions.Levels.ToList().FindIndex(l => l.Level == IncomingErrorCorrection);
@@ -46,6 +66,7 @@ public partial class QrPage : CodeGeneratorPage
         }
         if (int.TryParse(IncomingMargin, out var margin))
             MarginStepper.Value = Math.Clamp(margin, 0, 4);
+        _restoring = false;
 
         ValueEditor.Text = IncomingValue;
         IncomingValue = null;
@@ -83,11 +104,16 @@ public partial class QrPage : CodeGeneratorPage
         ValueEditor.Focus();
     }
 
-    private void OnOptionsChanged(object? sender, EventArgs e) => RefreshKeepingScroll();
+    private void OnOptionsChanged(object? sender, EventArgs e)
+    {
+        RememberOptions();
+        RefreshKeepingScroll();
+    }
 
     private void OnMarginChanged(object? sender, ValueChangedEventArgs e)
     {
         MarginLabel.Text = $"{(int)e.NewValue} modules";
+        RememberOptions();
         RefreshKeepingScroll();
     }
 
