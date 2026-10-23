@@ -9,23 +9,6 @@ namespace TagBuddy.Pages;
 /// actions that fits each kind.</summary>
 public partial class SavedPage : ContentPage
 {
-    private const string ActionShow = "Show full screen";
-    private const string ActionViewPage = "View page in app";
-    private const string ActionShare = "Share image";
-    private const string ActionSaveImage = "Save image to gallery";
-    private const string ActionBarcode = "Use text in Barcode generator";
-    private const string ActionQr = "Use text in QR generator";
-    private const string ActionWriteNfc = "Write to an NFC tag";
-    private const string ActionCopy = "Copy text";
-    private const string ActionEditText = "Edit text";
-    private const string ActionTextToDump = "Make a tag dump from this text";
-    private const string ActionViewDump = "View memory";
-    private const string ActionWriteDump = "Write dump to a tag";
-    private const string ActionShareDump = "Share .bin file";
-    private const string ActionCopyDumpText = "Copy readable text";
-    private const string ActionRename = "Rename";
-    private const string ActionDelete = "Delete";
-
     private readonly SavedService _saved;
     private readonly ObservableCollection<SavedItem> _shown = [];
     private SavedKind? _filter;
@@ -132,100 +115,96 @@ public partial class SavedPage : ContentPage
         }
     }
 
+    /// <summary>The item's menu (<see cref="SavedMenu"/>). A group opens a second menu whose "Back" returns here.</summary>
     private async Task ShowMenuAsync(SavedItem item)
     {
-        var actions = new List<string>();
-        Uri? uri = null;
-        var isLink = !item.IsDump && Links.TryGetOpenable(item.Value, out uri);
-        var openLabel = isLink && uri is not null ? Links.OpenLabel(uri) : string.Empty;
-
-        if (item.IsCode) actions.Add(ActionShow);
-        if (isLink) actions.Add(openLabel);
-        if (!item.IsDump && Links.IsWebLink(item.Value, out _)) actions.Add(ActionViewPage);
-
-        if (item.IsCode) actions.AddRange([ActionShare, ActionSaveImage]);
-        if (item.IsDump) actions.AddRange([ActionViewDump, ActionWriteDump, ActionShareDump]);
-        if (item.HasDumpText) actions.Add(ActionCopyDumpText);
-        if (!item.IsDump) actions.AddRange([ActionBarcode, ActionQr, ActionWriteNfc, ActionCopy]);
-        if (item.IsText) actions.AddRange([ActionEditText, ActionTextToDump]);
-        actions.Add(ActionRename);
-
-        var choice = await DisplayActionSheetAsync(item.DisplayName, "Cancel", ActionDelete, actions.ToArray());
-
-        if (isLink && choice == openLabel)
+        var appName = Links.IsWebLink(item.Value, out var web) ? Links.HandlerName(web) : null;
+        var menu = SavedMenu.For(item, appName);
+        while (true)
         {
-            await CodeActions.OpenLinkAsync(this, item.Value);
+            var choice = await DisplayActionSheetAsync(item.DisplayName, "Cancel", SavedMenu.Delete, menu.Select(e => e.Label).ToArray());
+            if (choice == SavedMenu.Delete)
+            {
+                await DeleteAsync(item);
+                return;
+            }
+            if (menu.FirstOrDefault(e => e.Label == choice) is not { } entry) return;   // Cancel, or tapped outside
+
+            if (entry.Children is { } children)
+            {
+                var sub = await DisplayActionSheetAsync(entry.Label.TrimEnd('…'), "Back", null, children.Select(c => c.Label).ToArray());
+                if (sub == "Back") continue;
+                if (children.FirstOrDefault(c => c.Label == sub)?.Action is not { } picked) return;
+                await RunAsync(item, picked);
+                return;
+            }
+            if (entry.Action is { } action) await RunAsync(item, action);
             return;
         }
+    }
 
-        switch (choice)
+    private async Task RunAsync(SavedItem item, SavedAction action)
+    {
+        switch (action)
         {
-            case ActionShow:
-                await ShowBarcodePage.ShowAsync(item);
+            case SavedAction.Open:
+                await CodeActions.OpenLinkAsync(this, item.Value);
                 break;
 
-            case ActionViewPage:
+            case SavedAction.ViewPage:
                 await WebPage.ShowAsync(item.Value);
                 break;
 
-            case ActionShare:
+            case SavedAction.ShareImage:
                 await CodeActions.ShareImageAsync(this, item);
                 break;
 
-            case ActionSaveImage:
+            case SavedAction.SaveImage:
                 await CodeActions.SaveImageAsync(this, item);
                 break;
 
-            case ActionBarcode:
+            case SavedAction.ToBarcode:
                 await AppNavigation.ToBarcodeGeneratorAsync(item.Value,
                     item.IsCode && !item.IsQr ? item.Format : BarcodeTypes.Linear[0].Key);
                 break;
 
-            case ActionQr:
+            case SavedAction.ToQr:
                 await AppNavigation.ToQrGeneratorAsync(item.Value, item.QrErrorCorrection, item.QrMargin);
                 break;
 
-            case ActionWriteNfc:
+            case SavedAction.ToNfc:
                 await AppNavigation.ToNfcWriteTextAsync(item.Value);
                 break;
 
-            case ActionCopy:
+            case SavedAction.Copy:
                 await CodeActions.CopyTextAsync(this, item.Value);
                 break;
 
-            case ActionEditText:
+            case SavedAction.EditText:
                 await EditTextAsync(item);
                 break;
 
-            case ActionTextToDump:
+            case SavedAction.ToDump:
                 // Raw UTF-8 bytes from page 4 on, the way "Raw bytes" on the NFC tab writes them; the dump
                 // can then be written to any Type 2 tag, Amiibo-formatted ones included.
                 var dump = await _saved.AddDumpAsync(item.DisplayName, "", "Text", DumpText.FromText(item.Value));
                 Notice.Show($"Dump made: {dump.DumpSize} bytes. Find it under Tags.");
                 break;
 
-            case ActionViewDump:
-                await DumpPage.ShowAsync(item);
-                break;
-
-            case ActionWriteDump:
+            case SavedAction.WriteDump:
                 await AppNavigation.ToNfcWriteDumpAsync(item);
                 break;
 
-            case ActionShareDump:
+            case SavedAction.ShareDump:
                 await ShareDumpAsync(item);
                 break;
 
-            case ActionCopyDumpText:
+            case SavedAction.CopyDumpText:
                 await CodeActions.CopyTextAsync(this, item.DumpText);
                 break;
 
-            case ActionRename:
+            case SavedAction.Rename:
                 await RenameAsync(item);
-                break;
-
-            case ActionDelete:
-                await DeleteAsync(item);
                 break;
         }
     }

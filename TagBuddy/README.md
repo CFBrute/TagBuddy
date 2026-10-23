@@ -31,9 +31,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.
 - **Saved** tab: codes with their options, text notes and tag dumps in one list, filtered by kind. Tap a code
-  to show it full screen, a dump to see its memory; the menu on each row offers what fits the kind (open or view
-  the link, share or save the image, use the text in a generator, write it to a tag, make a dump from text,
-  share a dump's .bin file, rename, delete). Stored as `saved.json` in the app's private data folder, with dump
+  to show it full screen, a dump to see its memory; the menu on each row (`Models/SavedMenu.cs`) offers the rest
+  for that kind. Everyday actions are on the first level (open the link, view the page, copy, rename, delete);
+  "QR code image…" (share, save to gallery) and "Use the text…" (QR or barcode generator, write to an NFC tag,
+  make a dump) open a second menu with Back. Stored as `saved.json` in the app's private data folder, with dump
   bytes as .bin files next to it; older `favorites.json` files are taken over on first start.
 - **About** tab: version and build, the link-preview setting, what the app sends over the network, and "Report
   a bug" / "Send feedback", which open an email to `BuildInfo.SupportEmail`. That address is a placeholder
