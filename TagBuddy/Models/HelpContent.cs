@@ -243,7 +243,8 @@ public static class HelpContent
                 new HelpText("Page 3 and every user page of the dump. The serial number (pages 0 to 2) is burned in at the factory and is never changed, and the lock bits are never written, so the tag stays rewritable.")),
             new HelpMore("Tag memory explained",
                 new HelpImage("help_tag_memory.png", "Memory of an NTAG tag, in 4-byte pages. Grey: the serial number, fixed at the factory. Orange: lock bits and page 3, which can only be set, never cleared. Green: user memory, where the content goes. Blue: settings and the password, at the end.", 150),
-                new HelpText("Page 3 can only ever have bits added. A tag's first real use decides what it is for, which is why some tags cannot go back to holding links.")),
+                new HelpText("Page 3 can only ever have bits added. A tag's first real use decides what it is for, which is why some tags cannot go back to holding links."),
+                new HelpText("When you read a tag, and in a saved dump, the memory list is a map of the tag: an overview says which pages are writable, writable only with the password, locked for good, one-time, or fixed at the factory, and every page is coloured to match, with the special pages named on their line.")),
             new HelpMore("Making a dump from text",
                 new HelpText("In Saved, open the menu of a text note and choose \"Use the text…\", then \"Make a tag dump from it\". That turns the text into tag memory you can write with \"Binary dump\".")),
             .. amiibo
@@ -261,6 +262,7 @@ public static class HelpContent
         new("saved", "Saved", "tab_saved.png", "Everything you keep: codes, text notes and tag backups.",
         [
             new HelpText("Use the buttons at the top to show everything, or only codes, text notes or tags. \"+ Text\" adds a note of your own."),
+            new HelpText("The list keeps what you used last at the top: showing, opening, sharing, copying or writing an item moves it up the next time you come back to Saved. Renaming or editing does not."),
             new HelpList(false,
                 "Tap a code to show it full screen.",
                 "Tap a tag backup to see its memory.",

@@ -29,6 +29,12 @@ public class SavedItem
 
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+    /// <summary>When it was last shown, opened, shared, copied or written; null until then. Saved is sorted by it.</summary>
+    public DateTime? LastUsedAt { get; set; }
+
+    /// <summary>The time Saved sorts by, newest first: last use, or when it was saved if it never was.</summary>
+    [JsonIgnore] public DateTime SortTime => LastUsedAt ?? CreatedAt;
+
     // ---------------------------------------------------------------- QR options
 
     /// <summary>QR only: error-correction level L, M, Q or H.</summary>

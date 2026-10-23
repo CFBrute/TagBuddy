@@ -6,6 +6,29 @@ namespace TagBuddy.Services;
 /// (lock and configuration pages follow); ConfigPage is CFG0, where AUTH0 lives, or -1 if none.</summary>
 internal sealed record Type2Chip(string Name, int TotalPages, int UserEnd, bool HasPassword, int ConfigPage);
 
+/// <summary>What can be done to one page of tag memory.</summary>
+internal enum PageAccess
+{
+    /// <summary>Written at the factory (the serial); never changes.</summary>
+    Fixed,
+    /// <summary>One-time bits (page 3, lock bits): bits can be set, never cleared.</summary>
+    OneTime,
+    /// <summary>Made read-only for good by a lock bit.</summary>
+    Locked,
+    /// <summary>Writable after giving the tag's password (AUTH0 covers it).</summary>
+    Password,
+    Writable,
+    /// <summary>Configuration: where password protection starts, and how.</summary>
+    Config,
+    /// <summary>The password and its acknowledgement: write-only, always read as zeros.</summary>
+    Hidden,
+    /// <summary>The chip is not known, so neither is the page's role.</summary>
+    Unknown,
+}
+
+/// <summary>One page of a tag's memory map: its number, what it holds ("" for plain user memory) and its access.</summary>
+internal sealed record TagPage(int Page, string Role, PageAccess Access);
+
 /// <summary>The byte-level rules of Type 2 tag memory (NTAG213/215/216, Ultralight EV1) that the NFC reader and
 /// writer depend on, with no radio and no Android types, so they can be unit-tested: chip identification from
 /// GET_VERSION, lock bits, the NDEF TLV, where raw text goes, the Amiibo key and how dumps are shown. See the
@@ -57,6 +80,92 @@ internal static class Type2Memory
             }
         }
         return locked;
+    }
+
+    /// <summary>The chip a memory image came from: by name when known ("NTAG215", or "Amiibo", which is one), else
+    /// by size, since a full read is exactly the chip's pages. Null when neither tells.</summary>
+    internal static Type2Chip? ChipFor(string? name, int memoryLength)
+    {
+        var n = name ?? "";
+        if (n.Contains("213")) return new("NTAG213", 45, 40, true, 41);
+        if (n.Contains("215") || n.Contains("Amiibo", StringComparison.OrdinalIgnoreCase)) return new("NTAG215", 135, 130, true, 131);
+        if (n.Contains("216")) return new("NTAG216", 231, 226, true, 227);
+        return memoryLength switch
+        {
+            45 * 4 => new("NTAG213", 45, 40, true, 41),
+            135 * 4 => new("NTAG215", 135, 130, true, 131),
+            231 * 4 => new("NTAG216", 231, 226, true, 227),
+            20 * 4 => new("MIFARE Ultralight EV1 (48 bytes)", 20, 16, true, 16),
+            41 * 4 => new("MIFARE Ultralight EV1 (128 bytes)", 41, 36, true, 37),
+            _ => null,
+        };
+    }
+
+    /// <summary>A map of every page in <paramref name="memory"/>: the serial, page 3, user memory (locked, behind the
+    /// password or writable, from the lock bits and AUTH0 in the image itself), the lock and configuration pages.
+    /// <paramref name="amiibo"/> marks the plain figure ID in pages 21-22.</summary>
+    internal static IReadOnlyList<TagPage> MapPages(byte[] memory, Type2Chip? chip, bool amiibo = false)
+    {
+        int pages = memory.Length / 4;
+        var locked = chip is { UserEnd: > 0 } ? LockedPages(memory, chip) : null;
+        int cfg = chip?.ConfigPage ?? -1;
+        int auth0 = cfg > 0 && memory.Length >= cfg * 4 + 4 ? memory[cfg * 4 + 3] : int.MaxValue;
+
+        var map = new List<TagPage>(pages);
+        for (int p = 0; p < pages; p++)
+        {
+            map.Add(p switch
+            {
+                0 or 1 => new(p, "serial", PageAccess.Fixed),
+                // Bytes 0-1 end the serial (fixed); bytes 2-3 are the static lock bits, one-time and zero when new.
+                2 => new(p, "serial end · lock bits", PageAccess.OneTime),
+                3 => new(p, "page 3 · format", locked?[3] == true ? PageAccess.Locked : PageAccess.OneTime),
+                _ when chip is not { UserEnd: > 0 } => new(p, "", PageAccess.Unknown),
+                _ when p < chip.UserEnd => new(p, amiibo && p is 21 or 22 ? "figure ID" : "",
+                    locked![p] ? PageAccess.Locked : p >= auth0 ? PageAccess.Password : PageAccess.Writable),
+                _ when p == cfg => new(p, "CFG0 · password from", PageAccess.Config),
+                _ when p == cfg + 1 => new(p, "CFG1 · password rules", PageAccess.Config),
+                _ when p == cfg + 2 && chip.HasPassword => new(p, "password (hidden)", PageAccess.Hidden),
+                _ when p == cfg + 3 && chip.HasPassword => new(p, "PACK (hidden)", PageAccess.Hidden),
+                _ when p == chip.UserEnd => new(p, "dynamic lock bits", PageAccess.OneTime),
+                _ => new(p, "", PageAccess.Unknown),
+            });
+        }
+        return map;
+    }
+
+    /// <summary>The map grouped by access, in a fixed order, as page ranges: ("Writable", "4-12, 32-129").</summary>
+    internal static IReadOnlyList<(PageAccess Access, string Pages)> SummarizePages(IReadOnlyList<TagPage> map) =>
+        new[] { PageAccess.Writable, PageAccess.Password, PageAccess.Locked, PageAccess.OneTime, PageAccess.Fixed,
+                PageAccess.Config, PageAccess.Hidden, PageAccess.Unknown }
+            .Select(a => (a, map.Where(p => p.Access == a).Select(p => p.Page).ToList()))
+            .Where(g => g.Item2.Count > 0)
+            .Select(g => (g.a, Ranges(g.Item2)))
+            .ToList();
+
+    /// <summary>How an access level is named in the overview.</summary>
+    internal static string Describe(PageAccess access) => access switch
+    {
+        PageAccess.Writable => "Writable",
+        PageAccess.Password => "Writable with the password",
+        PageAccess.Locked => "Locked for good",
+        PageAccess.OneTime => "One-time bits (lock bits, page 3)",
+        PageAccess.Fixed => "Fixed at the factory",
+        PageAccess.Config => "Password settings",
+        PageAccess.Hidden => "Password, never readable",
+        _ => "Unknown chip",
+    };
+
+    /// <summary>The figure ID an Amiibo keeps unencrypted in pages 21-22: eight bytes, "head" (character and
+    /// variant) and "tail" (type, model number, series), with the type spelled out. Null for anything shorter.</summary>
+    internal static string? AmiiboFigure(byte[] memory)
+    {
+        if (memory.Length < 23 * 4) return null;
+        var id = memory[84..92];
+        if (id.All(b => b == 0)) return null;
+        string head = Convert.ToHexString(id, 0, 4), tail = Convert.ToHexString(id, 4, 4);
+        string type = id[3] switch { 0x00 => "figure", 0x01 => "card", 0x02 => "yarn figure", 0x03 => "band", _ => $"type {id[3]:X2}" };
+        return $"{head} {tail} ({type})";
     }
 
     internal static bool SamePage(byte[] memory, int page, byte[] data) =>

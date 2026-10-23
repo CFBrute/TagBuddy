@@ -218,7 +218,8 @@ public partial class NfcPage : ContentPage
             AddDetail("Private text", $"{sealedBytes.Length - SealedText.Overhead} bytes, encrypted with a passphrase (AES-256-GCM)");
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
-        MemoryLabel.Text = tag.HasMemoryDump ? string.Join("\n", tag.MemoryDump!) : string.Empty;
+        if (tag.RawMemory is { Length: > 0 } memory) MemoryMapView.Show(MemoryOverview, MemoryLabel, memory, tag.ChipName);
+        else MemoryLabel.Text = string.Empty;
     }
 
     /// <summary>The tag's content, or what it is when there is none to show: the private text once unlocked.</summary>
@@ -535,14 +536,24 @@ public partial class NfcPage : ContentPage
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
+        UseRawButton.IsVisible = !ok && note.Contains(NfcReader.RawBytesTip)
+            && WriteType is WriteMode.Auto or WriteMode.Text or WriteMode.Link;
 
         if (_writeMode) ArmWrite(updateStatus: false);
+    }
+
+    /// <summary>The tag cannot hold NDEF (its page 3 says otherwise for good): switch to raw bytes, which arms the
+    /// writer with the same text, so the next touch writes it.</summary>
+    private void OnUseRaw(object? sender, EventArgs e)
+    {
+        UseRawButton.IsVisible = false;
+        WriteTypePicker.SelectedIndex = (int)WriteMode.Raw;
     }
 
     private async void OnLoadFavorite(object? sender, EventArgs e)
     {
         await _saved.LoadAsync();
-        var candidates = _saved.Items.Where(i => !i.IsDump).ToList();
+        var candidates = _saved.Items.Where(i => !i.IsDump).OrderByDescending(i => i.SortTime).ToList();
         if (candidates.Count == 0)
         {
             await DisplayAlertAsync("Nothing saved", "You have no saved codes or texts to load.", "OK");
@@ -558,6 +569,7 @@ public partial class NfcPage : ContentPage
         {
             WriteEditor.Text = candidates[index].Value;
             ArmWrite();
+            await _saved.MarkUsedAsync(candidates[index]);
         }
     }
 
@@ -578,7 +590,7 @@ public partial class NfcPage : ContentPage
     private async Task<SavedItem?> PickSavedDumpAsync(string title)
     {
         await _saved.LoadAsync();
-        var dumps = _saved.Dumps.ToList();
+        var dumps = _saved.Dumps.OrderByDescending(d => d.SortTime).ToList();
         if (dumps.Count == 0)
         {
             await DisplayAlertAsync("No saved dumps", "Read a tag and tap \"Save dump\", import a .bin file, or paste hex.", "OK");
@@ -599,6 +611,7 @@ public partial class NfcPage : ContentPage
         try
         {
             UseDump(await _saved.ReadDumpAsync(dump), dump.DisplayName, dump.DumpSerial);
+            await _saved.MarkUsedAsync(dump);
         }
         catch (Exception ex)
         {

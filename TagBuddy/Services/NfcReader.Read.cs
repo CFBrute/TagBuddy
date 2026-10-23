@@ -162,7 +162,12 @@ public sealed partial class NfcReader
     private static void DescribeType2Layout(byte[] bytes, Type2Chip? chip, List<(string, string)> details)
     {
         if (Features.Amiibo && IsAmiiboDump(bytes))
+        {
             details.Add(("Data", "Amiibo-style content (NTAG215 layout with the Nintendo capability container)"));
+            // The rest of the game data is encrypted with Nintendo's keys, but the figure ID is not.
+            if (AmiiboFigure(bytes) is { } figure)
+                details.Add(("Figure ID", figure));
+        }
 
         if (bytes[10] != 0 || bytes[11] != 0)
             details.Add(("Lock bits", $"Static lock bits set ({ToHex(bytes[10..12])}): some of pages 3-15 are permanently read-only"));

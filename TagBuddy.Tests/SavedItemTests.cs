@@ -24,6 +24,25 @@ public class SavedItemTests
     }
 
     [Fact]
+    public void Saved_sorts_by_last_use_then_by_when_it_was_saved()
+    {
+        var saved = new DateTime(2026, 1, 1);
+        var item = new SavedItem { CreatedAt = saved };
+        Assert.Equal(saved, item.SortTime);
+
+        item.LastUsedAt = saved.AddDays(3);
+        Assert.Equal(saved.AddDays(3), item.SortTime);
+    }
+
+    [Fact]
+    public void Items_saved_before_last_use_was_kept_load_as_never_used()
+    {
+        var item = JsonSerializer.Deserialize<SavedItem>("""{"Value":"x","CreatedAt":"2026-01-01T00:00:00"}""")!;
+        Assert.Null(item.LastUsedAt);
+        Assert.Equal(new DateTime(2026, 1, 1), item.SortTime);
+    }
+
+    [Fact]
     public void Json_round_trips()
     {
         var item = new SavedItem { Name = "Home", Kind = SavedKind.Text, Value = "hello", Caption = "" };

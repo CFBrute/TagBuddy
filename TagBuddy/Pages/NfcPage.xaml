@@ -91,15 +91,19 @@
                                     BackgroundColor="#6B7280" TextColor="White" />
                         </Grid>
 
+                        <!-- Which pages are writable, behind the password, locked, one-time or fixed (MemoryMapView) -->
+                        <Label x:Name="MemoryOverview" FontSize="13" LineHeight="1.2" />
+
                         <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="10"
                                 BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
+                            <!-- Every page on its own line. Not NoWrap: on Android that also limits the label to one line. -->
                             <Label x:Name="MemoryLabel"
                                    FontFamily="monospace"
                                    FontSize="12"
-                                   LineBreakMode="NoWrap" />
+                                   LineBreakMode="CharacterWrap" />
                         </Border>
                         <Button Text="Copy memory as text" Clicked="OnCopyMemory"
                                 BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
@@ -192,6 +196,9 @@
                        FontSize="14"
                        HorizontalTextAlignment="Center"
                        Margin="0,10,0,0" />
+                <!-- Shown when a text write met a tag that cannot hold NDEF (an Amiibo tag, say): one tap to write it as raw bytes -->
+                <Button x:Name="UseRawButton" Text="Write it as raw bytes instead" Clicked="OnUseRaw" IsVisible="False"
+                        HorizontalOptions="Center" />
 
                 <Label x:Name="WriteHint"
                        Text="Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written."

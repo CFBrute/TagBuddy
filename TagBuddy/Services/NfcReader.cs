@@ -47,6 +47,10 @@ public sealed partial class NfcReader
     /// <summary>Success flag and a message, raised after an attempt to write a tag held to the phone.</summary>
     public event Action<bool, string>? TagWritten;
 
+    /// <summary>Ends the message of a text write refused because the tag can never hold NDEF; the NFC tab looks for
+    /// it to offer writing raw bytes instead.</summary>
+    public const string RawBytesTip = "\"Raw bytes (no NDEF)\" can still store text on it for this app.";
+
     /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
     public static bool IsAmiiboDump(byte[] bytes) => Type2Memory.IsAmiiboDump(bytes);
 
