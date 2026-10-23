@@ -21,6 +21,16 @@ public partial class AppShell : Shell
 #endif
     }
 
+    /// <summary>Leaving the More tab closes any help topic open there, so coming back shows the tab itself rather
+    /// than wherever the reading had got to.</summary>
+    protected override async void OnNavigated(ShellNavigatedEventArgs args)
+    {
+        base.OnNavigated(args);
+        if (CurrentItem?.CurrentItem == MoreTab || MoreTab.Navigation.NavigationStack.Count <= 1) return;
+        try { await MoreTab.Navigation.PopToRootAsync(false); }
+        catch { /* the tab is not shown; it is tidied on the next visit instead */ }
+    }
+
 #if ANDROID
     private async void ShowDispatchedTag()
     {
