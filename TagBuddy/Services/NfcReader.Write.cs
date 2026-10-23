@@ -144,10 +144,10 @@ public sealed partial class NfcReader
         }
         else if (cc[0] != 0xE1)
         {
-            return (false, Features.Amiibo && IsAmiiboDump(before)
-                ? "This tag carries Amiibo data and its capability container (page 3) is one-time programmable, so phones " +
-                  "will never read it as a text or link tag. It can still be erased or loaded with another binary dump."
-                : $"This tag is not NDEF-formatted (capability container {ToHex(cc)}) and cannot be formatted, so text and links cannot be written to it.");
+            return (false, (Features.Amiibo && LooksAmiibo(before)
+                ? "This tag has been an Amiibo, which changes its page 3 for good, so phones will never read it as a text or link tag. "
+                : $"This tag is not NDEF-formatted (page 3 is {ToHex(cc)}) and cannot be formatted, so phones will never read it as a text or link tag. ")
+                + RawBytesTip);
         }
         else if ((cc[3] & 0x0F) != 0)
         {

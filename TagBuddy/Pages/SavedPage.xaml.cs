@@ -26,6 +26,8 @@ public partial class SavedPage : ContentPage
     {
         base.OnAppearing();
         await _saved.LoadAsync();
+        // Whatever was used since the list was last shown moves to the top now, not while it was being looked at.
+        _saved.SortByUse();
         Refill();
     }
 
@@ -96,6 +98,7 @@ public partial class SavedPage : ContentPage
         if (e.Parameter is not SavedItem item) return;
         try
         {
+            if (item.IsCode || item.IsDump) await _saved.MarkUsedAsync(item);
             if (item.IsCode) await ShowBarcodePage.ShowAsync(item);
             else if (item.IsDump) await DumpPage.ShowAsync(item);
             else await ShowMenuAsync(item);
@@ -145,6 +148,10 @@ public partial class SavedPage : ContentPage
 
     private async Task RunAsync(SavedItem item, SavedAction action)
     {
+        // Doing something with the item counts as using it; tidying it (rename, edit) does not.
+        if (action is not (SavedAction.Rename or SavedAction.EditText))
+            await _saved.MarkUsedAsync(item);
+
         switch (action)
         {
             case SavedAction.Open:

@@ -42,7 +42,7 @@ public class SavedService
 
             // A dump whose file is gone is useless; drop it quietly. The readable-text line is worked out
             // afresh each start, so improvements to the extraction reach dumps saved earlier.
-            foreach (var item in items.Where(i => !i.IsDump || File.Exists(DumpPath(i))).OrderByDescending(i => i.CreatedAt))
+            foreach (var item in items.Where(i => !i.IsDump || File.Exists(DumpPath(i))).OrderByDescending(i => i.SortTime))
             {
                 if (item.IsDump)
                 {
@@ -204,6 +204,28 @@ public class SavedService
         await SaveAsync();
     }
 
+    /// <summary>Notes that the item was just used (shown, opened, shared, copied, written). It moves to the top the
+    /// next time the list is sorted (<see cref="SortByUse"/>), not now, so a row never jumps away while looked at.</summary>
+    public async Task MarkUsedAsync(SavedItem item)
+    {
+        await LoadAsync();
+        if (!Items.Contains(item)) return;
+        item.LastUsedAt = DateTime.Now;
+        await SaveAsync();
+    }
+
+    /// <summary>Puts the most recently used (or saved) items first. Moves rather than rebuilds, and only what is out
+    /// of place, so the list view keeps its rows.</summary>
+    public void SortByUse()
+    {
+        var sorted = Items.OrderByDescending(i => i.SortTime).ToList();
+        for (int target = 0; target < sorted.Count; target++)
+        {
+            int current = Items.IndexOf(sorted[target]);
+            if (current != target) Items.Move(current, target);
+        }
+    }
+
     /// <summary>Writes the list after an item was edited in place (renamed, text changed).</summary>
     public async Task UpdateAsync(SavedItem item)
     {
@@ -289,8 +311,10 @@ public static class DumpText
         if (!string.IsNullOrWhiteSpace(ndef)) return ndef.Trim();
 
         // Encrypted Amiibo content has no words in it, but a tag with the Amiibo page 3 may since have been
-        // loaded with plain text, so look anyway and just demand longer runs there than random bytes produce.
-        int minRun = NfcReader.IsAmiiboDump(data) ? 8 : 4;
+        // loaded with plain text, so look anyway. Game data fills the user memory with random-looking bytes, in
+        // which short "words" turn up by chance, so demand longer runs there; raw text written by this app leaves
+        // the rest of the memory zeroed, and then a short name like "Carlos" is real.
+        int minRun = NfcReader.IsAmiiboDump(data) && !MostlyEmpty(data) ? 8 : 4;
 
         // Printable runs, skipping the serial/lock pages at the start, kept only when they look like words:
         // mostly letters and digits, with a few letters at least. Line breaks in the text separate runs.
@@ -318,6 +342,17 @@ public static class DumpText
         var dump = new byte[16 + pages * 4];
         Array.Copy(payload, 0, dump, 16, payload.Length);
         return dump;
+    }
+
+    /// <summary>At least half the user memory (from page 4, NTAG215-sized at most) is zero bytes: written with
+    /// a little text, not filled with game data.</summary>
+    internal static bool MostlyEmpty(byte[] data)
+    {
+        int end = Math.Min(data.Length, 130 * 4);
+        if (end <= 16) return true;
+        int zeros = 0;
+        for (int i = 16; i < end; i++) if (data[i] == 0) zeros++;
+        return zeros * 2 >= end - 16;
     }
 
     private static bool LooksLikeWords(string run, int minLength)

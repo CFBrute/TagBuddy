@@ -1,3 +1,4 @@
+using System.Text;
 using TagBuddy.Services;
 
 namespace TagBuddy.Tests;
@@ -78,4 +79,33 @@ public class DumpTests
     [InlineData("not hex at all")]
     public void ParseHex_rejects_what_is_not_hex(string? text) =>
         Assert.Null(SavedService.ParseHex(text));
+
+    /// <summary>An NTAG215 image with the Amiibo page 3: 135 pages, F1 10 FF EE in page 3.</summary>
+    private static byte[] AmiiboShaped()
+    {
+        var data = new byte[540];
+        data[12] = 0xF1; data[13] = 0x10; data[14] = 0xFF; data[15] = 0xEE;
+        return data;
+    }
+
+    [Fact]
+    public void A_short_name_written_raw_on_a_former_Amiibo_tag_is_read()
+    {
+        // Raw text in page 4, the pages an Amiibo writer locked (13-31) still holding old game bytes, the rest zero.
+        var data = AmiiboShaped();
+        new Random(1).NextBytes(data.AsSpan(13 * 4, 19 * 4));
+        Encoding.UTF8.GetBytes("Carlos").CopyTo(data, 16);
+        Assert.Equal("Carlos", DumpText.Describe(data));
+    }
+
+    [Fact]
+    public void Game_data_does_not_make_up_short_words()
+    {
+        // Filled with random-looking bytes, as encrypted Amiibo data is, with a six-letter run inside it.
+        var data = AmiiboShaped();
+        new Random(2).NextBytes(data.AsSpan(16, 504));
+        for (int i = 16; i < 520; i++) if (data[i] is >= 0x20 and < 0x7F) data[i] = 0x80;   // no accidental runs
+        Encoding.ASCII.GetBytes("Qwerty").CopyTo(data, 200);
+        Assert.Equal("", DumpText.Describe(data));
+    }
 }

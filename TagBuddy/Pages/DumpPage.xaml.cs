@@ -34,7 +34,7 @@ public partial class DumpPage : ContentPage, IQueryAttributable
         try
         {
             _data = await _saved.ReadDumpAsync(item);
-            MemoryLabel.Text = string.Join("\n", NfcReader.FormatDump(_data) ?? []);
+            MemoryMapView.Show(MemoryOverview, MemoryLabel, _data, item.DumpChip);
         }
         catch (Exception ex)
         {
@@ -57,7 +57,8 @@ public partial class DumpPage : ContentPage, IQueryAttributable
     private async void OnCopyHex(object? sender, EventArgs e)
     {
         if (_data is null) return;
-        await Clipboard.Default.SetTextAsync(MemoryLabel.Text);
+        // From the bytes: the label holds coloured spans, whose Text is empty.
+        await Clipboard.Default.SetTextAsync(string.Join("\n", NfcReader.FormatDump(_data) ?? []));
         Notice.Show($"{_data.Length / 4} pages copied");
     }
 }

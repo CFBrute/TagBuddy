@@ -18,6 +18,8 @@
             </HorizontalStackLayout>
 
             <Label Text="Memory" FontAttributes="Bold" />
+            <!-- Which pages are writable, behind the password, locked, one-time or fixed (MemoryMapView) -->
+            <Label x:Name="MemoryOverview" FontSize="13" LineHeight="1.2" />
             <Label x:Name="MemoryLabel" FontFamily="monospace" FontSize="12" LineBreakMode="CharacterWrap" />
         </VerticalStackLayout>
     </ScrollView>

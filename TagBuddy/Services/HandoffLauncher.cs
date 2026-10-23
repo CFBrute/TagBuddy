@@ -112,9 +112,9 @@ public static class HandoffLauncher
     private static Android.Content.Intent EventIntent(CalendarEvent e)
     {
         var intent = new Android.Content.Intent(Android.Content.Intent.ActionInsert, Android.Provider.CalendarContract.Events.ContentUri);
-        if (e.Title is { } title) intent.PutExtra(Android.Provider.CalendarContract.EventsColumns.Title, title);
-        if (e.Location is { } location) intent.PutExtra(Android.Provider.CalendarContract.EventsColumns.EventLocation, location);
-        if (e.Description is { } description) intent.PutExtra(Android.Provider.CalendarContract.EventsColumns.Description, description);
+        if (e.Title is { } title) intent.PutExtra(Android.Provider.CalendarContract.IEventsColumns.Title, title);
+        if (e.Location is { } location) intent.PutExtra(Android.Provider.CalendarContract.IEventsColumns.EventLocation, location);
+        if (e.Description is { } description) intent.PutExtra(Android.Provider.CalendarContract.IEventsColumns.Description, description);
         if (e.Start is { } start) intent.PutExtra(Android.Provider.CalendarContract.ExtraEventBeginTime, start.ToUnixTimeMilliseconds());
         if (e.End is { } end) intent.PutExtra(Android.Provider.CalendarContract.ExtraEventEndTime, end.ToUnixTimeMilliseconds());
         if (e.AllDay) intent.PutExtra(Android.Provider.CalendarContract.ExtraEventAllDay, true);
