@@ -138,12 +138,52 @@ public class SavedItem
         _ => BarcodeTypes.LabelFor(Format),
     };
 
-    /// <summary>Second line of the list row.</summary>
+    /// <summary>Second line of the list row. A code with its own text under the image shows that text too, so
+    /// versions of the same code can be told apart.</summary>
     [JsonIgnore] public string Subtitle => Kind switch
     {
         SavedKind.Dump => $"{DumpSize} bytes ({DumpSize / 4} pages)" + (DumpSerial.Length > 0 ? $"  ·  {DumpSerial}" : ""),
+        SavedKind.Code when ImageText != Value => ImageText.Length == 0
+            ? $"{Value}  ·  no text under the image"
+            : $"{Value}  ·  text: {ImageText.Split('\n')[0].Trim()}",
         _ => Value,
     };
+
+    // ---------------------------------------------------------------- comparing codes
+
+    /// <summary>The same code for a scanner: the same content in the same format.</summary>
+    public bool IsSameCode(SavedItem other) =>
+        IsCode && other.IsCode && Value == other.Value && Format == other.Format;
+
+    /// <summary>What would make this code's picture look different from <paramref name="other"/>'s, in words for
+    /// the person ("the text under the image", "error correction", ...). Empty when the pictures are identical.
+    /// Only meaningful for the same code (<see cref="IsSameCode"/>); the text's layout only counts when there is
+    /// text.</summary>
+    public IReadOnlyList<string> ImageDifferences(SavedItem other)
+    {
+        var differences = new List<string>();
+        if (IsQr && other.IsQr)
+        {
+            if (QrErrorCorrection != other.QrErrorCorrection) differences.Add("error correction");
+            if (QrMargin != other.QrMargin) differences.Add("margin");
+        }
+        if (ImageText != other.ImageText)
+        {
+            differences.Add("the text under the image");
+        }
+        else if (ImageText.Length > 0)
+        {
+            if (CaptionAlign != other.CaptionAlign) differences.Add("the text's position");
+            if (CaptionFonts.Get(CaptionFont).Key != CaptionFonts.Get(other.CaptionFont).Key) differences.Add("the text's font");
+            if (!Near(CaptionTextScale, other.CaptionTextScale)) differences.Add("the text's size");
+            if (!Near(CaptionGapScale, other.CaptionGapScale)) differences.Add("the text's distance");
+            if (!Near(CaptionWidthScale, other.CaptionWidthScale)) differences.Add("the text's max width");
+        }
+        return differences;
+    }
+
+    // The dials step by 0.01, so anything closer is the same setting.
+    private static bool Near(double a, double b) => Math.Abs(a - b) < 0.001;
 
     /// <summary>Dumps only: the readable text line, if any.</summary>
     [JsonIgnore] public bool HasDumpText => IsDump && DumpText.Length > 0;
