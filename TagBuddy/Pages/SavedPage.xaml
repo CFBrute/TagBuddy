@@ -3,19 +3,28 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:TagBuddy.Models"
              xmlns:controls="clr-namespace:TagBuddy.Controls"
+             xmlns:pages="clr-namespace:TagBuddy.Pages"
              x:Class="TagBuddy.Pages.SavedPage"
              Title="Saved">
     <Grid RowDefinitions="Auto,*">
 
-        <!-- Filter by kind, and a way to add a text note right here -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="6" Padding="12,10,12,4">
-            <Button Grid.Column="0" x:Name="FilterAll" Text="All" Clicked="OnFilterAll" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
-            <Button Grid.Column="1" x:Name="FilterCodes" Text="Codes" Clicked="OnFilterCodes" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
-            <Button Grid.Column="2" x:Name="FilterTexts" Text="Text" Clicked="OnFilterTexts" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
-            <Button Grid.Column="3" x:Name="FilterDumps" Text="Tags" Clicked="OnFilterDumps" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
-            <Button Grid.Column="5" Text="+ Text" Clicked="OnNewText" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
-                    BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
-                    ToolTipProperties.Text="Save a piece of text" />
+        <!-- Filter by kind -->
+        <HorizontalStackLayout Grid.Row="0" x:Name="FilterBar" Spacing="6" Padding="12,10,12,4">
+            <Button x:Name="FilterAll" Text="All" Clicked="OnFilterAll" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button x:Name="FilterCodes" Text="Codes" Clicked="OnFilterCodes" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button x:Name="FilterTexts" Text="Text" Clicked="OnFilterTexts" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <Button x:Name="FilterDumps" Text="Tags" Clicked="OnFilterDumps" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+        </HorizontalStackLayout>
+
+        <!-- Select mode, started by a long press on a row: how many are picked, and what to do with them -->
+        <Grid Grid.Row="0" x:Name="SelectBar" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6" Padding="12,10,12,4">
+            <Button Grid.Column="0" Text="Cancel" Clicked="OnCancelSelect" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    BackgroundColor="#6B7280" TextColor="White" />
+            <Label Grid.Column="1" x:Name="SelectCount" FontSize="15" FontFamily="OpenSansSemibold" VerticalOptions="Center" Margin="6,0,0,0" />
+            <Button Grid.Column="2" x:Name="SelectAllButton" Text="All" Clicked="OnSelectAll" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    BackgroundColor="#6B7280" TextColor="White" />
+            <Button Grid.Column="3" x:Name="DeleteSelectedButton" Text="Delete" Clicked="OnDeleteSelected" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    BackgroundColor="#DC2626" TextColor="White" />
         </Grid>
 
         <CollectionView Grid.Row="1" x:Name="List"
@@ -30,15 +39,6 @@
             </CollectionView.EmptyView>
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="models:SavedItem">
-                    <SwipeView>
-                        <SwipeView.RightItems>
-                            <SwipeItems>
-                                <SwipeItem Text="Delete"
-                                           BackgroundColor="#DC2626"
-                                           Invoked="OnDeleteInvoked"
-                                           CommandParameter="{Binding .}" />
-                            </SwipeItems>
-                        </SwipeView.RightItems>
                         <Border Margin="0,0,0,10"
                                 Padding="14,10,6,10"
                                 Stroke="#D1D5DB"
@@ -47,9 +47,17 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="10" />
                             </Border.StrokeShape>
-                            <Border.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
-                            </Border.GestureRecognizers>
+                            <!-- Tap opens (or picks, in select mode); a long press starts select mode -->
+                            <Border.Behaviors>
+                                <pages:RowPressBehavior Pressed="OnRowPressed" LongPressed="OnRowLongPressed" />
+                            </Border.Behaviors>
+                            <Border.Triggers>
+                                <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                    <Setter Property="Stroke" Value="{StaticResource Primary}" />
+                                    <Setter Property="StrokeThickness" Value="3" />
+                                    <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#FFF4E0, Dark=#3A2C12}" />
+                                </DataTrigger>
+                            </Border.Triggers>
                             <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10">
                                 <!-- Picture of the code, or a mark for text and tag dumps -->
                                 <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
@@ -144,7 +152,6 @@
                                                           Margin="0,8,8,0" />
                             </Grid>
                         </Border>
-                    </SwipeView>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>

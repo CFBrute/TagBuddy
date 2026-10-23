@@ -13,8 +13,25 @@ public enum SavedKind
 
 /// <summary>One entry in the Saved tab. Codes carry a value and a format; text notes carry just a value; tag
 /// dumps point at a .bin file in the app's data folder and keep what is known about the tag they came from.</summary>
-public class SavedItem
+public class SavedItem : System.ComponentModel.INotifyPropertyChanged
 {
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    private bool _isSelected;
+
+    /// <summary>Picked in Saved's select mode (long press). Only on screen, never stored.</summary>
+    [JsonIgnore]
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new(nameof(IsSelected)));
+        }
+    }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
 
