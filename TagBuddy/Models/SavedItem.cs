@@ -46,6 +46,9 @@ public class SavedItem
     /// <summary>Where the image text sits under the code: "Left", "Center" (default) or "Right".</summary>
     public string CaptionAlign { get; set; } = "Center";
 
+    /// <summary>The image text's font, a key of <see cref="CaptionFonts"/>.</summary>
+    public string CaptionFont { get; set; } = CaptionFonts.Default;
+
     // The three layout settings are ratios of the code itself, so an image looks the same whatever the code's
     // pixel size: the code is the unit.
 

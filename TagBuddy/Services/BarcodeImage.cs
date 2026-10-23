@@ -96,6 +96,9 @@ public static class BarcodeImage
         int gap = item.CaptionGapPx(darkH, quietZone);
 
         using var textPaint = new Android.Graphics.Paint { AntiAlias = true, Color = Android.Graphics.Color.Black, TextSize = textSize };
+        var font = CaptionFonts.Get(item.CaptionFont);
+        textPaint.SetTypeface(Android.Graphics.Typeface.Create(font.Family,
+            font.Bold ? Android.Graphics.TypefaceStyle.Bold : Android.Graphics.TypefaceStyle.Normal));
         textPaint.TextAlign = item.CaptionLeft ? Android.Graphics.Paint.Align.Left
             : item.CaptionRight ? Android.Graphics.Paint.Align.Right
             : Android.Graphics.Paint.Align.Center;

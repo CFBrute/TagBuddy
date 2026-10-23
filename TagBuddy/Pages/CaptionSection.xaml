@@ -26,31 +26,33 @@
                 <Label x:Name="CaptionInfo" IsVisible="False" Margin="8,0,0,0"
                        Text="Printed under the code when you share or save the image. Change it, use several lines, or leave it empty for no text. Size and distance are fractions of the code's height; max width is how many code widths a line may use before it breaks. The − and + buttons step by 0.01 (0.1 for width)."
                        FontSize="12" TextColor="Gray" />
-                <Grid ColumnDefinitions="76,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="4">
+                <Grid ColumnDefinitions="76,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="4">
                     <Label Grid.Row="0" Grid.Column="0" Text="Position" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
                     <HorizontalStackLayout Grid.Row="0" Grid.Column="1" Spacing="6">
                         <Button x:Name="AlignLeftButton" Text="Left" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="AlignCenterButton" Text="Center" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="AlignRightButton" Text="Right" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
+                    <Label Grid.Row="1" Grid.Column="0" Text="Font" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
+                    <Picker Grid.Row="1" Grid.Column="1" x:Name="FontPicker" Title="Font" FontSize="14" SelectedIndexChanged="OnFontChanged" />
                     <!-- Each dial: a minus button, a slider, a plus button and the value. The buttons step by
                          0.01 (0.1 for width); the slider track is curved so the low end is easy to fine-tune. -->
-                    <Label Grid.Row="1" Grid.Column="0" Text="Size" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
-                    <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
+                    <Label Grid.Row="2" Grid.Column="0" Text="Size" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
+                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="SizeMinus" Text="−" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
                         <Slider Grid.Column="1" x:Name="SizeSlider" VerticalOptions="Center" />
                         <Button Grid.Column="2" x:Name="SizePlus" Text="+" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
                         <Label Grid.Column="3" x:Name="SizeLabel" FontSize="13" VerticalOptions="Center" HorizontalTextAlignment="End" />
                     </Grid>
-                    <Label Grid.Row="2" Grid.Column="0" Text="Distance" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
-                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
+                    <Label Grid.Row="3" Grid.Column="0" Text="Distance" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
+                    <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="DistanceMinus" Text="−" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
                         <Slider Grid.Column="1" x:Name="DistanceSlider" VerticalOptions="Center" />
                         <Button Grid.Column="2" x:Name="DistancePlus" Text="+" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
                         <Label Grid.Column="3" x:Name="DistanceLabel" FontSize="13" VerticalOptions="Center" HorizontalTextAlignment="End" />
                     </Grid>
-                    <Label Grid.Row="3" Grid.Column="0" Text="Max width" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
-                    <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
+                    <Label Grid.Row="4" Grid.Column="0" Text="Max width" FontSize="13" TextColor="Gray" VerticalOptions="Center" />
+                    <Grid Grid.Row="4" Grid.Column="1" ColumnDefinitions="36,*,36,44" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="WidthMinus" Text="−" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
                         <Slider Grid.Column="1" x:Name="WidthSlider" VerticalOptions="Center" />
                         <Button Grid.Column="2" x:Name="WidthPlus" Text="+" Padding="0" MinimumHeightRequest="34" FontSize="16" BackgroundColor="#6B7280" TextColor="White" />
