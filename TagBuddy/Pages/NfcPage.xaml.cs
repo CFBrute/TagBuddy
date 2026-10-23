@@ -117,9 +117,20 @@ public partial class NfcPage : ContentPage
         SettingsButton.IsVisible = false;
         _nfc.TagRead += OnTagRead;
         _nfc.TagWritten += OnTagWritten;
+        _nfc.TagDispatched += OnTagDispatched;
         _nfc.Start();
         _active = true;
         if (_writeMode) ArmWrite();
+        OnTagDispatched();
+    }
+
+    /// <summary>A private tag Android handed the app (see NfcReader.Dispatch): show it as if it had just been read
+    /// here, which brings up the passphrase box.</summary>
+    private void OnTagDispatched()
+    {
+        if (_nfc.TakeDispatchedTag() is not { } tag) return;
+        SetMode(write: false);
+        OnTagRead(tag);
     }
 
     protected override void OnDisappearing()
@@ -129,6 +140,7 @@ public partial class NfcPage : ContentPage
         _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
         _nfc.TagWritten -= OnTagWritten;
+        _nfc.TagDispatched -= OnTagDispatched;
         _nfc.Disarm();
         _nfc.Stop();
     }
