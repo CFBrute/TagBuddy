@@ -248,11 +248,11 @@ public partial class NfcPage : ContentPage
         KeyDictionaryPanel.IsVisible = Features.MifareKeyTools;
         if (!Features.MifareKeyTools) return;
         int imported = _keyStore.ImportedCount();
-        TryAllKeysButton.Text = imported > 0 ? $"Try all {imported:N0} known keys" : "Try all known keys";
+        TryAllKeysButton.Text = imported > 0 ? $"Try all {imported:N0} default keys" : "Try all default keys";
         TryAllKeysButton.IsEnabled = imported > 0;
         KeyStoreStatus.Text = imported > 0
-            ? $"{imported:N0} keys imported. Hold the card again after tapping to run them against the locked sectors; a key that opens a sector is remembered for this card."
-            : "Import a key dictionary (for example mfc_default_keys.dic) to try more than the built-in defaults. Keys that open a card are remembered for next time.";
+            ? $"{imported:N0} default keys imported. Hold the card again after tapping to run them against the locked sectors; a key that opens a sector is remembered for this card."
+            : "Import a dictionary of default keys (for example mfc_default_keys.dic) to try more than the built-in set. Keys that open a card are remembered for next time.";
     }
 
     private void OnTryAllKeys(object? sender, EventArgs e)
@@ -261,7 +261,7 @@ public partial class NfcPage : ContentPage
         _tryAllKeys = true;
         ApplyClassicKey();
         Notice.Show("Hold the card against the phone again");
-        StatusLabel.Text = $"Hold the card again to try all {_keyStore.ImportedCount():N0} known keys on the locked sectors…";
+        StatusLabel.Text = $"Hold the card again to try all {_keyStore.ImportedCount():N0} default keys on the locked sectors…";
     }
 
     private async void OnImportKeys(object? sender, EventArgs e)
