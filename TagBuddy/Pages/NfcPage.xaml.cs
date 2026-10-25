@@ -1110,7 +1110,7 @@ public partial class NfcPage : ContentPage
         _renderingSegments = true;
         try
         {
-            SectorKeyTitle.Text = can ? $"Sector {sector}: set your own key" : $"Sector {sector} already has its own key";
+            SectorKeyTitle.Text = can ? $"Sector {sector}: set a new key" : $"Sector {sector} did not open, so its key cannot be changed";
             SectorKeyEntry.IsVisible = can;
             SectorKeyHint.IsVisible = can;
             var pending = edit.NewKeyFor(sector);

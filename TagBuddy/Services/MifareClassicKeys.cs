@@ -44,11 +44,11 @@ public static class MifareClassicKeys
     /// key A reads and writes every block and both keys, key B is a plain data key. Bytes 6-8 of the trailer.</summary>
     public static readonly byte[] TransportAccessBits = [0xFF, 0x07, 0x80];
 
-    /// <summary>A sector trailer giving the sector <paramref name="key"/> as both key A and key B, with the standard
-    /// (transport) access bits, so the key reads and writes the whole sector and nothing is locked out. Byte 9 (unused
-    /// by the card, often 0x69) is kept from <paramref name="current"/>.</summary>
+    /// <summary>A sector trailer giving the sector <paramref name="key"/> as both key A and key B. The access bits and
+    /// byte 9 are kept from <paramref name="current"/> (the transport ones when the trailer could not be read), so what
+    /// the key may do in the sector does not change; only the key does.</summary>
     public static byte[] TrailerFor(byte[] key, byte[] current) =>
-        [.. key, .. TransportAccessBits, current.Length > 9 ? current[9] : (byte)0x69, .. key];
+        [.. key, .. (current.Length >= 10 ? current[6..10] : [.. TransportAccessBits, (byte)0x69]), .. key];
 
     /// <summary>Whether a trailer's access bits are the transport ones (a sector whose rules were never changed).</summary>
     public static bool HasTransportAccessBits(byte[] trailer) =>

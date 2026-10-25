@@ -223,24 +223,18 @@ public sealed partial class NfcReader
         finally { try { classic.Close(); } catch { } }
     }
 
-    /// <summary>Gives a sector a key of the person's own, as key A and key B, keeping the standard access bits. Only for a
-    /// sector that a public default key opened as key A (so it is a blank or unsecured tag's sector) and whose access
-    /// bits are the transport ones: the new key then reads and writes everything, so nothing can be locked out. The
-    /// sector is opened with the new key afterwards to confirm it; only then is the key reported as set.</summary>
+    /// <summary>Gives a sector a new key, as key A and key B, keeping its access bits as they are. The sector was just
+    /// opened with a known key (that is what <paramref name="openedWith"/> is), which is what entitles a change; whether
+    /// the card lets that key rewrite the trailer is up to its access bits, and a refusal is reported. The sector is
+    /// opened with the new key afterwards to confirm it; only then is the key reported as set.</summary>
     private static (bool Done, string? Why) SetClassicSectorKey(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, byte[] newKey)
     {
-        if (asKeyB || !MifareClassicKeys.IsDefault(openedWith))
-            return (false, $"Sector {sector} did not take a new key: it is not open with a public default key A, so it is not a blank sector.");
-
         int trailer = classic.SectorToBlock(sector) + classic.GetBlockCountInSector(sector) - 1;
         byte[]? current;
         try { current = classic.ReadBlock(trailer); }
         catch { current = null; }
         if (current is not { Length: >= 16 })
             return (false, $"Sector {sector} did not take a new key: its trailer could not be read.");
-        if (!MifareClassicKeys.HasTransportAccessBits(current))
-            return (false, $"Sector {sector} did not take a new key: its access bits are not the standard ones, so changing the key could lock it.");
-
         try
         {
             classic.WriteBlock(trailer, MifareClassicKeys.TrailerFor(newKey, current));
@@ -248,14 +242,15 @@ public sealed partial class NfcReader
         catch
         {
             try { classic.Close(); classic.Connect(); classic.Timeout = 1000; } catch { }
-            return (false, $"Sector {sector} did not take a new key: the card refused the write or moved away.");
+            return (false, $"Sector {sector} did not take a new key: the card refused the write (its access bits may not let " +
+                           $"key {(asKeyB ? 'B' : 'A')} change the keys) or it moved away.");
         }
 
         // Writing the trailer ends the session; the proof is opening the sector again with the new key.
         try
         {
             classic.Close(); classic.Connect(); classic.Timeout = 1000;
-            if (classic.AuthenticateSectorWithKeyA(sector, newKey)) return (true, null);
+            if (classic.AuthenticateSectorWithKeyA(sector, newKey) || classic.AuthenticateSectorWithKeyB(sector, newKey)) return (true, null);
         }
         catch { }
         return (false, $"Sector {sector}: the new key was written but did not open the sector afterwards. Hold the card still and read it again before trying once more.");
