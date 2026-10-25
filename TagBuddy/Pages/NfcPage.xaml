@@ -245,16 +245,38 @@
                         </VerticalStackLayout>
                     </Border>
 
-                    <HorizontalStackLayout Spacing="6">
-                        <Button x:Name="SegmentHexButton" Text="Hex" Clicked="OnSegmentHex"
-                                Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Button x:Name="SegmentTextButton" Text="Text" Clicked="OnSegmentText"
-                                Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
-                    </HorizontalStackLayout>
-                    <Editor x:Name="SegmentEditor" FontFamily="monospace" FontSize="13"
-                            AutoSize="TextChanges" MinimumHeightRequest="120"
-                            IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
-                            TextChanged="OnSegmentEditorChanged" />
+                    <!-- Which column typing goes to, and the edit history -->
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="6">
+                        <Button x:Name="SegmentHexButton" Grid.Column="0" Text="Hex" Clicked="OnSegmentHex"
+                                Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentTextButton" Grid.Column="1" Text="Text" Clicked="OnSegmentText"
+                                Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentUndoButton" Grid.Column="3" Text="↶ Undo" Clicked="OnSegmentUndo"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentRedoButton" Grid.Column="4" Text="↷ Redo" Clicked="OnSegmentRedo"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentRevertButton" Grid.Column="5" Text="Revert" Clicked="OnSegmentRevert"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                    </Grid>
+
+                    <!-- The pages or blocks, laid out like the read view; tap a byte to put the cursor there -->
+                    <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="4"
+                            BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <ScrollView Orientation="Horizontal">
+                            <Grid>
+                                <!-- Takes the keyboard's typing for the grid. Never seen; it moves to the cursor's row so
+                                     Android keeps that row in view above the keyboard. -->
+                                <Entry x:Name="SegmentInput" Opacity="0.01" WidthRequest="40" HeightRequest="40"
+                                       HorizontalOptions="Start" VerticalOptions="Start"
+                                       Keyboard="Plain" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                                       TextChanged="OnSegmentInput" Completed="OnSegmentInputCompleted" />
+                                <controls:SegmentGrid x:Name="SegmentGrid" HorizontalOptions="Start" VerticalOptions="Start" />
+                            </Grid>
+                        </ScrollView>
+                    </Border>
                     <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
                 </VerticalStackLayout>
 

@@ -67,6 +67,22 @@ public sealed record SegmentLayout(TagFamily Family, string ChipName, int Segmen
         _ => segment > LastWritable ? "is past the end of this label" : null,
     };
 
+    /// <summary>A short name for a segment that is never written, shown on its row in the editor ("trailer: keys").</summary>
+    public string Role(int segment) => Family switch
+    {
+        TagFamily.Type2 => segment switch
+        {
+            0 or 1 => "serial",
+            2 => "serial, lock bits",
+            3 => "page 3, one-time",
+            _ when segment == UserEnd => "lock bits",
+            _ when segment >= UserEnd => "password settings",
+            _ => "",
+        },
+        TagFamily.Classic => segment == 0 ? "serial" : MifareClassicKeys.IsTrailer(segment) ? "trailer (keys)" : "",
+        _ => "",
+    };
+
     /// <summary>Whether a tag found at write time is the kind this layout was set up for. ISO 15693 labels are told
     /// apart by their block size and count, not their name.</summary>
     public bool Matches(SegmentLayout actual) =>
@@ -79,9 +95,10 @@ public sealed record SegmentLayout(TagFamily Family, string ChipName, int Segmen
 /// segments it must not write (with why: a page locked for good, a sector no known key opened).</summary>
 public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Data, IReadOnlyDictionary<int, string> Blocked);
 
-/// <summary>An armed segment write: the bytes per segment, and the tag they are meant for. Built from a
-/// <see cref="TagEdit"/>, checked against the tag held to the phone before anything is written.</summary>
-public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IReadOnlyDictionary<int, byte[]> Writes)
+/// <summary>An armed segment write: for each segment the bytes to put there, where null keeps the byte the tag has
+/// (read just before writing), and the tag they are meant for. Built from a <see cref="TagEdit"/>, checked against the
+/// tag held to the phone before anything is written.</summary>
+public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IReadOnlyDictionary<int, byte?[]> Writes)
 {
     /// <summary>Why the tag with this serial is not the one the edit is for, or null when it is (or any tag will do).</summary>
     public string? WrongTag(string id) =>
@@ -101,50 +118,84 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
         return $"This is {Article(actual.ChipName)} {actual.ChipName}, but the edit is for {Article(Layout.ChipName)} {Layout.ChipName}. Nothing was written.";
     }
 
-    /// <summary>"pages 5-6, 9 (12 bytes)": what will be written, for the status line.</summary>
-    public string Summary =>
-        $"{Layout.Noun}{(Writes.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Writes.Keys.Order().ToList())} ({Writes.Count * Layout.SegmentSize} bytes)";
+    /// <summary>The bytes to write to a segment: the edited bytes, and the tag's own <paramref name="current"/> bytes for
+    /// the rest. Null when some bytes are to be kept but the segment could not be read to know them.</summary>
+    public static byte[]? Merge(byte?[] wanted, ReadOnlySpan<byte> current)
+    {
+        var bytes = new byte[wanted.Length];
+        for (int i = 0; i < wanted.Length; i++)
+        {
+            if (wanted[i] is { } b) bytes[i] = b;
+            else if (i < current.Length) bytes[i] = current[i];
+            else return null;
+        }
+        return bytes;
+    }
+
+    /// <summary>"pages 5-6, 9 (7 bytes)": the segments written and how many of their bytes were edited.</summary>
+    public string Summary
+    {
+        get
+        {
+            int bytes = Writes.Values.Sum(w => w.Count(b => b is not null));
+            return $"{Layout.Noun}{(Writes.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Writes.Keys.Order().ToList())} " +
+                   $"({bytes} byte{(bytes == 1 ? "" : "s")})";
+        }
+    }
 
     /// <summary>"an" before a vowel sound: a vowel, or NTAG ("en-tag").</summary>
     private static string Article(string name) =>
         name.StartsWith("NTAG", StringComparison.OrdinalIgnoreCase) || (name.Length > 0 && "AEIOU".Contains(char.ToUpperInvariant(name[0]))) ? "an" : "a";
 }
 
-/// <summary>The segment editor's state: the tag it expects, the range of segments it covers, the bytes the person wants
-/// in each, and (after a read) what the tag held, so that only what was changed is written.
+/// <summary>The segment editor's state: the tag it expects, the range of segments it covers, what the tag held (after
+/// a read), the bytes the person changed, and a cursor that types over them.
 ///
-/// <para>A segment without bytes is left as the tag has it. After a read every readable segment starts with the tag's
-/// content; set up by hand, every segment starts empty and only those filled in are written.</para>
+/// <para>Editing works like overwrite mode in a hex editor. The writable bytes of the range form one run, segment after
+/// segment; the cursor sits on one of them, in the hex column (typing hex digits sets it a nibble at a time) or the
+/// text column (typing characters sets their UTF-8 bytes), and moves on as it types, into the next segment. Backspace
+/// steps back and puts the byte back as it was. A byte nobody typed is kept as the tag has it: after a read that is the
+/// byte read, set up by hand it is unknown (shown as ··) and the tag's own byte is kept when writing.</para>
 ///
-/// <para>Two views edit the same bytes. Hex: one line per segment, "005: 01 02 03 04". Text: one run of text laid over
-/// the segments from the first one on, where \xHH is a byte in hex and \\ a backslash; shortening the text clears the
-/// segments it no longer covers to zeros, up to where the text view started.</para></summary>
+/// <para>Each run of typing or deleting is one step for <see cref="Undo"/> and <see cref="Redo"/>; placing the cursor
+/// elsewhere starts a new one.</para></summary>
 public sealed class TagEdit
 {
-    private readonly Dictionary<int, byte[]> _original;
+    /// <summary>What the tag held, per segment (null bytes: not known). Every segment the read reached, writable or not.</summary>
+    private readonly Dictionary<int, byte?[]> _original;
     private readonly Dictionary<int, string> _blocked;
-    private Dictionary<int, byte[]> _data;
 
-    /// <summary>The bytes when the text view was opened; text typed since is laid over these.</summary>
-    private Dictionary<int, byte[]>? _textBase;
+    /// <summary>The bytes typed, per segment (null: not typed, the tag's byte stays).</summary>
+    private Dictionary<int, byte?[]> _edits = [];
+
+    private readonly Stack<Snapshot> _undo = new(), _redo = new();
+    private EditKind? _run;
+
+    private enum EditKind { Type, Delete }
+    private sealed record Snapshot(Dictionary<int, byte?[]> Edits, int Cursor, int Nibble, bool InText);
 
     public SegmentLayout Layout { get; }
 
     /// <summary>The serial the tag must have, or null for any tag of the layout's type. Never written to the tag.</summary>
     public string? ExpectedId { get; set; }
 
-    /// <summary>Whether the content came from reading a tag (only changes are written) rather than being set up by hand.</summary>
+    /// <summary>Whether the content came from reading a tag rather than being set up by hand.</summary>
     public bool FromRead { get; }
 
     public int From { get; private set; }
     public int To { get; private set; }
 
-    private TagEdit(SegmentLayout layout, Dictionary<int, byte[]> original, Dictionary<int, string> blocked, bool fromRead)
+    /// <summary>The cursor: a byte in the run of writable bytes (<see cref="Length"/> once past the last), which half of
+    /// it the next hex digit sets (0 the high nibble, 1 the low), and whether typing goes to the text column.</summary>
+    public int Cursor { get; private set; }
+    public int Nibble { get; private set; }
+    public bool InText { get; private set; }
+
+    private TagEdit(SegmentLayout layout, Dictionary<int, byte?[]> original, Dictionary<int, string> blocked, bool fromRead)
     {
         Layout = layout;
         _original = original;
         _blocked = blocked;
-        _data = original.ToDictionary(p => p.Key, p => p.Value.ToArray());
         FromRead = fromRead;
         From = layout.FirstWritable;
         To = layout.Count > 0 || layout.Family != TagFamily.Iso15693 ? layout.LastWritable : layout.FirstWritable + 15;
@@ -153,20 +204,23 @@ public sealed class TagEdit
     /// <summary>An edit of the tag just read, expecting that same tag (its serial and chip).</summary>
     public static TagEdit FromTag(SegmentRead read, string id) =>
         new(read.Layout,
-            read.Data.Where(p => p.Value.Length == read.Layout.SegmentSize && read.Layout.WhyNotWritable(p.Key) is null)
-                     .ToDictionary(p => p.Key, p => p.Value.ToArray()),
+            read.Data.Where(p => p.Value.Length == read.Layout.SegmentSize)
+                     .ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()),
             read.Blocked.ToDictionary(p => p.Key, p => p.Value), fromRead: true)
         { ExpectedId = id };
 
-    /// <summary>An empty edit for a tag type chosen by hand: nothing is written until segments are filled in.</summary>
+    /// <summary>An empty edit for a tag type chosen by hand: every byte unknown, nothing written until typed.</summary>
     public static TagEdit Blank(SegmentLayout layout) => new(layout, [], [], fromRead: false);
 
     public string? WhyNotWritable(int segment) =>
         Layout.WhyNotWritable(segment) ?? (_blocked.TryGetValue(segment, out var why) ? why : null);
 
-    /// <summary>The writable segments in the range, in order.</summary>
+    /// <summary>The writable segments in the range, in order: together they make the run the cursor moves over.</summary>
     public IReadOnlyList<int> Segments =>
         Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+
+    /// <summary>How many writable bytes the range has.</summary>
+    public int Length => Segments.Count * Layout.SegmentSize;
 
     /// <summary>Limits the edit to segments <paramref name="from"/>-<paramref name="to"/>. Returns why not, or null.</summary>
     public string? SetRange(int from, int to)
@@ -177,162 +231,184 @@ public sealed class TagEdit
             return $"{Capital(Layout.Noun)}s {first}-{last} can be edited on {(Layout.Family == TagFamily.Iso15693 && Layout.Count == 0 ? "a label" : "this tag")}.";
         From = from;
         To = to;
-        _textBase = null;
+        Place(0, InText);
         return null;
     }
 
-    /// <summary>The segments to write: those in the range with bytes that the tag (as read) does not already have.</summary>
-    public IReadOnlyDictionary<int, byte[]> Changes =>
-        Segments.Where(s => _data.TryGetValue(s, out var d) && !(_original.TryGetValue(s, out var o) && o.AsSpan().SequenceEqual(d)))
-                .ToDictionary(s => s, s => _data[s].ToArray());
+    // ------------------------------------------------------------------------------------------------ what it holds
+
+    /// <summary>The byte shown for a segment: typed, else as the tag held it, else null (not known).</summary>
+    public byte? ValueAt(int segment, int index) =>
+        _edits.TryGetValue(segment, out var e) && e[index] is { } typed ? typed
+            : _original.TryGetValue(segment, out var o) ? o[index] : null;
+
+    /// <summary>Whether the byte was typed (and differs from what the tag held).</summary>
+    public bool IsEdited(int segment, int index) => _edits.TryGetValue(segment, out var e) && e[index] is not null;
+
+    /// <summary>A short name for a segment the editor leaves alone, for its row: what it holds, or why it is closed.</summary>
+    public string RoleOf(int segment) =>
+        Layout.Role(segment) is { Length: > 0 } role ? role
+            : !_blocked.ContainsKey(segment) ? ""
+            : Layout.Family == TagFamily.Classic ? "sector not opened" : "locked for good";
+
+    /// <summary>The segment and byte at a position of the run.</summary>
+    public (int Segment, int Index) At(int position)
+    {
+        var segments = Segments;
+        int size = Layout.SegmentSize;
+        position = Math.Clamp(position, 0, Math.Max(0, segments.Count * size - 1));
+        return (segments.Count == 0 ? From : segments[position / size], position % size);
+    }
+
+    /// <summary>The run position of a byte, or -1 when its segment is not writable or not in the range.</summary>
+    public int PositionOf(int segment, int index)
+    {
+        int k = Segments.ToList().IndexOf(segment);
+        return k < 0 ? -1 : k * Layout.SegmentSize + Math.Clamp(index, 0, Layout.SegmentSize - 1);
+    }
+
+    /// <summary>The segments to write, with the typed bytes (null for those kept as the tag has them).</summary>
+    public IReadOnlyDictionary<int, byte?[]> Changes =>
+        Segments.Where(s => _edits.TryGetValue(s, out var e) && e.Any(b => b is not null))
+                .ToDictionary(s => s, s => _edits[s].ToArray());
 
     public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes);
 
-    /// <summary>After a successful write: the tag now holds these bytes, so they are no longer changes.</summary>
-    public void Commit(IReadOnlyDictionary<int, byte[]> written)
+    /// <summary>After a successful write: the tag now holds these bytes, so they are no longer changes. The history is
+    /// cleared, since undoing would now mean changing the tag back.</summary>
+    public void Commit(IReadOnlyDictionary<int, byte?[]> written)
     {
-        foreach (var (segment, data) in written) _original[segment] = data.ToArray();
-    }
-
-    /// <summary>The bytes the editor holds for a segment, or null when it is left as the tag has it.</summary>
-    public byte[]? DataFor(int segment) => _data.TryGetValue(segment, out var d) ? d.ToArray() : null;
-
-    // ------------------------------------------------------------------------------------------------ hex view
-
-    /// <summary>One line per writable segment in the range: "005: 01 02 03 04", or "005:" when left as it is.</summary>
-    public string FormatHex() =>
-        string.Join("\n", Segments.Select(s =>
-            _data.TryGetValue(s, out var d) ? $"{s:D3}: {string.Join(" ", d.Select(b => b.ToString("X2")))}" : $"{s:D3}:"));
-
-    /// <summary>Takes the hex view's lines as the new content of the range. A segment without a line, or with no bytes
-    /// after its number, is left as the tag has it. Returns what is wrong (nothing changes then), or null.</summary>
-    public string? ApplyHex(string? text)
-    {
-        var next = _data.Where(p => p.Key < From || p.Key > To).ToDictionary(p => p.Key, p => p.Value);
-        var seen = new HashSet<int>();
-        var lines = (text ?? "").Replace("\r", "").Split('\n');
-        string noun = Capital(Layout.Noun);
-
-        for (int n = 0; n < lines.Length; n++)
+        foreach (var (segment, bytes) in written)
         {
-            var line = lines[n].Trim();
-            if (line.Length == 0) continue;
-            int colon = line.IndexOf(':');
-            if (colon <= 0 || !int.TryParse(line[..colon].Trim(), out int segment))
-                return $"Line {n + 1}: start it with the {Layout.Noun} number, like \"{From:D3}: …\".";
-            if (WhyNotWritable(segment) is { } why) return $"{noun} {segment} {why}, so it cannot be edited.";
-            if (segment < From || segment > To) return $"{noun} {segment} is outside the range {From}-{To}.";
-            if (!seen.Add(segment)) return $"{noun} {segment} is listed twice.";
-
-            var rest = line[(colon + 1)..];
-            if (rest.Any(c => !Uri.IsHexDigit(c) && c is not (' ' or ':' or '-' or '\t')))
-                return $"{noun} {segment}: only hex digits (0-9, A-F) can follow the number.";
-            var hex = new string(rest.Where(Uri.IsHexDigit).ToArray());
-            if (hex.Length == 0) continue;                       // no bytes: leave the segment as it is
-            if (hex.Length != Layout.SegmentSize * 2)
-                return $"{noun} {segment} needs {Layout.SegmentSize} bytes ({Layout.SegmentSize * 2} hex digits); it has {hex.Length} digit{(hex.Length == 1 ? "" : "s")}.";
-            next[segment] = Convert.FromHexString(hex);
+            var original = _original.TryGetValue(segment, out var o) ? o : new byte?[Layout.SegmentSize];
+            for (int i = 0; i < bytes.Length; i++) if (bytes[i] is { } b) original[i] = b;
+            _original[segment] = original;
+            _edits.Remove(segment);
         }
-
-        _data = next;
-        _textBase = null;
-        return null;
+        _undo.Clear();
+        _redo.Clear();
+        _run = null;
     }
 
-    // ------------------------------------------------------------------------------------------------ text view
+    // ------------------------------------------------------------------------------------------------ cursor and typing
 
-    /// <summary>The range as one run of text: the segments from the first on that hold bytes, up to the first one
-    /// left empty, with trailing zeros dropped. Opening the text view starts from here.</summary>
-    public string FormatText()
+    /// <summary>Puts the cursor on a byte of the run, in the hex or the text column. Starts a new undo step.</summary>
+    public void Place(int position, bool inText, int nibble = 0)
     {
-        _textBase = _data.ToDictionary(p => p.Key, p => p.Value.ToArray());
-        var bytes = LeadingRun(_textBase).SelectMany(s => _textBase[s]).ToArray();
-        int end = bytes.Length;
-        while (end > 0 && bytes[end - 1] == 0) end--;
-        return Escape(bytes.AsSpan(0, end));
+        Cursor = Math.Clamp(position, 0, Length);
+        InText = inText;
+        Nibble = inText ? 0 : Math.Clamp(nibble, 0, 1);
+        _run = null;
     }
 
-    /// <summary>Lays the text over the segments from the first one on: each segment it reaches gets its bytes (the last
-    /// one padded with zeros), and the segments the text view started with but the text no longer reaches are cleared
-    /// to zeros. Segments beyond both stay as they are. Returns what is wrong (nothing changes then), or null.</summary>
-    public string? ApplyText(string? text)
+    /// <summary>Moves the cursor by a number of bytes (a row is one segment).</summary>
+    public void Move(int bytes) => Place(Math.Clamp(Cursor + bytes, 0, Math.Max(0, Length - 1)), InText);
+
+    /// <summary>Types one hex digit over the cursor's nibble and moves on. False when it is not a hex digit or the
+    /// cursor is past the end of the range.</summary>
+    public bool TypeHex(char digit)
     {
-        _textBase ??= _data.ToDictionary(p => p.Key, p => p.Value.ToArray());
-        if (!TryUnescape(text ?? "", out var bytes, out var error)) return error;
-
-        var segments = Segments;
-        int size = Layout.SegmentSize;
-        int capacity = segments.Count * size;
-        if (bytes.Length > capacity)
-            return $"The text needs {bytes.Length} bytes, but {Layout.Noun}s {From}-{To} hold {capacity}.";
-
-        int covered = Math.Max((bytes.Length + size - 1) / size, LeadingRun(_textBase).Count);
-        var next = _textBase.ToDictionary(p => p.Key, p => p.Value.ToArray());
-        for (int k = 0; k < covered; k++)
-        {
-            var chunk = new byte[size];
-            if (k * size < bytes.Length) Array.Copy(bytes, k * size, chunk, 0, Math.Min(size, bytes.Length - k * size));
-            next[segments[k]] = chunk;
-        }
-        _data = next;
-        return null;
-    }
-
-    /// <summary>The writable segments in the range, from the first, that hold bytes, up to the first left empty.</summary>
-    private List<int> LeadingRun(Dictionary<int, byte[]> data) => Segments.TakeWhile(data.ContainsKey).ToList();
-
-    /// <summary>Bytes as editable text: printable ASCII and UTF-8 as themselves, a newline as a line break, a backslash
-    /// as \\ and any other byte as \xHH, so that <see cref="TryUnescape"/> gives back exactly the same bytes.</summary>
-    public static string Escape(ReadOnlySpan<byte> bytes)
-    {
-        var text = new StringBuilder(bytes.Length);
-        for (int i = 0; i < bytes.Length;)
-        {
-            byte b = bytes[i];
-            if (b == (byte)'\\') { text.Append(@"\\"); i++; continue; }
-            if (b == 0x0A || b is >= 0x20 and < 0x7F) { text.Append((char)b); i++; continue; }
-            if (b >= 0x80 && System.Text.Rune.DecodeFromUtf8(bytes[i..], out var rune, out int used) == System.Buffers.OperationStatus.Done)
-            {
-                text.Append(rune.ToString());
-                i += used;
-                continue;
-            }
-            text.Append($"\\x{b:X2}");
-            i++;
-        }
-        return text.ToString();
-    }
-
-    /// <summary>The bytes text in the editor stands for: UTF-8, with \xHH a byte in hex and \\ a backslash.</summary>
-    public static bool TryUnescape(string text, out byte[] bytes, out string? error)
-    {
-        var result = new List<byte>(text.Length);
-        error = null;
-        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        for (int i = 0; i < text.Length; i++)
-        {
-            char c = text[i];
-            if (c != '\\')
-            {
-                int length = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
-                result.AddRange(Encoding.UTF8.GetBytes(text.Substring(i, length)));
-                i += length - 1;
-                continue;
-            }
-            if (i + 1 < text.Length && text[i + 1] == '\\') { result.Add((byte)'\\'); i++; continue; }
-            if (i + 3 < text.Length && text[i + 1] == 'x' && Uri.IsHexDigit(text[i + 2]) && Uri.IsHexDigit(text[i + 3]))
-            {
-                result.Add(Convert.ToByte(text.Substring(i + 2, 2), 16));
-                i += 3;
-                continue;
-            }
-            bytes = [];
-            error = @"A backslash starts \xHH (one byte in hex, like \x00) or \\ (a backslash itself).";
-            return false;
-        }
-        bytes = result.ToArray();
+        if (!Uri.IsHexDigit(digit) || Cursor >= Length) return false;
+        Begin(EditKind.Type);
+        var (segment, index) = At(Cursor);
+        int value = Convert.ToInt32(digit.ToString(), 16);
+        int current = ValueAt(segment, index) ?? 0;
+        Set(segment, index, (byte)(Nibble == 0 ? (value << 4) | (current & 0x0F) : (current & 0xF0) | value));
+        if (Nibble == 0) Nibble = 1;
+        else { Nibble = 0; Cursor++; }
         return true;
     }
+
+    /// <summary>Types text over the bytes from the cursor on (UTF-8), moving on as it goes. Returns how many bytes it
+    /// wrote, fewer than the text needs when the range ends first.</summary>
+    public int TypeText(string text)
+    {
+        if (text.Length == 0 || Cursor >= Length) return 0;
+        Begin(EditKind.Type);
+        int written = 0;
+        foreach (var b in Encoding.UTF8.GetBytes(text))
+        {
+            if (Cursor >= Length) break;
+            var (segment, index) = At(Cursor);
+            Set(segment, index, b);
+            Cursor++;
+            written++;
+        }
+        Nibble = 0;
+        return written;
+    }
+
+    /// <summary>Steps back one byte and puts it back as the tag had it (in hex, half a typed byte is taken back first).</summary>
+    public void Backspace()
+    {
+        if (!InText && Nibble == 1) { Nibble = 0; }           // the cursor is inside the byte: go back to its start
+        else if (Cursor > 0) Cursor--;
+        else return;
+        Begin(EditKind.Delete);
+        var (segment, index) = At(Cursor);
+        Clear(segment, index);
+        Nibble = 0;
+    }
+
+    /// <summary>Puts every byte back as the tag had it. One undo step.</summary>
+    public void RevertAll()
+    {
+        if (_edits.Count == 0) return;
+        _run = null;
+        Begin(EditKind.Delete);
+        _edits.Clear();
+        _run = null;
+    }
+
+    public bool CanUndo => _undo.Count > 0;
+    public bool CanRedo => _redo.Count > 0;
+
+    public bool Undo() => Step(_undo, _redo);
+    public bool Redo() => Step(_redo, _undo);
+
+    private bool Step(Stack<Snapshot> from, Stack<Snapshot> to)
+    {
+        if (from.Count == 0) return false;
+        to.Push(Take());
+        var s = from.Pop();
+        _edits = Copy(s.Edits);
+        Cursor = Math.Clamp(s.Cursor, 0, Length);
+        Nibble = s.Nibble;
+        InText = s.InText;
+        _run = null;
+        return true;
+    }
+
+    /// <summary>Starts an undo step unless this edit continues the current run of the same kind.</summary>
+    private void Begin(EditKind kind)
+    {
+        if (_run == kind) return;
+        _undo.Push(Take());
+        _redo.Clear();
+        _run = kind;
+    }
+
+    private Snapshot Take() => new(Copy(_edits), Cursor, Nibble, InText);
+
+    private static Dictionary<int, byte?[]> Copy(Dictionary<int, byte?[]> edits) =>
+        edits.ToDictionary(p => p.Key, p => p.Value.ToArray());
+
+    /// <summary>Sets a typed byte; typing what the tag already held is no change.</summary>
+    private void Set(int segment, int index, byte value)
+    {
+        if (_original.TryGetValue(segment, out var o) && o[index] == value) { Clear(segment, index); return; }
+        if (!_edits.TryGetValue(segment, out var e)) _edits[segment] = e = new byte?[Layout.SegmentSize];
+        e[index] = value;
+    }
+
+    private void Clear(int segment, int index)
+    {
+        if (!_edits.TryGetValue(segment, out var e)) return;
+        e[index] = null;
+        if (e.All(b => b is null)) _edits.Remove(segment);
+    }
+
+    // ------------------------------------------------------------------------------------------------ serials
 
     /// <summary>Whether two serials are the same, however they are written (colons, spaces, case).</summary>
     public static bool SameId(string a, string b) => NormalizeId(a) == NormalizeId(b);

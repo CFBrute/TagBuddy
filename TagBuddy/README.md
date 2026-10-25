@@ -51,12 +51,17 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   **Edit pages or blocks** (`Services/TagSegments.cs`, `Services/NfcReader.Segments.cs`): after a read, "Edit and
   write to this tag" opens the write side with the tag's pages (Type 2), data blocks (MIFARE Classic, sectors that
-  opened) or blocks (ISO 15693) to edit, one line per segment in hex ("005: 01 02 03 04"), or as one run of text
-  laid over them (`\xHH` for a byte in hex, `\\` for a backslash). The edit expects that same tag: its serial and
-  chip are checked when a tag is held to the phone, and anything else is refused with nothing written. Only the
-  segments that were changed are written, each read back to confirm. The expectations can also be set up by hand
-  (tag type, an optional serial, the range of segments, and for ISO 15693 the bytes per block, which the label
-  must confirm); then only the segments filled in are written. The serial, page 3, lock bits, password pages,
+  opened) or blocks (ISO 15693) to edit, drawn like the read view (`Controls/SegmentGrid.cs`): one row per segment,
+  hex then text, Classic blocks under their sector, rows that are never written greyed with what they hold. Tap any
+  byte, in the hex or the text column, to put the cursor there, and type: it works like overwrite mode in a hex
+  editor, hex digits a nibble at a time or characters as UTF-8, running on into the next segment; backspace puts a
+  byte back as it was. Undo and Redo take back a run of typing (Ctrl+Z and Ctrl+Y or Ctrl+Shift+Z, and the cursor
+  keys, work on a hardware keyboard, passed on by `MainActivity` through `Pages/HardwareKeys.cs`). The edit expects
+  that same tag: its serial and chip are checked when a tag is held to the phone, and anything else is refused with
+  nothing written. Only the bytes that were changed are written: a segment is written whole, so its other bytes are
+  read from the tag just before and kept, and each segment is read back to confirm. The expectations can also be
+  set up by hand (tag type, an optional serial, the range of segments, and for ISO 15693 the bytes per block, which
+  the label must confirm); every byte then starts unknown (`··`) and only the bytes typed are written. The serial, page 3, lock bits, password pages,
   Classic block 0 and sector trailers are never written, so an edit can neither lock a tag for good nor change
   how it opens. Classic sectors are opened for writing with the same keys a read tries (entered, defaults,
   remembered), as key A and then key B. The serial is only ever compared, never written.

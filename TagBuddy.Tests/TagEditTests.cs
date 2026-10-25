@@ -96,161 +96,223 @@ public class TagEditTests
         Assert.Equal(36, edit.Segments.Count);   // pages 4-39
     }
 
+    /// <summary>Puts the cursor on a byte of a segment, in hex (or text).</summary>
+    private static void At(TagEdit edit, int segment, int index, bool text = false) =>
+        edit.Place(edit.PositionOf(segment, index), text);
+
+    private static void Hex(TagEdit edit, string digits) { foreach (var c in digits) edit.TypeHex(c); }
+
     [Fact]
-    public void Only_the_changed_page_is_written()
+    public void Only_the_typed_bytes_are_written()
     {
         var edit = TagEdit.FromTag(ReadNtag213(), "04");
-        var hex = edit.FormatHex().Replace("005: 05 05 05 05", "005: AA BB CC DD");
-        Assert.Null(edit.ApplyHex(hex));
+        At(edit, 5, 1);
+        Hex(edit, "AABB");
         var change = Assert.Single(edit.Changes);
         Assert.Equal(5, change.Key);
-        Assert.Equal(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD }, change.Value);
+        Assert.Equal(new byte?[] { null, 0xAA, 0xBB, null }, change.Value);
+        Assert.Equal((byte)0xAA, edit.ValueAt(5, 1));
+        Assert.Equal((byte)0x05, edit.ValueAt(5, 0));          // untouched: as read
     }
 
     [Fact]
-    public void Locked_pages_from_the_read_are_not_offered()
+    public void Typing_runs_on_into_the_next_segment()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 3);
+        Hex(edit, "1122");
+        Assert.Equal([5, 6], edit.Changes.Keys);
+        Assert.Equal((byte)0x22, edit.ValueAt(6, 0));
+    }
+
+    [Fact]
+    public void Typing_what_the_tag_already_has_is_no_change()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 0);
+        Hex(edit, "05");
+        Assert.Empty(edit.Changes);
+    }
+
+    [Fact]
+    public void One_hex_digit_sets_half_a_byte()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 7, 0);
+        edit.TypeHex('A');
+        Assert.Equal((byte)0xA7, edit.ValueAt(7, 0));
+        Assert.Equal(1, edit.Nibble);
+        Assert.False(edit.TypeHex('G'));
+    }
+
+    [Fact]
+    public void Text_overwrites_from_the_cursor_and_skips_classic_trailers()
+    {
+        var edit = TagEdit.Blank(Classic1K);
+        At(edit, 2, 14, text: true);
+        Assert.Equal(4, edit.TypeText("Hiya"));
+        Assert.Equal((byte)'H', edit.ValueAt(2, 14));
+        Assert.Equal((byte)'y', edit.ValueAt(4, 0));            // block 3 is the trailer
+        Assert.Equal([2, 4], edit.Changes.Keys);
+    }
+
+    [Fact]
+    public void A_blank_segment_keeps_the_tags_bytes_where_nothing_was_typed()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        Assert.Null(edit.ValueAt(4, 0));
+        At(edit, 4, 2, text: true);
+        edit.TypeText("é");                                      // two UTF-8 bytes
+        var change = Assert.Single(edit.Changes);
+        Assert.Equal(new byte?[] { null, null, 0xC3, 0xA9 }, change.Value);
+    }
+
+    [Fact]
+    public void Text_stops_at_the_end_of_the_range()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        edit.SetRange(4, 4);
+        At(edit, 4, 2, text: true);
+        Assert.Equal(2, edit.TypeText("abc"));
+        Assert.Equal(0, edit.TypeText("d"));
+        Assert.False(edit.TypeHex('1'));
+    }
+
+    [Fact]
+    public void Backspace_puts_the_byte_back()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 0, text: true);
+        edit.TypeText("xy");
+        edit.Backspace();
+        Assert.Equal((byte)0x05, edit.ValueAt(5, 1));
+        Assert.Equal((byte)'x', edit.ValueAt(5, 0));
+        edit.Backspace();
+        Assert.Empty(edit.Changes);
+    }
+
+    [Fact]
+    public void Backspace_in_the_middle_of_a_hex_byte_takes_back_that_byte()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 0);
+        edit.TypeHex('F');
+        edit.Backspace();
+        Assert.Equal((byte)0x05, edit.ValueAt(5, 0));
+        Assert.Equal(0, edit.Nibble);
+        Assert.Equal(edit.PositionOf(5, 0), edit.Cursor);
+    }
+
+    [Fact]
+    public void Undo_takes_back_a_run_of_typing_and_redo_puts_it_back()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        At(edit, 4, 0, text: true);
+        edit.TypeText("a");
+        edit.TypeText("b");                                      // the same run
+        At(edit, 10, 0, text: true);
+        edit.TypeText("c");                                      // a new run: the cursor was placed
+
+        Assert.True(edit.Undo());
+        Assert.Equal([4], edit.Changes.Keys);
+        Assert.Equal(edit.PositionOf(10, 0), edit.Cursor);
+        Assert.True(edit.Undo());
+        Assert.Empty(edit.Changes);
+        Assert.False(edit.Undo());
+
+        Assert.True(edit.Redo());
+        Assert.Equal((byte)'b', edit.ValueAt(4, 1));
+        Assert.True(edit.Redo());
+        Assert.Equal([4, 10], edit.Changes.Keys);
+        Assert.False(edit.CanRedo);
+    }
+
+    [Fact]
+    public void Typing_after_an_undo_drops_the_redo()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        At(edit, 4, 0, text: true);
+        edit.TypeText("a");
+        edit.Undo();
+        edit.TypeText("z");
+        Assert.False(edit.CanRedo);
+    }
+
+    [Fact]
+    public void Revert_is_one_step_that_undo_takes_back()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        At(edit, 4, 0);
+        Hex(edit, "0102");
+        edit.RevertAll();
+        Assert.Empty(edit.Changes);
+        edit.Undo();
+        Assert.Equal([4], edit.Changes.Keys);
+    }
+
+    [Fact]
+    public void Locked_pages_from_the_read_are_not_in_the_run()
     {
         var edit = TagEdit.FromTag(ReadNtag213(new() { [6] = "is locked for good" }), "04");
         Assert.DoesNotContain(6, edit.Segments);
-        Assert.Contains("locked", edit.ApplyHex("006: 00 00 00 00"));
+        Assert.Equal(-1, edit.PositionOf(6, 0));
+        Assert.Equal("locked for good", edit.RoleOf(6));
+        Assert.Equal((byte)6, edit.ValueAt(6, 0));              // still shown as read
+        At(edit, 5, 3);
+        Hex(edit, "AABB");
+        Assert.Equal((byte)0xBB, edit.ValueAt(7, 0));           // runs on past the locked page
     }
 
     [Fact]
     public void A_committed_write_is_no_longer_a_change()
     {
-        var edit = TagEdit.FromTag(ReadNtag213(), "04");
-        edit.ApplyHex(edit.FormatHex().Replace("004: 04 04 04 04", "004: 01 02 03 04"));
-        Assert.Single(edit.Changes);
+        var edit = TagEdit.Blank(Ntag213);
+        At(edit, 4, 0);
+        Hex(edit, "01");
         edit.Commit(edit.Changes);
         Assert.Empty(edit.Changes);
-    }
-
-    // ------------------------------------------------------------------------------------------------ hex view
-
-    [Fact]
-    public void A_blank_edit_writes_only_what_is_filled_in()
-    {
-        var edit = TagEdit.Blank(Ntag213);
-        Assert.StartsWith("004:\n005:", edit.FormatHex());
-        Assert.Empty(edit.Changes);
-        Assert.Null(edit.ApplyHex("004:\n005: de:ad:be:ef\n006:"));
-        Assert.Equal([5], edit.Changes.Keys);
-    }
-
-    [Theory]
-    [InlineData("hello", "start it with the page number")]
-    [InlineData("003: 00 00 00 00", "one-time")]
-    [InlineData("041: 00 00 00 00", "password")]
-    [InlineData("004: 00 00 00", "needs 4 bytes")]
-    [InlineData("004: 00 00 00 0G", "only hex digits")]
-    [InlineData("004: 00 00 00 00\n4: 11 11 11 11", "listed twice")]
-    public void Bad_hex_lines_say_what_is_wrong_and_change_nothing(string text, string problem)
-    {
-        var edit = TagEdit.Blank(Ntag213);
-        edit.ApplyHex("010: 01 01 01 01");
-        Assert.Contains(problem, edit.ApplyHex(text));
-        Assert.Equal([10], edit.Changes.Keys);   // the earlier input stands
+        Assert.Equal((byte)1, edit.ValueAt(4, 0));
+        Assert.False(edit.CanUndo);
     }
 
     [Fact]
-    public void Lines_outside_the_range_are_refused_and_only_the_range_is_written()
+    public void Only_the_range_is_written()
     {
         var edit = TagEdit.Blank(Ntag213);
-        Assert.Null(edit.ApplyHex("020: 01 01 01 01"));
+        At(edit, 20, 0);
+        Hex(edit, "01");
         Assert.Null(edit.SetRange(4, 10));
-        Assert.Empty(edit.Changes);                         // page 20 is kept, but not written from 4-10
-        Assert.Contains("outside", edit.ApplyHex("011: 00 00 00 00"));
-        Assert.NotNull(edit.SetRange(4, 40));               // page 40 is the lock page
+        Assert.Empty(edit.Changes);
+        Assert.NotNull(edit.SetRange(4, 40));                   // page 40 is the lock page
         Assert.NotNull(edit.SetRange(9, 5));
     }
 
-    // ------------------------------------------------------------------------------------------------ text view
-
     [Fact]
-    public void Text_runs_over_the_pages_and_pads_the_last_with_zeros()
+    public void Moving_stays_inside_the_run()
     {
         var edit = TagEdit.Blank(Ntag213);
-        Assert.Equal("", edit.FormatText());
-        Assert.Null(edit.ApplyText("Hello"));
-        Assert.Equal([4, 5], edit.Changes.Keys);
-        Assert.Equal("Hell"u8.ToArray(), edit.DataFor(4));
-        Assert.Equal(new byte[] { (byte)'o', 0, 0, 0 }, edit.DataFor(5));
-        Assert.Equal("004: 48 65 6C 6C\n005: 6F 00 00 00\n006:", string.Join("\n", edit.FormatHex().Split('\n').Take(3)));
-    }
-
-    [Fact]
-    public void Typing_and_deleting_leaves_untouched_pages_alone()
-    {
-        var edit = TagEdit.Blank(Ntag213);
-        edit.FormatText();
-        edit.ApplyText("Hello there");
-        Assert.Null(edit.ApplyText("Hi"));
-        Assert.Equal([4], edit.Changes.Keys);   // pages 5-6 were never on the tag's side of the edit
-    }
-
-    [Fact]
-    public void Shortening_text_from_a_read_clears_what_it_no_longer_covers()
-    {
-        var data = new Dictionary<int, byte[]>
-        {
-            [4] = "Hell"u8.ToArray(), [5] = "o wo"u8.ToArray(), [6] = "rld\0"u8.ToArray(), [7] = [0, 0, 0, 0],
-        };
-        var edit = TagEdit.FromTag(new SegmentRead(Ntag213, data, new Dictionary<int, string>()), "04");
-        edit.SetRange(4, 7);
-        Assert.Equal("Hello world", edit.FormatText());
-        Assert.Null(edit.ApplyText("Hello world"));
-        Assert.Empty(edit.Changes);                         // the same text gives the same bytes
-        Assert.Null(edit.ApplyText("Hi"));
-        Assert.Equal([4, 5, 6], edit.Changes.Keys);         // page 7 was zeros already
-        Assert.Equal(new byte[4], edit.DataFor(6));
-    }
-
-    [Fact]
-    public void Text_that_does_not_fit_is_refused()
-    {
-        var edit = TagEdit.Blank(Ntag213);
-        edit.SetRange(4, 5);
-        Assert.Contains("needs 9 bytes", edit.ApplyText("123456789"));
-    }
-
-    [Fact]
-    public void Classic_text_skips_the_trailer()
-    {
-        var edit = TagEdit.Blank(Classic1K);
-        Assert.Null(edit.ApplyText(new string('a', 40)));
-        Assert.Equal([1, 2, 4], edit.Changes.Keys);
+        edit.Move(-5);
+        Assert.Equal(0, edit.Cursor);
+        edit.Move(1000);
+        Assert.Equal(edit.Length - 1, edit.Cursor);
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x48, 0x69 }, "Hi")]
-    [InlineData(new byte[] { 0x03, 0x00, 0xFE }, @"\x03\x00\xFE")]
-    [InlineData(new byte[] { 0x5C }, @"\\")]
-    [InlineData(new byte[] { 0x61, 0x0A, 0x62 }, "a\nb")]
-    [InlineData(new byte[] { 0xC3, 0xA5 }, "å")]
-    [InlineData(new byte[] { 0xC3 }, @"\xC3")]   // half a UTF-8 character stays a byte
-    public void Escaping_round_trips(byte[] bytes, string text)
-    {
-        Assert.Equal(text, TagEdit.Escape(bytes));
-        Assert.True(TagEdit.TryUnescape(text, out var back, out _));
-        Assert.Equal(bytes, back);
-    }
+    [InlineData(new int[] { 0x11, -1, 0x33, -1 }, new byte[] { 1, 2, 3, 4 }, new byte[] { 0x11, 2, 0x33, 4 })]
+    [InlineData(new int[] { 0x11, 0x22, 0x33, 0x44 }, new byte[0], new byte[] { 0x11, 0x22, 0x33, 0x44 })]
+    public void Merge_keeps_the_tags_bytes_that_were_not_typed(int[] wanted, byte[] current, byte[] expected) =>
+        Assert.Equal(expected, SegmentWrite.Merge(wanted.Select(b => b < 0 ? (byte?)null : (byte)b).ToArray(), current));
 
-    [Theory]
-    [InlineData(@"a\q")]
-    [InlineData(@"\x4")]
-    [InlineData(@"end\")]
-    public void A_stray_backslash_is_explained(string text)
-    {
-        Assert.False(TagEdit.TryUnescape(text, out _, out var error));
-        Assert.Contains("backslash", error);
-    }
+    [Fact]
+    public void Merge_needs_the_tags_bytes_when_some_are_kept() =>
+        Assert.Null(SegmentWrite.Merge([0x11, null], []));
 
     // ------------------------------------------------------------------------------------------------ checks at write time
 
     [Fact]
     public void The_expected_serial_must_match_however_it_is_written()
     {
-        var write = new SegmentWrite(Ntag213, "04:A1:B2", new Dictionary<int, byte[]>());
+        var write = new SegmentWrite(Ntag213, "04:A1:B2", new Dictionary<int, byte?[]>());
         Assert.Null(write.WrongTag("04a1b2"));
         Assert.Contains("Nothing was written", write.WrongTag("04:A1:B3"));
         Assert.Null(write with { ExpectedId = null } is var any ? any.WrongTag("FF") : "");
@@ -259,7 +321,7 @@ public class TagEditTests
     [Fact]
     public void Another_chip_is_refused()
     {
-        var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte[]>());
+        var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte?[]>());
         Assert.Null(write.WrongChip(Ntag213 with { }));
         Assert.Contains("an NTAG215, but the edit is for an NTAG213", write.WrongChip(Layout("NTAG215")));
         Assert.Contains("a MIFARE Classic 1K", write.WrongChip(Classic1K));
@@ -268,10 +330,10 @@ public class TagEditTests
     [Fact]
     public void An_iso_label_is_checked_by_block_size_and_count()
     {
-        var write = new SegmentWrite(Iso, null, new Dictionary<int, byte[]>());
+        var write = new SegmentWrite(Iso, null, new Dictionary<int, byte?[]>());
         Assert.Null(write.WrongChip(Iso with { Count = 28 }));
         Assert.Contains("Set the bytes per block to 8", write.WrongChip(Iso with { SegmentSize = 8 }));
-        var sized = new SegmentWrite(Iso with { Count = 28 }, null, new Dictionary<int, byte[]>());
+        var sized = new SegmentWrite(Iso with { Count = 28 }, null, new Dictionary<int, byte?[]>());
         Assert.Contains("has 64 blocks", sized.WrongChip(Iso with { Count = 64 }));
     }
 
@@ -289,14 +351,19 @@ public class TagEditTests
     {
         var edit = TagEdit.Blank(Iso with { SegmentSize = 8 });
         Assert.Equal((0, 15), (edit.From, edit.To));
-        Assert.Contains("needs 8 bytes", edit.ApplyHex("000: 00 00 00 00"));
-        Assert.Null(edit.ApplyHex("000: 01 02 03 04 05 06 07 08"));
+        Assert.Equal(16 * 8, edit.Length);
+        edit.Place(7, inText: false);
+        Hex(edit, "AB");
+        Assert.Equal(new byte?[] { null, null, null, null, null, null, null, 0xAB }, edit.Changes[0]);
     }
 
     [Fact]
     public void The_summary_names_the_pages_and_bytes()
     {
-        var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte[]> { [5] = new byte[4], [6] = new byte[4], [9] = new byte[4] });
-        Assert.Equal("pages 5-6, 9 (12 bytes)", write.Summary);
+        var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte?[]>
+        {
+            [5] = [1, 2, 3, 4], [6] = [null, 7, null, null], [9] = [8, null, null, null],
+        });
+        Assert.Equal("pages 5-6, 9 (6 bytes)", write.Summary);
     }
 }
