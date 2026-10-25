@@ -170,6 +170,15 @@ public static class HelpContent
                 new HelpText("These are recognised by type only: a payment card by its brand (Visa, Mastercard, ...), a passport or ID card, a MIFARE Classic access card. The app never asks such a card for the holder's data; it shows them as secure items with their type and serial number.")),
             new HelpMore("What is NDEF?",
                 new HelpText("NDEF is the standard way to store content on a tag so that any phone understands it: a link, a text, a contact card. A tag without NDEF content still has a serial number and memory, which the app shows.")),
+            .. Features.MifareKeyTools
+                ? new HelpBlock[]
+                {
+                    new HelpMore("MIFARE Classic keys",
+                        new HelpText("Each sector of a MIFARE Classic card is locked behind a 6-byte key. The app opens sectors that still use a well-known public key and shows only the serial for the rest."),
+                        new HelpText("When some sectors stay locked, you can type one key to try, or import a key dictionary (a .dic/.txt, such as the one shipped with Proxmark tools) and tap \"Try all known keys\" to run the whole list against the locked sectors. Trying keys is safe: Classic cards have no wrong-key lockout."),
+                        new HelpText("A key that opens a sector is remembered for that card's serial, so the same card opens quickly next time. A sector with a genuinely custom key stays closed; only its real key opens it.")),
+                }
+                : [],
             new HelpMore("Readable memory and backups",
                 new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save dump\" keeps a copy in Saved, which can be written back to a tag later."),
                 new HelpSeeAlso("dumps")),

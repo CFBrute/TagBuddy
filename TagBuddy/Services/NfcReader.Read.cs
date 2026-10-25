@@ -230,6 +230,7 @@ public sealed partial class NfcReader
             classic.Timeout = 1000;
             int sectors = classic.SectorCount;
             var lines = new List<string>();
+            var found = new List<(int Sector, string Key)>();
             int opened = 0;
 
             for (int sector = 0; sector < sectors; sector++)
@@ -243,6 +244,7 @@ public sealed partial class NfcReader
                 }
 
                 opened++;
+                found.Add((sector, MifareClassicKeys.KeyHex(key.Value.Key)));
                 lines.Add(MifareClassicKeys.SectorHeader(sector, key.Value.Key, key.Value.Slot, key.Value.Name));
                 int first = classic.SectorToBlock(sector);
                 int count = classic.GetBlockCountInSector(sector);
@@ -261,6 +263,7 @@ public sealed partial class NfcReader
                 }
             }
 
+            ClassicKeysFound = found;
             details.Add(("Access", MifareClassicKeys.AccessSummary(opened, sectors)));
             return opened > 0 ? lines : null;
         }
@@ -279,16 +282,27 @@ public sealed partial class NfcReader
     /// first, then the public defaults.</summary>
     private static (byte[] Key, char Slot, string Name)? AuthenticateClassicSector(MifareClassic classic, int sector)
     {
-        var candidates = _manualKey is { } manual
-            ? MifareClassicKeys.Defaults.Prepend((manual, "entered")).ToList()
-            : MifareClassicKeys.Defaults;
-
-        foreach (var (key, name) in candidates)
+        foreach (var (key, name) in ClassicKeyCandidates())
         {
             try { if (classic.AuthenticateSectorWithKeyA(sector, key)) return (key, 'A', name); } catch { }
             try { if (classic.AuthenticateSectorWithKeyB(sector, key)) return (key, 'B', name); } catch { }
         }
         return null;
+    }
+
+    /// <summary>The keys to try for a sector, in order and without repeats: the entered key first, then the built-in
+    /// public defaults, then keys remembered from earlier reads, and last — only when "try all" is on — the whole
+    /// imported dictionary.</summary>
+    private static IEnumerable<(byte[] Key, string Name)> ClassicKeyCandidates()
+    {
+        var seen = new HashSet<string>();
+        bool fresh(byte[] k) => seen.Add(Convert.ToHexString(k));
+
+        if (_manualKey is { } manual && fresh(manual)) yield return (manual, "entered");
+        foreach (var d in MifareClassicKeys.Defaults) if (fresh(d.Key)) yield return d;
+        foreach (var k in _rememberedClassicKeys) if (fresh(k)) yield return (k, "remembered");
+        if (_tryAllClassicKeys)
+            foreach (var k in _dictionaryClassicKeys) if (fresh(k)) yield return (k, "dictionary");
     }
 
     /// <summary>Adds what the page layout reveals: Amiibo content, lock bits, password protection.</summary>

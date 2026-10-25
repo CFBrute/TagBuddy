@@ -147,6 +147,10 @@ public partial class NfcPage : ContentPage
         _nfc.Disarm();
         _nfc.SetManualPassword(null, null);   // not kept once the tab is left
         _nfc.SetManualClassicKey(null);
+        _tryAllKeys = false;
+        _nfc.SetClassicKeySearch([], [], false);
+        _tryDefaultOnce = false;
+        _nfc.SetTryDefaultOnce(false);
         _nfc.Stop();
     }
 
@@ -207,12 +211,78 @@ public partial class NfcPage : ContentPage
         PasswordEntry.Unfocus();
     }
 
+    /// <summary>Set for one read when the person taps "Try the factory default on the next read" (shown only when
+    /// the automatic setting is off).</summary>
+    private bool _tryDefaultOnce;
+
+    private void OnTryDefaultOnce(object? sender, EventArgs e)
+    {
+        _tryDefaultOnce = true;
+        _nfc.SetTryDefaultOnce(true);
+        Notice.Show("Hold the tag against the phone again");
+        StatusLabel.Text = "Hold the tag again to try the factory default password (FFFFFFFF) once…";
+    }
+
     // ---------------------------------------------------------------- MIFARE Classic key
+
+    /// <summary>Known MIFARE Classic keys the app has learned or the person imported (sideload only).</summary>
+    private readonly MifareKeyStore _keyStore = new();
+
+    /// <summary>Set for one read when the person taps "Try all": that read runs the whole imported dictionary.</summary>
+    private bool _tryAllKeys;
 
     private void OnClassicKeyChanged(object? sender, TextChangedEventArgs e) => ApplyClassicKey();
 
-    private void ApplyClassicKey() =>
+    /// <summary>Hands the reader the entered key, the keys remembered from earlier reads (always tried), and the
+    /// imported dictionary (tried only when "Try all" is armed).</summary>
+    private void ApplyClassicKey()
+    {
         _nfc.SetManualClassicKey(MifareClassicKeys.TryParseKey(ClassicKeyEntry.Text, out var key) ? key : null);
+        if (Features.MifareKeyTools)
+            _nfc.SetClassicKeySearch(_keyStore.AllRemembered(), _keyStore.ImportedKeys(), _tryAllKeys);
+    }
+
+    /// <summary>The dictionary tools, shown under the custom-key box when a Classic card has locked sectors.</summary>
+    private void ShowKeyDictionaryTools()
+    {
+        KeyDictionaryPanel.IsVisible = Features.MifareKeyTools;
+        if (!Features.MifareKeyTools) return;
+        int imported = _keyStore.ImportedCount();
+        TryAllKeysButton.Text = imported > 0 ? $"Try all {imported:N0} known keys" : "Try all known keys";
+        TryAllKeysButton.IsEnabled = imported > 0;
+        KeyStoreStatus.Text = imported > 0
+            ? $"{imported:N0} keys imported. Hold the card again after tapping to run them against the locked sectors; a key that opens a sector is remembered for this card."
+            : "Import a key dictionary (for example mfc_default_keys.dic) to try more than the built-in defaults. Keys that open a card are remembered for next time.";
+    }
+
+    private void OnTryAllKeys(object? sender, EventArgs e)
+    {
+        if (_keyStore.ImportedCount() == 0) return;
+        _tryAllKeys = true;
+        ApplyClassicKey();
+        Notice.Show("Hold the card against the phone again");
+        StatusLabel.Text = $"Hold the card again to try all {_keyStore.ImportedCount():N0} known keys on the locked sectors…";
+    }
+
+    private async void OnImportKeys(object? sender, EventArgs e)
+    {
+        try
+        {
+            var file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Pick a key file (.dic or .txt)" });
+            if (file is null) return;
+            using var reader = new StreamReader(await file.OpenReadAsync());
+            int added = _keyStore.Import(await reader.ReadToEndAsync());
+            ApplyClassicKey();
+            ShowKeyDictionaryTools();
+            await DisplayAlertAsync("Keys imported", added > 0
+                ? $"Added {added:N0} new keys. The store now has {_keyStore.ImportedCount():N0}."
+                : "No new keys were found in that file (it may already be imported, or hold no 12-hex-digit keys).", "OK");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("Could not import", ex.Message, "OK");
+        }
+    }
 
     // ---------------------------------------------------------------- mode switch
 
@@ -248,15 +318,38 @@ public partial class NfcPage : ContentPage
         ResultPanel.IsVisible = true;
 
         // Protected pages the read could not reach: offer the password, then the person holds the tag again.
+        // Running the default once is a one-shot per tap; turn it off again now that this read is done.
+        if (_tryDefaultOnce)
+        {
+            _tryDefaultOnce = false;
+            _nfc.SetTryDefaultOnce(false);
+        }
+
         if (tag.NeedsPassword)
+        {
             RevealPassword(HasTypedPassword
                 ? "That password did not open this tag. Check it and hold the tag again, or try another."
                 : "This tag is password-protected. Enter its password, then hold the tag again to read the locked pages.");
+            // When the app does not try the default by itself (setting off), offer a one-tap attempt here.
+            TryDefaultButton.IsVisible = !AppSettings.AutoTryDefaultPassword;
+        }
         else
             PasswordPanel.IsVisible = false;   // read fully; nothing to unlock
 
-        // A MIFARE Classic card with sectors the default keys did not open: offer a custom key.
+        // A MIFARE Classic card: remember the keys that opened its sectors, so this card opens quickly next time.
+        if (Features.MifareKeyTools && NfcReader.ClassicKeysFound.Count > 0)
+            _keyStore.Remember(tag.Id, NfcReader.ClassicKeysFound.Select(k => k.Key));
+
+        // Running the whole dictionary is a one-shot per tap; turn it off again now that this read is done.
+        if (_tryAllKeys)
+        {
+            _tryAllKeys = false;
+            ApplyClassicKey();
+        }
+
+        // A MIFARE Classic card with sectors the default keys did not open: offer a custom key and the dictionary.
         ClassicKeyPanel.IsVisible = tag.NeedsClassicKey;
+        if (tag.NeedsClassicKey) ShowKeyDictionaryTools();
 
         TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
 
