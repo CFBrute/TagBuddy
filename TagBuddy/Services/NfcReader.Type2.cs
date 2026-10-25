@@ -64,12 +64,14 @@ public sealed partial class NfcReader
         return buffer.ToArray();
     }
 
-    /// <summary>PWD_AUTH with the given password. A wrong password and a tag that moved away during the
-    /// handshake both surface as a failed transceive, so one failure is retried once after reconnecting
-    /// before it counts; the caller words its message accordingly.</summary>
-    private static bool TryAuthenticate(Type2Link link, byte[] pwd)
+    /// <summary>PWD_AUTH with the given password. A wrong password and a tag that moved away during the handshake
+    /// both surface as a failed transceive, so one failure is retried once after reconnecting before it counts,
+    /// and the caller words its message accordingly. <paramref name="singleAttempt"/> skips that retry: a wrong
+    /// password ticks the tag's wrong-attempt counter, so an automatic guess (the factory default) spends at most
+    /// one, rather than two, before it falls back to asking.</summary>
+    private static bool TryAuthenticate(Type2Link link, byte[] pwd, bool singleAttempt = false)
     {
-        for (int attempt = 0; attempt < 2; attempt++)
+        for (int attempt = 0; attempt < (singleAttempt ? 1 : 2); attempt++)
         {
             try
             {
@@ -80,6 +82,7 @@ public sealed partial class NfcReader
             {
                 // NAK or lost tag: fall through to the retry.
             }
+            if (singleAttempt) return false;
             try { link.Reconnect(); } catch { return false; }
         }
         return false;

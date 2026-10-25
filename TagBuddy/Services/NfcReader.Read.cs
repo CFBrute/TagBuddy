@@ -137,7 +137,8 @@ public sealed partial class NfcReader
                         byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? TagPassword.FactoryDefault;
                         bool triedDefault = !amiiboAuto && manual is null;
 
-                        if (TryAuthenticate(link, pwd))
+                        // The default is an automatic guess, so try it once: a wrong one ticks the tag's limit.
+                        if (TryAuthenticate(link, pwd, singleAttempt: triedDefault))
                         {
                             rawMemory = ReadMemory(link, chip);
                             if (triedDefault && rawMemory.Length >= chip.TotalPages * 4)
