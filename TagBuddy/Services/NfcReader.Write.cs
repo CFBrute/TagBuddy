@@ -103,13 +103,16 @@ public sealed partial class NfcReader
         if (pwd is null)
             return $"This tag is password-protected from page {auth0}. Enter its password and hold it again. " +
                    "Nothing was changed.";
-        authed = TryAuthenticate(link, pwd);
-        if (authed) return null;
 
         // The handshake fails the same way for a wrong password and for a tag that moved during it.
         string serial = ToHex(link.Uid);
         bool manualBound = ManualPasswordFor(serial) is not null;
         bool amiibo = Features.Amiibo && !manualBound && pwd.SequenceEqual(AmiiboPassword(link.Uid));
+        bool usingDefault = !manualBound && !amiibo;   // the factory default fallback: an automatic guess
+
+        // A wrong automatic guess (the default) ticks the tag's limit, so spend at most one attempt on it.
+        authed = TryAuthenticate(link, pwd, singleAttempt: usingDefault);
+        if (authed) return null;
         string which = amiibo ? "Amiibo key" : manualBound ? "password" : "factory default password (FFFFFFFF)";
         string next = manualBound || amiibo ? "Hold it still and try again." : "Enter the tag's password and hold it again.";
         int limit = ReadAuthLimit(link, chip);
