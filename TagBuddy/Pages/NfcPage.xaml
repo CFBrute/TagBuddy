@@ -143,11 +143,15 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
-                            <!-- Every page on its own line. Not NoWrap: on Android that also limits the label to one line. -->
-                            <Label x:Name="MemoryLabel"
-                                   FontFamily="monospace"
-                                   FontSize="12"
-                                   LineBreakMode="CharacterWrap" />
+                            <!-- Scrolls sideways so a long block line keeps its columns instead of wrapping. -->
+                            <!-- CharacterWrap, not NoWrap: NoWrap collapses a multi-line label to one line on Android.
+                                 The horizontal scroll gives unbounded width, so no line actually wraps. -->
+                            <ScrollView Orientation="Horizontal">
+                                <Label x:Name="MemoryLabel"
+                                       FontFamily="monospace"
+                                       FontSize="12"
+                                       LineBreakMode="CharacterWrap" />
+                            </ScrollView>
                         </Border>
                         <Button Text="Copy memory as text" Clicked="OnCopyMemory"
                                 BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
