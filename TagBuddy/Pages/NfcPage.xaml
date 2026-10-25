@@ -155,6 +155,9 @@
                         </Border>
                         <Button Text="Copy memory as text" Clicked="OnCopyMemory"
                                 BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
+                        <!-- Opens the write tab with these pages or blocks to edit, expecting this same tag -->
+                        <Button x:Name="EditTagButton" Text="Edit and write to this tag" Clicked="OnEditTag"
+                                HorizontalOptions="Center" IsVisible="False" />
                     </VerticalStackLayout>
 
                     <Label Text="Hold another tag to read it"
@@ -175,6 +178,7 @@
                         <x:String>Contact (vCard)</x:String>
                         <x:String>Private text (passphrase)</x:String>
                         <x:String>Raw bytes (no NDEF)</x:String>
+                        <x:String>Edit pages or blocks (hex, text)</x:String>
                         <x:String>Binary dump (Amiibo, backup)</x:String>
                         <x:String>Erase tag (reset)</x:String>
                     </Picker.Items>
@@ -202,6 +206,56 @@
                         <Entry x:Name="RepeatEntry" Placeholder="The same passphrase again" IsPassword="True"
                                TextChanged="OnWriteTextChanged" />
                     </VerticalStackLayout>
+                </VerticalStackLayout>
+
+                <!-- Segment editor: chosen pages or blocks, in hex or text, for the tag it expects -->
+                <VerticalStackLayout x:Name="SegmentPanel" Spacing="10" IsVisible="False">
+                    <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="12"
+                            BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <VerticalStackLayout Spacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <Label x:Name="ExpectSummary" FontSize="13" VerticalOptions="Center" LineBreakMode="WordWrap" />
+                                <Button x:Name="ExpectToggle" Grid.Column="1" Text="Change" Clicked="OnToggleExpect"
+                                        BackgroundColor="#6B7280" TextColor="White" FontSize="12" Padding="10,4" MinimumHeightRequest="32" />
+                            </Grid>
+                            <VerticalStackLayout x:Name="ExpectDetails" Spacing="6" IsVisible="False">
+                                <Label Text="Tag type" FontSize="12" TextColor="Gray" />
+                                <Picker x:Name="SegmentTypePicker" SelectedIndexChanged="OnSegmentTypeChanged" />
+                                <Label Text="Expected serial number (leave empty for any tag)" FontSize="12" TextColor="Gray" />
+                                <Entry x:Name="ExpectedIdEntry" Placeholder="e.g. 04:A1:B2:C3:D4:E5:F6" TextChanged="OnExpectedIdChanged" />
+                                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                                    <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                        <Label x:Name="RangeFromLabel" Text="From page" FontSize="12" TextColor="Gray" />
+                                        <Entry x:Name="RangeFromEntry" Keyboard="Numeric" TextChanged="OnRangeChanged" />
+                                    </VerticalStackLayout>
+                                    <VerticalStackLayout Grid.Column="1" Spacing="2">
+                                        <Label x:Name="RangeToLabel" Text="To page" FontSize="12" TextColor="Gray" />
+                                        <Entry x:Name="RangeToEntry" Keyboard="Numeric" TextChanged="OnRangeChanged" />
+                                    </VerticalStackLayout>
+                                    <VerticalStackLayout x:Name="SegmentSizePanel" Grid.Column="2" Spacing="2">
+                                        <Label Text="Bytes per block" FontSize="12" TextColor="Gray" />
+                                        <Entry x:Name="SegmentSizeEntry" Keyboard="Numeric" TextChanged="OnSegmentSizeChanged" />
+                                    </VerticalStackLayout>
+                                </Grid>
+                                <Label x:Name="ExpectHint" FontSize="12" TextColor="Gray" />
+                            </VerticalStackLayout>
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <HorizontalStackLayout Spacing="6">
+                        <Button x:Name="SegmentHexButton" Text="Hex" Clicked="OnSegmentHex"
+                                Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentTextButton" Text="Text" Clicked="OnSegmentText"
+                                Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
+                    </HorizontalStackLayout>
+                    <Editor x:Name="SegmentEditor" FontFamily="monospace" FontSize="13"
+                            AutoSize="TextChanges" MinimumHeightRequest="120"
+                            IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                            TextChanged="OnSegmentEditorChanged" />
+                    <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
                 </VerticalStackLayout>
 
                 <!-- Binary dump: restore a saved tag image -->

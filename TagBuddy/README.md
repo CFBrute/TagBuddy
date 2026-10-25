@@ -49,6 +49,17 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   an automatic attempt never risks locking a tag. Auto-trying the default can also be turned off on the Settings tab. The password is kept only while the tab is open.
   A wrong one can count against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
+  **Edit pages or blocks** (`Services/TagSegments.cs`, `Services/NfcReader.Segments.cs`): after a read, "Edit and
+  write to this tag" opens the write side with the tag's pages (Type 2), data blocks (MIFARE Classic, sectors that
+  opened) or blocks (ISO 15693) to edit, one line per segment in hex ("005: 01 02 03 04"), or as one run of text
+  laid over them (`\xHH` for a byte in hex, `\\` for a backslash). The edit expects that same tag: its serial and
+  chip are checked when a tag is held to the phone, and anything else is refused with nothing written. Only the
+  segments that were changed are written, each read back to confirm. The expectations can also be set up by hand
+  (tag type, an optional serial, the range of segments, and for ISO 15693 the bytes per block, which the label
+  must confirm); then only the segments filled in are written. The serial, page 3, lock bits, password pages,
+  Classic block 0 and sector trailers are never written, so an edit can neither lock a tag for good nor change
+  how it opens. Classic sectors are opened for writing with the entered key or the public defaults, as key A and
+  then key B. The serial is only ever compared, never written.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.
@@ -174,7 +185,9 @@ things about them decide what the app can do, and they are documented at the top
 - `Services/FrameDecoder.cs`, `Services/GrayDecoder.cs`, `Services/ImageDecoder.cs` - centre-first live decoding,
   and finding a code in a picked photo.
 - `Services/NfcReader*.cs` - NFC reader mode (Android), split by concern: lifecycle (`NfcReader.cs`), reading
-  (`.Read.cs`), Type 2 page access and passwords (`.Type2.cs`), writing (`.Write.cs`).
+  (`.Read.cs`), Type 2 page access and passwords (`.Type2.cs`), writing (`.Write.cs`), segment edits (`.Segments.cs`).
+- `Services/TagSegments.cs` - the segment editor: which pages or blocks each tag type may write, the hex and text
+  views, what changed, and the checks that the tag held to the phone is the one expected.
 - `Services/Type2Dump.cs` - checks on a dump's bytes (size, serial, chip label) before it goes near a tag.
 - `Services/SavedService.cs` - loads/saves everything in Saved; `DumpText` finds the readable text in a dump.
 - `Services/KnownSites.cs` - well-known sites, their other addresses, and link shorteners.

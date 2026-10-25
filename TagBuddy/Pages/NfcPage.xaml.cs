@@ -6,13 +6,13 @@ using TagBuddy.Services;
 namespace TagBuddy.Pages;
 
 /// <summary>The NFC tab: read a tag (details, content, memory dump, private text with its passphrase), or write
-/// text, links, contacts, private text, raw bytes or a dump to one, or erase it.</summary>
+/// text, links, contacts, private text, raw bytes, edited pages or blocks, or a dump to one, or erase it.</summary>
 [QueryProperty(nameof(IncomingDumpId), AppNavigation.Dump)]
 [QueryProperty(nameof(IncomingText), AppNavigation.Text)]
 public partial class NfcPage : ContentPage
 {
     /// <summary>The write types, in the order of the picker in NfcPage.xaml.</summary>
-    private enum WriteMode { Auto, Link, Text, Contact, Private, Raw, Dump, Erase }
+    private enum WriteMode { Auto, Link, Text, Contact, Private, Raw, Segments, Dump, Erase }
 
     private const string NdefHint = "Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written.";
     private static readonly string RawHint = "Writes the text as plain bytes into the tag's user pages, with no NDEF wrapper, and clears the rest. Phones will not show it as a text tag, but this app reads it back" +
@@ -47,6 +47,17 @@ public partial class NfcPage : ContentPage
     private byte[]? _dumpData;
     private string _dumpSerial = "";
     private string _dumpName = "";
+
+    /// <summary>The segment editor: what it expects and holds, the tag types offered, and what is wrong with the
+    /// input (each field's own problem, so fixing one does not hide another).</summary>
+    private TagEdit? _edit;
+    private List<SegmentLayout> _segmentLayouts = [];
+    private bool _segmentAsText;
+    private bool _renderingSegments;
+    private string? _idError, _rangeError, _sizeError, _editorError;
+
+    /// <summary>The segment write last armed, so a successful write to the expected tag can be marked as done.</summary>
+    private SegmentWrite? _segmentWrite;
 
     public NfcPage(SavedService saved)
     {
@@ -396,6 +407,7 @@ public partial class NfcPage : ContentPage
             AddDetail("Private text", $"{sealedBytes.Length - SealedText.Overhead} bytes, encrypted with a passphrase (AES-256-GCM)");
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
+        EditTagButton.IsVisible = tag.CanEdit;
         if (tag.RawMemory is { Length: > 0 } memory)
         {
             // Type 2 tag: the full page memory, shown with its map, saveable as a backup.
@@ -407,9 +419,13 @@ public partial class NfcPage : ContentPage
         }
         else if (tag.HasMemoryDump)
         {
-            // MIFARE Classic: the sectors the common default keys opened. Not a backup, so no dump buttons.
-            MemoryTitle.Text = "Card data";
-            MemoryDescription.Text = "The sectors that opened with common default keys. A card secured with custom keys shows only its serial number.";
+            // MIFARE Classic: the sectors the common default keys opened; ISO 15693: the blocks that answered.
+            // Not a backup, so no dump buttons.
+            bool label = tag.Segments?.Layout.Family == TagFamily.Iso15693;
+            MemoryTitle.Text = label ? "Label memory" : "Card data";
+            MemoryDescription.Text = label
+                ? "Every block of this label that answered a read."
+                : "The sectors that opened with common default keys. A card secured with custom keys shows only its serial number.";
             DumpButtons.IsVisible = false;
             MemoryOverview.IsVisible = false;
             MemoryLabel.Text = string.Join("\n", tag.MemoryDump!);
@@ -578,8 +594,15 @@ public partial class NfcPage : ContentPage
             }
         }
 
-        TextPanel.IsVisible = WriteType is not (WriteMode.Dump or WriteMode.Erase);
+        TextPanel.IsVisible = WriteType is not (WriteMode.Dump or WriteMode.Erase or WriteMode.Segments);
         PrivatePanel.IsVisible = WriteType == WriteMode.Private;
+        SegmentPanel.IsVisible = WriteType == WriteMode.Segments;
+        if (WriteType == WriteMode.Segments && _edit is null)
+        {
+            // Set up by hand: open the expectations, since the tag type has to be chosen first.
+            _edit = TagEdit.Blank(SegmentLayout.Known[0]);
+            ShowEdit(expand: true);
+        }
         DumpPanel.IsVisible = WriteType == WriteMode.Dump;
         ErasePanel.IsVisible = WriteType == WriteMode.Erase;
         WriteHint.IsVisible = TextPanel.IsVisible;
@@ -607,6 +630,10 @@ public partial class NfcPage : ContentPage
             case WriteMode.Erase:
                 _nfc.ArmErase();
                 ShowStatus("Ready. Hold the tag to erase against the back of the phone", ok: true);
+                return;
+
+            case WriteMode.Segments:
+                ArmSegments();
                 return;
 
             case WriteMode.Dump:
@@ -658,6 +685,33 @@ public partial class NfcPage : ContentPage
         void ShowStatus(string text, bool? ok)
         {
             if (updateStatus) SetWriteStatus(text, ok);
+        }
+
+        void ArmSegments()
+        {
+            _segmentWrite = null;
+            if (_edit is not { } edit) { _nfc.Disarm(); return; }
+            if ((_idError ?? _sizeError ?? _rangeError ?? _editorError) is { } problem)
+            {
+                _nfc.Disarm();
+                ShowStatus(problem, ok: false);
+                return;
+            }
+
+            var write = edit.ToWrite();
+            if (write.Writes.Count == 0)
+            {
+                _nfc.Disarm();
+                ShowStatus(edit.FromRead
+                    ? $"Change a {edit.Layout.Noun} above, then hold the tag to write it"
+                    : $"Fill in the {edit.Layout.Noun}s to write, then hold the tag", ok: null);
+                return;
+            }
+
+            _segmentWrite = write;
+            _nfc.ArmSegmentWrite(write);
+            var target = write.ExpectedId is { } id ? $"tag {id}" : $"any {write.Layout.ChipName}";
+            ShowStatus($"Ready. Hold {target} to the back of the phone to write {write.Summary}", ok: true);
         }
     }
 
@@ -731,6 +785,11 @@ public partial class NfcPage : ContentPage
     {
         Feedback.Tag(ok);
 
+        // The expected tag now holds the edit, so the same touch is not repeated; with any tag expected, it stays armed
+        // to write the next one too.
+        if (ok && WriteType == WriteMode.Segments && _segmentWrite is { ExpectedId: not null } done)
+            _edit?.Commit(done.Writes);
+
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
@@ -775,6 +834,177 @@ public partial class NfcPage : ContentPage
             ArmWrite();
             await _saved.MarkUsedAsync(candidates[index]);
         }
+    }
+
+    // ---------------------------------------------------------------- segment editor
+
+    /// <summary>From a read: edit this tag's pages or blocks, expecting the same tag (serial and chip) at write time.</summary>
+    private void OnEditTag(object? sender, EventArgs e)
+    {
+        if (_last is not { Segments: { } read } tag) return;
+        _edit = TagEdit.FromTag(read, tag.Id);
+        _segmentAsText = false;
+        SetMode(write: true);
+        ShowEdit(expand: false);
+        if (WriteType != WriteMode.Segments) WriteTypePicker.SelectedIndex = (int)WriteMode.Segments;   // arms the write
+        else ArmWrite();
+    }
+
+    /// <summary>Fills the editor's fields from <see cref="_edit"/> without treating that as input.</summary>
+    private void ShowEdit(bool? expand = null)
+    {
+        if (_edit is not { } edit) return;
+        _renderingSegments = true;
+        try
+        {
+            _segmentLayouts = SegmentLayout.Known.ToList();
+            int index = _segmentLayouts.FindIndex(l => l.Family == edit.Layout.Family && l.ChipName == edit.Layout.ChipName);
+            if (index < 0) { _segmentLayouts.Insert(0, edit.Layout); index = 0; }
+            SegmentTypePicker.ItemsSource = _segmentLayouts.Select(l => l.ChipName).ToList();
+            SegmentTypePicker.SelectedIndex = index;
+
+            ExpectedIdEntry.Text = edit.ExpectedId ?? string.Empty;
+            RangeFromEntry.Text = edit.From.ToString();
+            RangeToEntry.Text = edit.To.ToString();
+            RangeFromLabel.Text = $"From {edit.Layout.Noun}";
+            RangeToLabel.Text = $"To {edit.Layout.Noun}";
+            SegmentSizePanel.IsVisible = edit.Layout.Family == TagFamily.Iso15693 && !edit.FromRead;
+            SegmentSizeEntry.Text = edit.Layout.SegmentSize.ToString();
+            ExpectHint.Text = edit.Layout.Family switch
+            {
+                TagFamily.Type2 => "Pages are 4 bytes. The serial (pages 0-2), page 3 and the lock and password pages are never " +
+                                   "written, so an edit cannot lock the tag for good or change its password.",
+                TagFamily.Classic => "Blocks are 16 bytes. Block 0 (the serial) and each sector's trailer (its keys and access bits) " +
+                                     "are never written, so an edit cannot lock you out of a sector. Sectors are opened with the key " +
+                                     "you entered on the Read side, or the public default keys.",
+                _ => "Labels use blocks of 4 or 8 bytes, sometimes more. The label reports its size when written, and nothing is " +
+                     "written if it differs from the bytes per block here. Lock commands are never sent.",
+            };
+            _idError = _rangeError = _sizeError = null;
+            RenderSegments();
+        }
+        finally { _renderingSegments = false; }
+
+        if (expand is { } open) SetExpectExpanded(open);
+        UpdateExpectSummary();
+    }
+
+    /// <summary>Puts the edit into the editor in the current view (hex lines, or text).</summary>
+    private void RenderSegments()
+    {
+        if (_edit is not { } edit) return;
+        bool was = _renderingSegments;
+        _renderingSegments = true;
+        try { SegmentEditor.Text = _segmentAsText ? edit.FormatText() : edit.FormatHex(); }
+        finally { _renderingSegments = was; }
+        _editorError = null;
+
+        Palette.Select(SegmentHexButton, !_segmentAsText);
+        Palette.Select(SegmentTextButton, _segmentAsText);
+        string noun = edit.Layout.Noun;
+        SegmentHint.Text = (_segmentAsText
+                ? $@"Text runs over the {noun}s from {edit.From} on. \xHH is one byte in hex (\x00 is a zero byte), \\ a backslash. " +
+                  $"Shortening the text clears the {noun}s it no longer reaches to zeros."
+                : $"One line per {noun}: its number, then {edit.Layout.SegmentSize} bytes in hex. A line with no bytes is left as the tag has it.")
+            + (edit.FromRead
+                ? $" The {noun}s start as the tag held them when it was read; only the {noun}s you change are written."
+                : $" Only the {noun}s you fill in are written.");
+    }
+
+    private void UpdateExpectSummary()
+    {
+        if (_edit is not { } edit) return;
+        var tag = edit.ExpectedId is { } id ? $"tag {id}" : "any tag";
+        var size = edit.Layout.Family == TagFamily.Iso15693 ? $", {edit.Layout.SegmentSize} bytes per block" : "";
+        ExpectSummary.Text = $"Expects {edit.Layout.ChipName}, {tag}{size}. Edits {edit.Layout.Noun}s {edit.From}-{edit.To}.";
+    }
+
+    private void OnToggleExpect(object? sender, EventArgs e) => SetExpectExpanded(!ExpectDetails.IsVisible);
+
+    private void SetExpectExpanded(bool open)
+    {
+        ExpectDetails.IsVisible = open;
+        ExpectToggle.Text = open ? "Done" : "Change";
+    }
+
+    /// <summary>Another tag type: a new, empty edit for it (the bytes of a read do not carry over to another layout).</summary>
+    private void OnSegmentTypeChanged(object? sender, EventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit || SegmentTypePicker.SelectedIndex < 0) return;
+        var layout = _segmentLayouts[SegmentTypePicker.SelectedIndex];
+        if (layout.Family == edit.Layout.Family && layout.ChipName == edit.Layout.ChipName) return;
+        _edit = TagEdit.Blank(layout);
+        _edit.ExpectedId = edit.ExpectedId;
+        ShowEdit();
+        ArmWrite();
+    }
+
+    private void OnExpectedIdChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is null) return;
+        var text = ExpectedIdEntry.Text?.Trim() ?? string.Empty;
+        var id = TagEdit.ParseId(text);
+        _idError = text.Length > 0 && id is null ? "The expected serial number is hex bytes, like 04:A1:B2:C3:D4:E5:F6." : null;
+        _edit.ExpectedId = text.Length == 0 ? null : id;
+        UpdateExpectSummary();
+        ArmWrite();
+    }
+
+    private void OnRangeChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit) return;
+        _rangeError = int.TryParse(RangeFromEntry.Text, out int from) && int.TryParse(RangeToEntry.Text, out int to)
+            ? edit.SetRange(from, to)
+            : $"Enter the first and last {edit.Layout.Noun} to edit.";
+        if (_rangeError is null) RenderSegments();
+        UpdateExpectSummary();
+        ArmWrite();
+    }
+
+    /// <summary>ISO 15693 set up by hand: the block size, which only the label itself can confirm.</summary>
+    private void OnSegmentSizeChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit) return;
+        if (!int.TryParse(SegmentSizeEntry.Text, out int size) || size < 1 || size > SegmentLayout.MaxIsoBlockSize)
+        {
+            _sizeError = $"Bytes per block is a number from 1 to {SegmentLayout.MaxIsoBlockSize}; most labels use 4 or 8.";
+            ArmWrite();
+            return;
+        }
+        _sizeError = null;
+        if (size == edit.Layout.SegmentSize) { ArmWrite(); return; }
+        int from = edit.From, to = edit.To;
+        _edit = TagEdit.Blank(edit.Layout with { SegmentSize = size });
+        _edit.ExpectedId = edit.ExpectedId;
+        _edit.SetRange(from, to);
+        RenderSegments();
+        UpdateExpectSummary();
+        ArmWrite();
+    }
+
+    private void OnSegmentEditorChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit) return;
+        _editorError = _segmentAsText ? edit.ApplyText(SegmentEditor.Text) : edit.ApplyHex(SegmentEditor.Text);
+        ArmWrite();
+    }
+
+    private void OnSegmentHex(object? sender, EventArgs e) => SetSegmentView(asText: false);
+    private void OnSegmentText(object? sender, EventArgs e) => SetSegmentView(asText: true);
+
+    /// <summary>Switches between the hex and text views of the same bytes; not while the current view has an error,
+    /// which would lose what was typed.</summary>
+    private void SetSegmentView(bool asText)
+    {
+        if (asText == _segmentAsText) return;
+        if (_editorError is not null)
+        {
+            Notice.Show("Fix the editor first: " + _editorError);
+            return;
+        }
+        _segmentAsText = asText;
+        RenderSegments();
+        ArmWrite();
     }
 
     // ---------------------------------------------------------------- dumps (write side)

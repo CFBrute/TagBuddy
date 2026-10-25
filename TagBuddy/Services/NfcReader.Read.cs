@@ -35,6 +35,7 @@ public sealed partial class NfcReader
         string? chipName = null;
         byte[]? ndefBytes = null;
         int? sak = null;
+        SegmentRead? segments = null;
 
         using (var nfcA = NfcA.Get(tag))
         {
@@ -64,6 +65,7 @@ public sealed partial class NfcReader
             {
                 details.Add(("Radio", "ISO 15693 (NfcV), typical for library and inventory labels"));
                 DescribeIso15693(tag.GetId(), details);
+                (memory, segments) = ReadIso15693(nfcV, tag.GetId() ?? [], details);
             }
         }
 
@@ -73,10 +75,10 @@ public sealed partial class NfcReader
             if (classic is not null)
             {
                 isClassic = true;
-                details.Add(("Chip", $"MIFARE Classic {classic.Size * 8 / 1024}K, {classic.SectorCount} sectors"));
+                details.Add(("Chip", $"{MifareClassicKeys.ChipName(classic.Size)}, {classic.SectorCount} sectors"));
                 details.Add(("Card", "MIFARE Classic"));
                 // Try the entered key and the public defaults; show whatever opens. Sectors with another custom key stay closed.
-                memory = ReadClassic(classic, details, out needsClassicKey);
+                memory = ReadClassic(classic, details, out needsClassicKey, out segments);
             }
         }
 
@@ -171,6 +173,7 @@ public sealed partial class NfcReader
                     {
                         ndefBytes = ExtractType2Ndef(rawMemory, details);
                         DescribeType2Layout(rawMemory, chip, details);
+                        if (chip is { UserEnd: > 0 }) segments = Type2Segments(rawMemory, chip);
                     }
                     memory = FormatDump(rawMemory);
                 }
@@ -215,15 +218,33 @@ public sealed partial class NfcReader
         if (rawMemory is not null && memory is { Count: > 0 })
             details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
 
-        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName, needsPassword, needsClassicKey);
+        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName, needsPassword, needsClassicKey,
+            segments);
+    }
+
+    /// <summary>A Type 2 read for the segment editor: every page read, with the pages the lock bits lock for good
+    /// left out of what may be written. Pages the read could not reach (behind a password) start empty.</summary>
+    private static SegmentRead Type2Segments(byte[] memory, Type2Chip chip)
+    {
+        var layout = new SegmentLayout(TagFamily.Type2, chip.Name, 4, chip.TotalPages, chip.UserEnd);
+        var data = new Dictionary<int, byte[]>();
+        for (int page = 0; page * 4 + 4 <= memory.Length; page++) data[page] = memory[(page * 4)..(page * 4 + 4)];
+        var locked = LockedPages(memory, chip);
+        var blocked = Enumerable.Range(4, Math.Max(0, chip.UserEnd - 4)).Where(p => locked[p])
+            .ToDictionary(p => p, _ => "is locked for good by the tag's lock bits");
+        return new SegmentRead(layout, data, blocked);
     }
 
     /// <summary>Opens as many sectors of a MIFARE Classic card as the public default keys allow and returns their
     /// blocks as "sector / block" lines, or null when nothing opened. Only the keys everyone knows are tried
     /// (<see cref="MifareClassicKeys"/>); a card with custom keys stays closed. Read-only.</summary>
-    private static List<string>? ReadClassic(MifareClassic classic, List<(string, string)> details, out bool anyLocked)
+    private static List<string>? ReadClassic(MifareClassic classic, List<(string, string)> details, out bool anyLocked,
+        out SegmentRead? segments)
     {
         anyLocked = false;
+        segments = null;
+        var blocks = new Dictionary<int, byte[]>();
+        var closed = new Dictionary<int, string>();
         try
         {
             classic.Connect();
@@ -240,6 +261,8 @@ public sealed partial class NfcReader
                 {
                     anyLocked = true;
                     lines.Add(MifareClassicKeys.LockedSector(sector));
+                    for (int b = 0; b < classic.GetBlockCountInSector(sector); b++)
+                        closed[classic.SectorToBlock(sector) + b] = "is in a sector no known key opened (enter its key and read the card again)";
                     continue;
                 }
 
@@ -254,7 +277,11 @@ public sealed partial class NfcReader
                     try
                     {
                         var data = classic.ReadBlock(block);
-                        if (data is { Length: >= 16 }) lines.Add(MifareClassicKeys.FormatBlock(block, data[..16]));
+                        if (data is { Length: >= 16 })
+                        {
+                            lines.Add(MifareClassicKeys.FormatBlock(block, data[..16]));
+                            blocks[block] = data[..16];
+                        }
                     }
                     catch
                     {
@@ -265,6 +292,9 @@ public sealed partial class NfcReader
 
             ClassicKeysFound = found;
             details.Add(("Access", MifareClassicKeys.AccessSummary(opened, sectors)));
+            if (opened > 0)
+                segments = new SegmentRead(new SegmentLayout(TagFamily.Classic, MifareClassicKeys.ChipName(classic.Size), 16,
+                    classic.BlockCount), blocks, closed);
             return opened > 0 ? lines : null;
         }
         catch (Exception ex)
@@ -425,6 +455,42 @@ public sealed partial class NfcReader
         var name = CardTypes.Iso15693Manufacturer(maker);
         var product = maker == 0x04 ? CardTypes.NxpIcodeProduct(type) : null;
         details.Add(("Chip", product is not null ? $"{name} {product}" : $"{name} ISO 15693 label"));
+    }
+
+    /// <summary>Reads every block of an ISO 15693 label (as many as it reports, or until it stops answering) for the
+    /// memory view and the segment editor. Blocks a label keeps private are simply not shown. Read-only.</summary>
+    private static (List<string>? Lines, SegmentRead? Segments) ReadIso15693(NfcV nfcV, byte[] uid, List<(string, string)> details)
+    {
+        if (uid.Length != 8) return (null, null);
+        try
+        {
+            nfcV.Connect();
+            var (count, size) = Iso15693SystemInfo(nfcV, uid);
+            var blocks = new Dictionary<int, byte[]>();
+            var lines = new List<string>();
+            int limit = count ?? 256;
+            for (int block = 0; block < limit; block++)
+            {
+                var data = Iso15693ReadBlock(nfcV, uid, block);
+                if (data is null) break;
+                if (size is { } s && data.Length != s) break;
+                blocks[block] = data;
+                lines.Add($"{block:D3}: {ToHex(data)}  {Ascii(data)}");
+            }
+            if (blocks.Count == 0) return (null, null);
+
+            int blockSize = size ?? blocks[0].Length;
+            details.Add(("Memory", $"{blocks.Count} blocks of {blockSize} bytes readable" +
+                (count is { } c && c > blocks.Count ? $" (the label reports {c})" : "")));
+            var layout = new SegmentLayout(TagFamily.Iso15693, SegmentLayout.Iso15693Name, blockSize, count ?? blocks.Count);
+            return (lines, new SegmentRead(layout, blocks, new Dictionary<int, string>()));
+        }
+        catch (Exception ex)
+        {
+            details.Add(("Note", "Could not read the label's memory (" + ex.Message + ")"));
+            return (null, null);
+        }
+        finally { try { nfcV.Close(); } catch { } }
     }
 
     private static byte[]? ReadType4Ndef(IsoDep isoDep, List<(string, string)> details)

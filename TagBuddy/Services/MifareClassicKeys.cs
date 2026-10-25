@@ -6,7 +6,8 @@ namespace TagBuddy.Services;
 /// an unknown key, so a real access card (custom keys) stays closed and shows only its serial.
 ///
 /// <para>Trying keys is safe: unlike a password-protected NTAG, a Classic sector has no wrong-key lockout, so a
-/// failed attempt costs nothing. Everything here is read-only; the app does not write MIFARE Classic.</para></summary>
+/// failed attempt costs nothing. Reading is read-only; the segment editor (<see cref="TagEdit"/>) writes data blocks
+/// of sectors these keys or the person's own key open, never block 0 and never a sector trailer.</para></summary>
 public static class MifareClassicKeys
 {
     /// <summary>The public default keys, tried in this order for key A and then key B of each sector. These are
@@ -35,6 +36,20 @@ public static class MifareClassicKeys
         key = Hex(hex);
         return true;
     }
+
+    /// <summary>The card's name from its memory size in bytes: "MIFARE Classic 1K" (1024), "4K", "2K" or "Mini" (320).</summary>
+    public static string ChipName(int sizeBytes) => sizeBytes switch
+    {
+        320 => "MIFARE Classic Mini",
+        _ => $"MIFARE Classic {sizeBytes / 1024}K",
+    };
+
+    /// <summary>Whether a block is its sector's trailer (keys A and B and the access bits): the last block of each
+    /// 4-block sector, and from block 128 on (4K cards) of each 16-block sector.</summary>
+    public static bool IsTrailer(int block) => block < 128 ? block % 4 == 3 : (block - 128) % 16 == 15;
+
+    /// <summary>The sector a block belongs to.</summary>
+    public static int SectorOf(int block) => block < 128 ? block / 4 : 32 + (block - 128) / 16;
 
     /// <summary>"FFFFFFFFFFFF" from a 6-byte key, the way keys are usually written.</summary>
     public static string KeyHex(byte[] key) => string.Concat(key.Select(b => b.ToString("X2")));
