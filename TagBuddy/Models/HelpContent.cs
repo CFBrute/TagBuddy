@@ -202,7 +202,7 @@ public static class HelpContent
                     "Contact (vCard): a contact card the phone offers to save.",
                     "Private text: encrypted with a passphrase; only Tag Buddy can read it (see Private text).",
                     "Raw bytes: text stored without the NDEF format. Only this app reads it back; it is meant for tags that cannot hold NDEF any more.",
-                    "Pages or blocks: edit a tag's memory directly, in hex or as text. Read the tag first and tap \"Edit and write to this tag\", then tap any byte and type over it; Undo and Redo go one keystroke at a time, \"All to 00\" clears every page, and \"Undo on the tag\" puts back what a write changed. The write only goes to that same tag, and only the bytes you changed are written. The serial, lock and password settings are never written.",
+                    "Pages or blocks: edit a tag's memory directly, in hex or as text. Read the tag first and tap \"Edit and write to this tag\", then tap any byte and type over it; Undo and Redo go one keystroke at a time, \"All to 00\" clears every page, and a blank MIFARE Classic sector (one that still opens with a default key) can be given a key of your own, which the phone remembers for that tag, and \"Undo on the tag\" puts back what a write changed. The write only goes to that same tag, and only the bytes you changed are written. The serial, lock and password settings are never written.",
                     amiibo ? "Binary dump: writes a saved backup back to a tag, including Amiibo dumps (see Tag backups)." : "Binary dump: writes a saved backup back to a tag (see Tag backups).",
                     "Erase: clears the tag so it is empty again.")),
             new HelpMore("Can a tag get locked by accident?",

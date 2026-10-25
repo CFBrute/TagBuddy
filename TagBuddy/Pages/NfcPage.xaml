@@ -286,6 +286,17 @@
                     </Border>
                     <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
 
+                    <!-- A key of the person's own for the cursor's sector, offered only for a sector that opened with a default key -->
+                    <VerticalStackLayout x:Name="SectorKeyPanel" Spacing="6" IsVisible="False"
+                                         Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                        <Label x:Name="SectorKeyTitle" FontSize="13" FontAttributes="Bold" />
+                        <Entry x:Name="SectorKeyEntry" Placeholder="New key: 12 hex digits" MaxLength="17"
+                               IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyChanged" />
+                        <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
+                               Text="This sector still opens with a public default key, as a blank tag does. Give it a key of your own and it is written with the tag, as key A and key B, with the standard access rules kept so the key can read and write the whole sector. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
+                        <Label x:Name="SectorKeyList" FontSize="12" />
+                    </VerticalStackLayout>
+
                     <!-- Writes already on a tag: put the old bytes back, or write the change again -->
                     <VerticalStackLayout x:Name="TagHistoryPanel" Spacing="6" IsVisible="False">
                         <Label x:Name="TagHistoryLabel" FontSize="13" />

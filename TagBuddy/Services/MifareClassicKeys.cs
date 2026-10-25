@@ -37,6 +37,23 @@ public static class MifareClassicKeys
         return true;
     }
 
+    /// <summary>Whether a key is one of the built-in public defaults (the sign of a blank or unsecured sector).</summary>
+    public static bool IsDefault(byte[] key) => Defaults.Any(d => d.Key.AsSpan().SequenceEqual(key));
+
+    /// <summary>The access bits of a sector trailer in transport configuration (as a blank card leaves the factory):
+    /// key A reads and writes every block and both keys, key B is a plain data key. Bytes 6-8 of the trailer.</summary>
+    public static readonly byte[] TransportAccessBits = [0xFF, 0x07, 0x80];
+
+    /// <summary>A sector trailer giving the sector <paramref name="key"/> as both key A and key B, with the standard
+    /// (transport) access bits, so the key reads and writes the whole sector and nothing is locked out. Byte 9 (unused
+    /// by the card, often 0x69) is kept from <paramref name="current"/>.</summary>
+    public static byte[] TrailerFor(byte[] key, byte[] current) =>
+        [.. key, .. TransportAccessBits, current.Length > 9 ? current[9] : (byte)0x69, .. key];
+
+    /// <summary>Whether a trailer's access bits are the transport ones (a sector whose rules were never changed).</summary>
+    public static bool HasTransportAccessBits(byte[] trailer) =>
+        trailer.Length >= 9 && trailer.AsSpan(6, 3).SequenceEqual(TransportAccessBits);
+
     /// <summary>The card's name from its memory size in bytes: "MIFARE Classic 1K" (1024), "4K", "2K" or "Mini" (320).</summary>
     public static string ChipName(int sizeBytes) => sizeBytes switch
     {

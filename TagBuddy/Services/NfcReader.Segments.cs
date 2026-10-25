@@ -19,6 +19,10 @@ public sealed partial class NfcReader
 
     private static SegmentWriteRecord? _lastSegmentWrite;
 
+    /// <summary>The sector keys the last segment write set on a card, confirmed by opening the sector with them:
+    /// (sector, 12-hex key). The page remembers them for the card, so later reads open it.</summary>
+    public static IReadOnlyList<(int Sector, string Key)> ClassicKeysSet { get; private set; } = [];
+
     /// <summary>What the last segment write changed (each segment's bytes before and after), for undoing it on the tag;
     /// null when it changed nothing. Taken once, by the page handling the write's result.</summary>
     public SegmentWriteRecord? TakeLastSegmentWrite()
@@ -50,6 +54,7 @@ public sealed partial class NfcReader
     private static (bool Ok, string Note) WriteSegments(Tag tag, SegmentWrite write)
     {
         _lastSegmentWrite = null;
+        ClassicKeysSet = [];
         var log = new WriteLog(ToHex(tag.GetId()), write.Layout);
         try { return WriteSegments(tag, write, log); }
         finally { log.Publish(); }
@@ -57,7 +62,7 @@ public sealed partial class NfcReader
 
     private static (bool Ok, string Note) WriteSegments(Tag tag, SegmentWrite write, WriteLog log)
     {
-        if (write.Writes.Count == 0) return (false, "Nothing to write.");
+        if (write.IsEmpty) return (false, "Nothing to write.");
         if (write.WrongTag(ToHex(tag.GetId())) is { } wrongTag) return (false, wrongTag);
         foreach (var segment in write.Writes.Keys)
             if (write.Layout.WhyNotWritable(segment) is { } why)
@@ -152,18 +157,24 @@ public sealed partial class NfcReader
 
             int written = 0, same = 0;
             var refused = new List<int>();
-            foreach (var sector in write.Writes.GroupBy(p => MifareClassicKeys.SectorOf(p.Key)).OrderBy(g => g.Key))
+            var keysSet = new List<(int, string)>();
+            var keyNotes = new List<string>();
+            var sectors = write.Writes.Keys.Select(MifareClassicKeys.SectorOf).Concat(write.NewKeys.Keys).Distinct().Order();
+            foreach (int sectorNo in sectors)
             {
-                var pending = sector.OrderBy(p => p.Key).ToList();
+                var pending = write.Writes.Where(p => MifareClassicKeys.SectorOf(p.Key) == sectorNo).OrderBy(p => p.Key).ToList();
+                // A new key is set only once the sector's data is written, and only when a public default key opened
+                // the sector as key A (a blank or unsecured tag) and its access bits are still the standard ones.
+                bool wantsKey = write.NewKeys.TryGetValue(sectorNo, out var newKey);
                 foreach (var key in candidates)
                 {
                     foreach (bool useB in new[] { false, true })
                     {
-                        if (pending.Count == 0) break;
+                        if (pending.Count == 0 && !wantsKey) break;
                         try
                         {
-                            bool opened = useB ? classic.AuthenticateSectorWithKeyB(sector.Key, key)
-                                               : classic.AuthenticateSectorWithKeyA(sector.Key, key);
+                            bool opened = useB ? classic.AuthenticateSectorWithKeyB(sectorNo, key)
+                                               : classic.AuthenticateSectorWithKeyA(sectorNo, key);
                             if (!opened) continue;
                             while (pending.Count > 0)
                             {
@@ -179,6 +190,14 @@ public sealed partial class NfcReader
                                 written++;
                                 pending.RemoveAt(0);
                             }
+
+                            if (pending.Count == 0 && wantsKey)
+                            {
+                                var (done, why) = SetClassicSectorKey(classic, sectorNo, key, useB, newKey!);
+                                if (done) keysSet.Add((sectorNo, MifareClassicKeys.KeyHex(newKey!)));
+                                else if (why is not null) keyNotes.Add(why);
+                                wantsKey = false;                           // one attempt: never retried with another key
+                            }
                         }
                         catch
                         {
@@ -187,15 +206,59 @@ public sealed partial class NfcReader
                             catch { return (false, $"The card moved away after {written} blocks. Hold it still and try again."); }
                         }
                     }
-                    if (pending.Count == 0) break;
+                    if (pending.Count == 0 && !wantsKey) break;
                 }
                 refused.AddRange(pending.Select(p => p.Key));
+                if (wantsKey) keyNotes.Add($"Sector {sectorNo} did not take a new key: no known key opened it.");
             }
 
-            return Result(write.Layout, written, same, [], refused,
-                "were not changed: no known key opened their sector, its access bits refuse writing, or they could not be read to keep the bytes you did not type", []);
+            ClassicKeysSet = keysSet;
+            if (keysSet.Count > 0)
+                keyNotes.Insert(0, $"Sector{(keysSet.Count == 1 ? "" : "s")} {Ranges(keysSet.Select(k => k.Item1).ToList())} now " +
+                                   $"{(keysSet.Count == 1 ? "has its" : "have their")} new key, which this phone remembers for this tag.");
+            var (ok, note) = Result(write.Layout, written, same, [], refused,
+                "were not changed: no known key opened their sector, its access bits refuse writing, or they could not be read to keep the bytes you did not type", keyNotes);
+            return (ok && keysSet.Count == write.NewKeys.Count, note);
         }
         finally { try { classic.Close(); } catch { } }
+    }
+
+    /// <summary>Gives a sector a key of the person's own, as key A and key B, keeping the standard access bits. Only for a
+    /// sector that a public default key opened as key A (so it is a blank or unsecured tag's sector) and whose access
+    /// bits are the transport ones: the new key then reads and writes everything, so nothing can be locked out. The
+    /// sector is opened with the new key afterwards to confirm it; only then is the key reported as set.</summary>
+    private static (bool Done, string? Why) SetClassicSectorKey(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, byte[] newKey)
+    {
+        if (asKeyB || !MifareClassicKeys.IsDefault(openedWith))
+            return (false, $"Sector {sector} did not take a new key: it is not open with a public default key A, so it is not a blank sector.");
+
+        int trailer = classic.SectorToBlock(sector) + classic.GetBlockCountInSector(sector) - 1;
+        byte[]? current;
+        try { current = classic.ReadBlock(trailer); }
+        catch { current = null; }
+        if (current is not { Length: >= 16 })
+            return (false, $"Sector {sector} did not take a new key: its trailer could not be read.");
+        if (!MifareClassicKeys.HasTransportAccessBits(current))
+            return (false, $"Sector {sector} did not take a new key: its access bits are not the standard ones, so changing the key could lock it.");
+
+        try
+        {
+            classic.WriteBlock(trailer, MifareClassicKeys.TrailerFor(newKey, current));
+        }
+        catch
+        {
+            try { classic.Close(); classic.Connect(); classic.Timeout = 1000; } catch { }
+            return (false, $"Sector {sector} did not take a new key: the card refused the write or moved away.");
+        }
+
+        // Writing the trailer ends the session; the proof is opening the sector again with the new key.
+        try
+        {
+            classic.Close(); classic.Connect(); classic.Timeout = 1000;
+            if (classic.AuthenticateSectorWithKeyA(sector, newKey)) return (true, null);
+        }
+        catch { }
+        return (false, $"Sector {sector}: the new key was written but did not open the sector afterwards. Hold the card still and read it again before trying once more.");
     }
 
     // ------------------------------------------------------------------------------------------------ ISO 15693
@@ -315,5 +378,6 @@ public sealed partial class NfcReader
 #else
     public void ArmSegmentWrite(SegmentWrite write) { }
     public SegmentWriteRecord? TakeLastSegmentWrite() => null;
+    public static IReadOnlyList<(int Sector, string Key)> ClassicKeysSet => [];
 #endif
 }
