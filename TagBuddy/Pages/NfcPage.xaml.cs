@@ -151,10 +151,16 @@ public partial class NfcPage : ContentPage
 
     // ---------------------------------------------------------------- tag password
 
-    private void OnTogglePassword(object? sender, EventArgs e)
+    /// <summary>Shows the password box, once a protected tag has been noticed, with what to do next. It is never
+    /// shown before that: nothing to set up in advance.</summary>
+    private void RevealPassword(string info)
     {
-        PasswordPanel.IsVisible = !PasswordPanel.IsVisible;
-        PasswordToggle.Text = PasswordPanel.IsVisible ? "Tag password  ▾" : "Tag password  ▸";
+        PasswordInfo.Text = info;
+        if (!PasswordPanel.IsVisible)
+        {
+            PasswordPanel.IsVisible = true;
+            if (PasswordEntry.Text?.Length is null or 0) PasswordEntry.Focus();
+        }
     }
 
     private void OnPasswordChanged(object? sender, TextChangedEventArgs e) => ApplyPassword();
@@ -193,6 +199,14 @@ public partial class NfcPage : ContentPage
 
         WaitingPanel.IsVisible = false;
         ResultPanel.IsVisible = true;
+
+        // Protected pages the read could not reach: offer the password, then the person holds the tag again.
+        if (tag.NeedsPassword)
+            RevealPassword(TagPassword.TryParse(PasswordEntry.Text, out _)
+                ? "That password did not open this tag. Check it and hold the tag again, or try another."
+                : "This tag is password-protected. Enter its password, then hold the tag again to read the locked pages.");
+        else
+            PasswordPanel.IsVisible = false;   // read fully; nothing to unlock
 
         TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
 
@@ -579,6 +593,12 @@ public partial class NfcPage : ContentPage
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
         UseRawButton.IsVisible = !ok && note.Contains(NfcReader.RawBytesTip)
             && WriteType is WriteMode.Auto or WriteMode.Text or WriteMode.Link;
+
+        // The write was refused because the tag is password-protected: offer the password, then hold it again.
+        if (!ok && note.Contains("password-protected"))
+            RevealPassword(TagPassword.TryParse(PasswordEntry.Text, out _)
+                ? "That password did not open this tag for writing. Check it and hold the tag again."
+                : "This tag is password-protected. Enter its password, then hold the tag again to write it.");
 
         if (_writeMode) ArmWrite(updateStatus: false);
     }

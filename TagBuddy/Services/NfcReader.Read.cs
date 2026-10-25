@@ -30,6 +30,7 @@ public sealed partial class NfcReader
         var records = new List<NfcRecordInfo>();
         List<string>? memory = null;
         byte[]? rawMemory = null;
+        bool needsPassword = false;
         string? chipName = null;
         byte[]? ndefBytes = null;
         int? sak = null;
@@ -125,11 +126,18 @@ public sealed partial class NfcReader
                     // typed, because a wrong guess counts against the tag's wrong-attempt limit.
                     if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4)
                     {
-                        byte[]? pwd = Features.Amiibo && LooksAmiibo(rawMemory) ? AmiiboPassword(link.Uid) : _manualPassword;
+                        bool amiiboAuto = Features.Amiibo && LooksAmiibo(rawMemory);
+                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : _manualPassword;
                         if (pwd is not null && TryAuthenticate(link, pwd))
                             rawMemory = ReadMemory(link, chip);
-                        else if (_manualPassword is null && !(Features.Amiibo && LooksAmiibo(rawMemory)))
-                            details.Add(("Password", "Some pages are password-protected. Enter the tag's password above to read them."));
+                        // Still short, and not an Amiibo we open on our own: the person must supply the password.
+                        if (rawMemory.Length < chip.TotalPages * 4 && !amiiboAuto)
+                        {
+                            needsPassword = true;
+                            details.Add(("Password", _manualPassword is null
+                                ? "Some pages are password-protected and were not read."
+                                : "That password did not open the protected pages."));
+                        }
                     }
 
                     if (rawMemory.Length >= 16)
@@ -180,7 +188,7 @@ public sealed partial class NfcReader
         if (rawMemory is not null && memory is { Count: > 0 })
             details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
 
-        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName);
+        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName, needsPassword);
     }
 
     /// <summary>Opens as many sectors of a MIFARE Classic card as the public default keys allow and returns their
