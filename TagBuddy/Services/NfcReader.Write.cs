@@ -99,7 +99,7 @@ public sealed partial class NfcReader
         int auth0 = ReadAuth0(link, chip);
         if (auth0 < 0 || auth0 >= lastPageTouched) return null;
         if (pwd is null)
-            return $"This tag is password-protected from page {auth0}. Enter its password above and hold it again. " +
+            return $"This tag is password-protected from page {auth0}. Enter its password and hold it again. " +
                    "Nothing was changed.";
         authed = TryAuthenticate(link, pwd);
         if (authed) return null;
