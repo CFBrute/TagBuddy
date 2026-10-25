@@ -70,6 +70,29 @@ public sealed partial class NfcReader
         _manualPassword is not null && string.Equals(serial, _manualPasswordSerial, StringComparison.OrdinalIgnoreCase)
             ? _manualPassword : null;
 
+    /// <summary>What this run has learned about the factory default password per tag serial: that it opened the
+    /// tag, or that it did not. A tag whose default already failed is not tried with it again, so the counter is
+    /// not ticked a second time; a tag read as default can then be written with it.</summary>
+    private static readonly HashSet<string> _defaultWorks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _defaultFailed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether to try the factory default on this tag: it is known to open it, or the setting is on and
+    /// it is not already known to fail on this tag.</summary>
+    private static bool ShouldTryDefault(string serial) =>
+        _defaultWorks.Contains(serial) || (AppSettings.AutoTryDefaultPassword && !_defaultFailed.Contains(serial));
+
+    private static void RecordDefault(string serial, bool worked)
+    {
+        if (worked) { _defaultWorks.Add(serial); _defaultFailed.Remove(serial); }
+        else { _defaultFailed.Add(serial); _defaultWorks.Remove(serial); }
+    }
+
+    /// <summary>Whether this run already found the factory default does not open this tag.</summary>
+    private static bool DefaultKnownFailed(string serial) => _defaultFailed.Contains(serial);
+
+    /// <summary>Whether this run already found the factory default opens this tag (e.g. on an earlier read).</summary>
+    private static bool DefaultKnownWorks(string serial) => _defaultWorks.Contains(serial);
+
     /// <summary>The 6-byte MIFARE Classic key the person entered, tried before the public defaults, or null. A
     /// Classic sector has no wrong-key lockout, so trying one does no harm.</summary>
     private static byte[]? _manualKey;

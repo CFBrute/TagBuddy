@@ -134,15 +134,22 @@ public sealed partial class NfcReader
                         string serial = ToHex(link.Uid);
                         bool amiiboAuto = Features.Amiibo && LooksAmiibo(rawMemory);
                         byte[]? manual = ManualPasswordFor(serial);
-                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? TagPassword.FactoryDefault;
-                        bool triedDefault = !amiiboAuto && manual is null;
+                        // Try the default only when it is not already known to fail on this tag (and the setting is on).
+                        bool autoDefault = !amiiboAuto && manual is null && ShouldTryDefault(serial);
+                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? (autoDefault ? TagPassword.FactoryDefault : null);
 
-                        // The default is an automatic guess, so try it once: a wrong one ticks the tag's limit.
-                        if (TryAuthenticate(link, pwd, singleAttempt: triedDefault))
+                        if (pwd is not null && TryAuthenticate(link, pwd, singleAttempt: autoDefault))
                         {
                             rawMemory = ReadMemory(link, chip);
-                            if (triedDefault && rawMemory.Length >= chip.TotalPages * 4)
+                            if (autoDefault && rawMemory.Length >= chip.TotalPages * 4)
+                            {
+                                RecordDefault(serial, true);
                                 details.Add(("Password", "Read with the factory default password (FFFFFFFF); this tag still has it."));
+                            }
+                        }
+                        else if (autoDefault)
+                        {
+                            RecordDefault(serial, false);   // not the default: do not auto-try it on this tag again
                         }
 
                         // Still short, and not an Amiibo we open on our own: the person must supply the password.
@@ -151,7 +158,9 @@ public sealed partial class NfcReader
                             needsPassword = true;
                             details.Add(("Password", manual is not null
                                 ? "That password did not open the protected pages."
-                                : "Some pages are password-protected (not the default). Enter the password to read them."));
+                                : DefaultKnownFailed(serial)
+                                    ? "Some pages are password-protected (not the default). Enter the password to read them."
+                                    : "Some pages are password-protected. Enter the password to read them."));
                         }
                     }
 

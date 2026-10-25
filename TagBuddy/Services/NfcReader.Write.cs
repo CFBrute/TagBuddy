@@ -89,30 +89,44 @@ public sealed partial class NfcReader
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
     /// Amiibo-style, otherwise the password the person entered for THIS tag, or the factory default FFFFFFFF as a
     /// single well-known fallback. A password entered for another tag is never tried here.</summary>
-    private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
-        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory))
-            ? AmiiboPassword(link.Uid)
-            : ManualPasswordFor(ToHex(link.Uid)) ?? TagPassword.FactoryDefault;
+    private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false)
+    {
+        if (Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory))) return AmiiboPassword(link.Uid);
+        string serial = ToHex(link.Uid);
+        return ManualPasswordFor(serial) ?? (ShouldTryDefault(serial) ? TagPassword.FactoryDefault : null);
+    }
 
     /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
     /// message when the operation cannot proceed.</summary>
-    private static string? OpenProtection(Type2Link link, Type2Chip? chip, int lastPageTouched, byte[]? pwd, ref bool authed)
+    private static string? OpenProtection(Type2Link link, Type2Chip? chip, int lastPageTouched, byte[]? pwd, ref bool authed, out string? note)
     {
+        note = null;
         int auth0 = ReadAuth0(link, chip);
         if (auth0 < 0 || auth0 >= lastPageTouched) return null;
+
+        string serial = ToHex(link.Uid);
+        bool manualBound = ManualPasswordFor(serial) is not null;
         if (pwd is null)
             return $"This tag is password-protected from page {auth0}. Enter its password and hold it again. " +
                    "Nothing was changed.";
 
-        // The handshake fails the same way for a wrong password and for a tag that moved during it.
-        string serial = ToHex(link.Uid);
-        bool manualBound = ManualPasswordFor(serial) is not null;
         bool amiibo = Features.Amiibo && !manualBound && pwd.SequenceEqual(AmiiboPassword(link.Uid));
         bool usingDefault = !manualBound && !amiibo;   // the factory default fallback: an automatic guess
+        bool knownDefault = usingDefault && DefaultKnownWorks(serial);   // seen on an earlier read this session
 
         // A wrong automatic guess (the default) ticks the tag's limit, so spend at most one attempt on it.
         authed = TryAuthenticate(link, pwd, singleAttempt: usingDefault);
-        if (authed) return null;
+        if (usingDefault) RecordDefault(serial, authed);
+        if (authed)
+        {
+            if (usingDefault)
+                note = knownDefault
+                    ? "This tag was read with the factory default password (FFFFFFFF), so it was written with it."
+                    : "Written with the tag's factory default password (FFFFFFFF).";
+            return null;
+        }
+
+        // The handshake fails the same way for a wrong password and for a tag that moved during it.
         string which = amiibo ? "Amiibo key" : manualBound ? "password" : "factory default password (FFFFFFFF)";
         string next = manualBound || amiibo ? "Hold it still and try again." : "Enter the tag's password and hold it again.";
         int limit = ReadAuthLimit(link, chip);
@@ -139,9 +153,10 @@ public sealed partial class NfcReader
         int userEnd = chip is { UserEnd: > 0 } ? chip.UserEnd : before.Length / 4;
         var pwd = PasswordFor(link, before);
         bool authed = false;
-        if (OpenProtection(link, chip, userEnd, pwd, ref authed) is { } blocked) return (false, blocked);
+        if (OpenProtection(link, chip, userEnd, pwd, ref authed, out var protNote) is { } blocked) return (false, blocked);
 
         var notes = new List<string>();
+        if (protNote is not null) notes.Add(protNote);
         var cc = before[12..16];
         if (cc.All(b => b == 0))
         {
@@ -225,9 +240,10 @@ public sealed partial class NfcReader
 
         var pwd = PasswordFor(link, before, amiibo);
         bool authed = false;
-        if (OpenProtection(link, chip, endPage, pwd, ref authed) is { } blocked) return (false, blocked);
+        if (OpenProtection(link, chip, endPage, pwd, ref authed, out var protNote) is { } blocked) return (false, blocked);
 
         var notes = new List<string>();
+        if (protNote is not null) notes.Add(protNote);
         var oldCc = before[12..16];
         var newCc = dump[12..16];
         // A dump with an all-zero page 3 (made from text, not read from a tag) means "leave page 3 alone":
@@ -341,7 +357,7 @@ public sealed partial class NfcReader
         var pwd = PasswordFor(link, before);
         bool authed = false;
         int auth0 = ReadAuth0(link, chip);
-        if (OpenProtection(link, chip, userEnd, pwd, ref authed) is { } blocked) return (false, blocked);
+        if (OpenProtection(link, chip, userEnd, pwd, ref authed, out var protNote) is { } blocked) return (false, blocked);
 
         int written = 0;
         // Permanently locked pages (set by an Amiibo writer, say) cannot be cleared; they are left alone.
@@ -361,6 +377,7 @@ public sealed partial class NfcReader
         }
 
         var notes = new List<string>();
+        if (protNote is not null) notes.Add(protNote);
         if (lockedPages.Count > 0)
             notes.Add($"{Pluralise(lockedPages.Count, "page")} {Ranges(lockedPages)} {(lockedPages.Count == 1 ? "is" : "are")} permanently locked and could not be cleared.");
         if (chip is { HasPassword: true, ConfigPage: > 0 } && auth0 >= 0 && auth0 < chip.TotalPages && authed)
