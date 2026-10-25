@@ -17,7 +17,45 @@ public sealed partial class NfcReader
     /// <summary>Arms writing the edit's segments to the next tag that matches it.</summary>
     public void ArmSegmentWrite(SegmentWrite write) => _pendingWrite = tag => WriteSegments(tag, write);
 
+    private static SegmentWriteRecord? _lastSegmentWrite;
+
+    /// <summary>What the last segment write changed (each segment's bytes before and after), for undoing it on the tag;
+    /// null when it changed nothing. Taken once, by the page handling the write's result.</summary>
+    public SegmentWriteRecord? TakeLastSegmentWrite()
+    {
+        var record = _lastSegmentWrite;
+        _lastSegmentWrite = null;
+        return record;
+    }
+
+    /// <summary>Collects, while a write runs, what each segment held before and holds after it, and leaves it as the
+    /// record once the write ends (however it ends).</summary>
+    private sealed class WriteLog(string tagId, SegmentLayout layout)
+    {
+        private readonly Dictionary<int, byte[]> _before = [], _after = [];
+
+        /// <summary>A segment written; <paramref name="before"/> is empty when the tag could not be read first, and then
+        /// it cannot be undone.</summary>
+        public void Written(int segment, ReadOnlySpan<byte> before, byte[] after)
+        {
+            if (before.Length < after.Length) return;
+            _before[segment] = before[..after.Length].ToArray();
+            _after[segment] = after;
+        }
+
+        public void Publish() =>
+            _lastSegmentWrite = _before.Count == 0 ? null : new SegmentWriteRecord(tagId, layout, _before, _after);
+    }
+
     private static (bool Ok, string Note) WriteSegments(Tag tag, SegmentWrite write)
+    {
+        _lastSegmentWrite = null;
+        var log = new WriteLog(ToHex(tag.GetId()), write.Layout);
+        try { return WriteSegments(tag, write, log); }
+        finally { log.Publish(); }
+    }
+
+    private static (bool Ok, string Note) WriteSegments(Tag tag, SegmentWrite write, WriteLog log)
     {
         if (write.Writes.Count == 0) return (false, "Nothing to write.");
         if (write.WrongTag(ToHex(tag.GetId())) is { } wrongTag) return (false, wrongTag);
@@ -27,15 +65,15 @@ public sealed partial class NfcReader
 
         return write.Layout.Family switch
         {
-            TagFamily.Type2 => WriteType2Segments(tag, write),
-            TagFamily.Classic => WriteClassicSegments(tag, write),
-            _ => WriteIso15693Segments(tag, write),
+            TagFamily.Type2 => WriteType2Segments(tag, write, log),
+            TagFamily.Classic => WriteClassicSegments(tag, write, log),
+            _ => WriteIso15693Segments(tag, write, log),
         };
     }
 
     // ------------------------------------------------------------------------------------------------ Type 2
 
-    private static (bool Ok, string Note) WriteType2Segments(Tag tag, SegmentWrite write)
+    private static (bool Ok, string Note) WriteType2Segments(Tag tag, SegmentWrite write, WriteLog log)
     {
         if (!IsType2(tag)) return (false, $"This is not an NTAG or Ultralight tag, but the edit is for {write.Layout.ChipName}. Nothing was written.");
         using var link = Type2Link.Open(tag);
@@ -78,6 +116,7 @@ public sealed partial class NfcReader
                 if (link.Read(page) is not null) { lockedPages.Add(page); locked[page] = true; continue; }
                 return (false, $"Write failed at page {page} ({error}) after {written} pages: the tag moved away. Hold it still and try again.");
             }
+            log.Written(page, before.Length >= (page + 1) * 4 ? before.AsSpan(page * 4, 4) : [], data);
             written++;
         }
 
@@ -95,7 +134,7 @@ public sealed partial class NfcReader
     /// <summary>Writes data blocks sector by sector. Each sector is opened with the keys a read tries (the entered key,
     /// the public defaults, remembered keys), as key A and then key B (a sector's access bits often let only one of them write), and each block is
     /// read back after writing. A sector that no key opens, or that refuses the write, is reported and left as it was.</summary>
-    private static (bool Ok, string Note) WriteClassicSegments(Tag tag, SegmentWrite write)
+    private static (bool Ok, string Note) WriteClassicSegments(Tag tag, SegmentWrite write, WriteLog log)
     {
         using var classic = MifareClassic.Get(tag);
         if (classic is null) return (false, $"This is not a MIFARE Classic card, but the edit is for {write.Layout.ChipName}. Nothing was written.");
@@ -136,6 +175,7 @@ public sealed partial class NfcReader
                                 classic.WriteBlock(block, data);
                                 var check = classic.ReadBlock(block);
                                 if (check is not { Length: >= 16 } || !check.AsSpan(0, 16).SequenceEqual(data)) break;
+                                log.Written(block, current is { Length: >= 16 } ? current.AsSpan(0, 16) : [], data);
                                 written++;
                                 pending.RemoveAt(0);
                             }
@@ -160,7 +200,7 @@ public sealed partial class NfcReader
 
     // ------------------------------------------------------------------------------------------------ ISO 15693
 
-    private static (bool Ok, string Note) WriteIso15693Segments(Tag tag, SegmentWrite write)
+    private static (bool Ok, string Note) WriteIso15693Segments(Tag tag, SegmentWrite write, WriteLog log)
     {
         using var nfcV = NfcV.Get(tag);
         if (nfcV is null) return (false, "This is not an ISO 15693 label, but the edit is for one. Nothing was written.");
@@ -185,7 +225,12 @@ public sealed partial class NfcReader
                 if (SegmentWrite.Merge(wanted, current) is not { } data) { refused.Add(block); continue; }
                 if (current is not null && current.AsSpan().SequenceEqual(data)) { same++; continue; }
                 if (Iso15693WriteBlock(nfcV, uid, block, data) && Iso15693ReadBlock(nfcV, uid, block) is { } check
-                    && check.AsSpan().SequenceEqual(data)) { written++; continue; }
+                    && check.AsSpan().SequenceEqual(data))
+                {
+                    log.Written(block, current, data);
+                    written++;
+                    continue;
+                }
                 // Refused but still answering: a locked or protected block. Gone: it moved away.
                 if (Iso15693ReadBlock(nfcV, uid, block) is null && current is null)
                     return (false, $"Write failed at block {block} after {written} blocks: the label moved away. Hold it still and try again.");
@@ -269,5 +314,6 @@ public sealed partial class NfcReader
     }
 #else
     public void ArmSegmentWrite(SegmentWrite write) { }
+    public SegmentWriteRecord? TakeLastSegmentWrite() => null;
 #endif
 }
