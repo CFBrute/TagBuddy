@@ -20,8 +20,10 @@ public sealed partial class NfcReader
 
     private static NfcTagInfo Describe(Tag tag)
     {
+        // GetTechList can list the same tech twice on some phones; show each once.
         var techs = (tag.GetTechList() ?? [])
             .Select(t => t.Split('.').Last())
+            .Distinct()
             .ToList();
 
         var details = new List<(string, string)>();
@@ -30,11 +32,13 @@ public sealed partial class NfcReader
         byte[]? rawMemory = null;
         string? chipName = null;
         byte[]? ndefBytes = null;
+        int? sak = null;
 
         using (var nfcA = NfcA.Get(tag))
         {
             if (nfcA is not null)
             {
+                sak = nfcA.Sak;
                 details.Add(("Radio", "ISO 14443-A (NfcA)"));
                 details.Add(("ATQA / SAK", $"{ToHex(nfcA.GetAtqa())} / 0x{nfcA.Sak:X2}"));
             }
@@ -45,11 +49,20 @@ public sealed partial class NfcReader
         }
         using (var nfcF = NfcF.Get(tag))
         {
-            if (nfcF is not null) details.Add(("Radio", "FeliCa (NfcF), common on Japanese transit cards"));
+            if (nfcF is not null)
+            {
+                details.Add(("Radio", "FeliCa (NfcF), common on Japanese transit cards"));
+                var systemCode = nfcF.GetSystemCode();
+                if (systemCode is { Length: > 0 }) details.Add(("System code", ToHex(systemCode)));
+            }
         }
         using (var nfcV = NfcV.Get(tag))
         {
-            if (nfcV is not null) details.Add(("Radio", "ISO 15693 (NfcV), typical for library and inventory labels"));
+            if (nfcV is not null)
+            {
+                details.Add(("Radio", "ISO 15693 (NfcV), typical for library and inventory labels"));
+                DescribeIso15693(tag.GetId(), details);
+            }
         }
 
         bool isClassic = false;
@@ -72,7 +85,7 @@ public sealed partial class NfcReader
             if (isoDep is not null)
             {
                 isIsoDep = true;
-                details.Add(("Chip", "ISO 14443-4 smart card"));
+                details.Add(("Chip", (sak is { } s ? CardTypes.ChipFromSak(s) : null) ?? "ISO 14443-4 smart card"));
                 try
                 {
                     isoDep.Timeout = 1500;
@@ -149,6 +162,11 @@ public sealed partial class NfcReader
                 details.Add(("NDEF", "Content present but could not be parsed (" + ex.Message + ")"));
             }
         }
+
+        // Nothing identified the chip (an unreadable or unusual card): fall back to what the SAK byte suggests,
+        // so the person still sees what kind of card it is.
+        if (sak is { } sakValue && CardTypes.ChipFromSak(sakValue) is { } sakChip && !details.Any(d => d.Item1 == "Chip"))
+            details.Add(("Chip", sakChip));
 
         if (records.Count == 0 && !details.Any(d => d.Item1 is "Access" or "Card" or "Data"))
             details.Add(("Content", "No NDEF content found on this tag"));
@@ -301,8 +319,50 @@ public sealed partial class NfcReader
             return;
         }
 
+        // DESFire or another ISO 14443-4 card: its version is public manufacturing data (no application keys).
+        if (TryDesfireVersion(isoDep) is { } desfire)
+        {
+            details.Add(("Card", desfire));
+            details.Add(("Access", "Secure item: application data is key-protected and not read by this app"));
+            return;
+        }
+
         details.Add(("Card", "Access, transit or company card (DESFire or similar)"));
         details.Add(("Access", "Secure item: content is protected and not read by this app"));
+    }
+
+    /// <summary>A DESFire's generation and storage size from its GET_VERSION frame, or null. The command returns
+    /// the chip's public manufacturing data; no key is used and nothing on the card is changed.</summary>
+    private static string? TryDesfireVersion(IsoDep isoDep)
+    {
+        try
+        {
+            // Native DESFire GetVersion, wrapped in an ISO 7816 APDU. The first frame is the 7-byte hardware block,
+            // followed by the status 91 AF ("more frames"); the later frames are not needed to name the chip.
+            var resp = isoDep.Transceive([0x90, 0x60, 0x00, 0x00, 0x00]);
+            if (resp is { Length: >= 9 } && resp[^2] == 0x91)
+                return CardTypes.DesfireFromVersion(resp[..7]);
+        }
+        catch
+        {
+            // Not a DESFire, or it moved away: the caller falls back to a generic description.
+        }
+        return null;
+    }
+
+    /// <summary>Adds the chip maker, and the NXP ICODE product when it is one, of an ISO 15693 label, read from the
+    /// manufacturer byte next to the 0xE0 at the end of its UID.</summary>
+    private static void DescribeIso15693(byte[]? uid, List<(string, string)> details)
+    {
+        if (uid is not { Length: >= 3 }) return;
+        byte maker, type;
+        if (uid[0] == 0xE0) { maker = uid[1]; type = uid.Length > 2 ? uid[2] : (byte)0; }
+        else if (uid[^1] == 0xE0 && uid.Length >= 3) { maker = uid[^2]; type = uid[^3]; }
+        else return;
+
+        var name = CardTypes.Iso15693Manufacturer(maker);
+        var product = maker == 0x04 ? CardTypes.NxpIcodeProduct(type) : null;
+        details.Add(("Chip", product is not null ? $"{name} {product}" : $"{name} ISO 15693 label"));
     }
 
     private static byte[]? ReadType4Ndef(IsoDep isoDep, List<(string, string)> details)
