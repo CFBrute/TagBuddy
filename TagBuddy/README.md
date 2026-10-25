@@ -36,13 +36,14 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   forgotten one means the text is gone. About 90 bytes of the tag go to the record and the encryption, which
   leaves roughly 54 characters on an NTAG213, 414 on an NTAG215 and 798 on an NTAG216.
   Writable NDEF tags only; the serial number is never changed and locked cards cannot be written.
-  **Tag password**: when a read cannot reach protected pages, or a write is refused because the tag is
-  protected, a password box appears (it is never shown before that). Enter the tag's 4-byte password (8 hex
-  digits, or 4 characters with the Hex/Text switch; a new NTAG/Ultralight's factory password is FFFFFFFF, offered
-  as a button) and hold the tag again:
-  the read then reaches the locked pages, or the write goes through (`Services/TagPassword.cs`). The password is
-  kept only while the tab is open. The app never guesses a password; a wrong one can count against a tag's
-  wrong-attempt limit, so the box warns about that.
+  **Tag password**: a protected tag is first tried with the factory default FFFFFFFF, one well-known guess; when
+  that opens it, the read says the tag still has the default password. Only when the default does not open it does
+  a password box appear (it is never shown before that). Enter the tag's 4-byte password (8 hex digits, or 4
+  characters with the Hex/Text switch) and hold the tag again: the read then reaches the locked pages, or the
+  write goes through (`Services/TagPassword.cs`). A password belongs to the tag it was entered for; it is never
+  tried on a different tag held to the phone (that tag gets the default), so one tag's password cannot count
+  against another's wrong-attempt limit. The password is kept only while the tab is open. A wrong one can count
+  against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as

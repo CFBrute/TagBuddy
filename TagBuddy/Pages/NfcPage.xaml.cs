@@ -145,7 +145,7 @@ public partial class NfcPage : ContentPage
         _nfc.TagWritten -= OnTagWritten;
         _nfc.TagDispatched -= OnTagDispatched;
         _nfc.Disarm();
-        _nfc.SetManualPassword(null);   // not kept once the tab is left
+        _nfc.SetManualPassword(null, null);   // not kept once the tab is left
         _nfc.SetManualClassicKey(null);
         _nfc.Stop();
     }
@@ -191,8 +191,15 @@ public partial class NfcPage : ContentPage
 
     private bool HasTypedPassword => TagPassword.TryParse(PasswordEntry.Text, _passwordAsText, out _);
 
-    private void ApplyPassword() =>
-        _nfc.SetManualPassword(TagPassword.TryParse(PasswordEntry.Text, _passwordAsText, out var pwd) ? pwd : null);
+    /// <summary>The serial the password in the box was entered for; a password belongs to one tag.</summary>
+    private string? _passwordSerial;
+
+    private void ApplyPassword()
+    {
+        bool ok = TagPassword.TryParse(PasswordEntry.Text, _passwordAsText, out var pwd);
+        _passwordSerial = ok ? _last?.Id : null;
+        _nfc.SetManualPassword(ok ? pwd : null, _passwordSerial);
+    }
 
     private void OnPasswordDefault(object? sender, EventArgs e)
     {
@@ -227,6 +234,13 @@ public partial class NfcPage : ContentPage
 
     private void OnTagRead(NfcTagInfo tag)
     {
+        // A password belongs to the tag it was entered for: drop it when a different tag is held to the phone, so
+        // it is never tried on the new one (which could count against the new tag's wrong-attempt limit).
+        if (_passwordSerial is not null && !string.Equals(tag.Id, _passwordSerial, StringComparison.OrdinalIgnoreCase))
+        {
+            PasswordEntry.Text = string.Empty;   // clears _passwordSerial and the reader's password via ApplyPassword
+        }
+
         _last = tag;
         Feedback.Tag(ok: true);
 

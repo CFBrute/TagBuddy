@@ -87,10 +87,12 @@ public sealed partial class NfcReader
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
-    /// Amiibo-style, otherwise the password the person typed, or none. The app never guesses one, because a wrong
-    /// guess counts against the tag's wrong-attempt limit.</summary>
+    /// Amiibo-style, otherwise the password the person entered for THIS tag, or the factory default FFFFFFFF as a
+    /// single well-known fallback. A password entered for another tag is never tried here.</summary>
     private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
-        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory)) ? AmiiboPassword(link.Uid) : _manualPassword;
+        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory))
+            ? AmiiboPassword(link.Uid)
+            : ManualPasswordFor(ToHex(link.Uid)) ?? TagPassword.FactoryDefault;
 
     /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
     /// message when the operation cannot proceed.</summary>
@@ -105,13 +107,17 @@ public sealed partial class NfcReader
         if (authed) return null;
 
         // The handshake fails the same way for a wrong password and for a tag that moved during it.
-        bool amiibo = Features.Amiibo && _manualPassword is null;
+        string serial = ToHex(link.Uid);
+        bool manualBound = ManualPasswordFor(serial) is not null;
+        bool amiibo = Features.Amiibo && !manualBound && pwd.SequenceEqual(AmiiboPassword(link.Uid));
+        string which = amiibo ? "Amiibo key" : manualBound ? "password" : "factory default password (FFFFFFFF)";
+        string next = manualBound || amiibo ? "Hold it still and try again." : "Enter the tag's password and hold it again.";
         int limit = ReadAuthLimit(link, chip);
         var limitNote = limit > 0
             ? $" This tag locks for good after {limit} wrong attempts, so do not keep retrying if it fails again."
             : "";
-        return $"This tag is password-protected and did not accept the {(amiibo ? "Amiibo key" : "password")}, or it moved " +
-               "away during the handshake. Hold it still and try again. Nothing was changed." + limitNote;
+        return $"This tag is password-protected and did not accept the {which}, or it moved away during the handshake. " +
+               next + " Nothing was changed." + limitNote;
     }
 
     /// <summary>Writes an NDEF TLV into the user pages of a Type 2 tag, formatting a blank one first.</summary>
