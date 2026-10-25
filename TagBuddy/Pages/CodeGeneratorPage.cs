@@ -42,6 +42,14 @@ public abstract class CodeGeneratorPage : ContentPage
 
     protected string Value => ValueInput.Text ?? string.Empty;
 
+    /// <summary>With nothing typed yet, the cursor blinks in the field to show where the content goes; the
+    /// keyboard stays closed until the field is tapped.</summary>
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        if (Value.Length == 0) Dispatcher.Dispatch(() => InputFocus.ShowCaret(ValueInput));
+    }
+
     protected SavedItem CurrentItem()
     {
         var item = CurrentCode();
