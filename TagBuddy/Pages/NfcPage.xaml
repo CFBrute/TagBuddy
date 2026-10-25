@@ -14,6 +14,24 @@
                         BackgroundColor="#6B7280" TextColor="White" />
             </Grid>
 
+            <!-- Password for protected NTAG/Ultralight tags, used by both reading and writing. Collapsed until wanted. -->
+            <Button x:Name="PasswordToggle" Text="Tag password  ▸" Clicked="OnTogglePassword"
+                    BackgroundColor="Transparent" Padding="0" FontSize="14" HorizontalOptions="Start"
+                    TextColor="{AppThemeBinding Light={StaticResource Tertiary}, Dark={StaticResource Primary}}" />
+            <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"
+                                 Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <Entry x:Name="PasswordEntry" Placeholder="8 hex digits, e.g. FFFFFFFF" MaxLength="11"
+                           TextChanged="OnPasswordChanged" />
+                    <Button Grid.Column="1" Text="FFFFFFFF" Clicked="OnPasswordDefault"
+                            BackgroundColor="#6B7280" TextColor="White" FontSize="12" Padding="10,4" />
+                </Grid>
+                <Label x:Name="PasswordHint" FontSize="12" TextColor="Gray"
+                       Text="For NTAG/Ultralight tags that are password-protected. The password is 4 bytes (8 hex digits); a new tag's factory password is FFFFFFFF. It is used to read locked pages and to write a protected tag, and is kept only while this tab is open." />
+                <Label FontSize="12" TextColor="#DC2626"
+                       Text="Warning: some tags lock for good after a few wrong passwords. Only enter one you know." />
+            </VerticalStackLayout>
+
             <!-- ===================== READ ===================== -->
             <VerticalStackLayout x:Name="ReadSection" Spacing="12">
 

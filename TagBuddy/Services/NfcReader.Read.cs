@@ -120,11 +120,17 @@ public sealed partial class NfcReader
 
                     rawMemory = ReadMemory(link, chip);
 
-                    // Read-protected pages (PROT=1) on an Amiibo-style tag: present the Nintendo key, then read
-                    // again. Other protected tags are left alone: a wrong guess counts against their AUTHLIM.
-                    if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4
-                        && Features.Amiibo && LooksAmiibo(rawMemory) && TryAuthenticate(link, AmiiboPassword(link.Uid)))
-                        rawMemory = ReadMemory(link, chip);
+                    // Read-protected pages (PROT=1): present a password and read again. The Amiibo key is a formula
+                    // of the serial, so it is always tried; any other tag is tried only with a password the person
+                    // typed, because a wrong guess counts against the tag's wrong-attempt limit.
+                    if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4)
+                    {
+                        byte[]? pwd = Features.Amiibo && LooksAmiibo(rawMemory) ? AmiiboPassword(link.Uid) : _manualPassword;
+                        if (pwd is not null && TryAuthenticate(link, pwd))
+                            rawMemory = ReadMemory(link, chip);
+                        else if (_manualPassword is null && !(Features.Amiibo && LooksAmiibo(rawMemory)))
+                            details.Add(("Password", "Some pages are password-protected. Enter the tag's password above to read them."));
+                    }
 
                     if (rawMemory.Length >= 16)
                     {

@@ -33,6 +33,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   forgotten one means the text is gone. About 90 bytes of the tag go to the record and the encryption, which
   leaves roughly 54 characters on an NTAG213, 414 on an NTAG215 and 798 on an NTAG216.
   Writable NDEF tags only; the serial number is never changed and locked cards cannot be written.
+  **Tag password**: a 4-byte password (8 hex digits; a new NTAG/Ultralight's factory password is FFFFFFFF) can be
+  entered under the Read/Write toggle (`Services/TagPassword.cs`). It is used to read a protected tag's locked
+  pages and to write a protected tag, kept only while the tab is open. The app never guesses a password; a wrong
+  one can count against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
