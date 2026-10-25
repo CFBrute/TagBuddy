@@ -992,7 +992,10 @@ public partial class NfcPage : ContentPage
         SegmentRedoButton.IsEnabled = edit.CanRedo;
         SegmentRevertButton.IsEnabled = edit.Changes.Count > 0;
         SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
-        SegmentInput.Margin = new Thickness(0, SegmentGrid.CursorY, 0, 0);
+        // The hidden input follows the cursor, across as well as down: Android scrolls to the view with the keyboard,
+        // so an input left at the far left pulled the grid back to its start on every keystroke and tap.
+        double left = Math.Max(0, Math.Min(SegmentGrid.CursorX, SegmentGrid.WidthRequest - SegmentInput.WidthRequest));
+        SegmentInput.Margin = new Thickness(left, SegmentGrid.CursorY, 0, 0);
 
         string noun = edit.Layout.Noun;
         SegmentHint.Text =
@@ -1016,9 +1019,9 @@ public partial class NfcPage : ContentPage
     /// <summary>A byte was tapped: the keyboard's typing goes there.</summary>
     private void OnSegmentCursorPlaced()
     {
+        UpdateSegmentTools();     // moves the hidden input to the cursor first, so focusing it scrolls there
         ResetInput();
         SegmentInput.Focus();
-        UpdateSegmentTools();
     }
 
     private void ResetInput()
