@@ -175,7 +175,7 @@ public static class HelpContent
                 {
                     new HelpMore("MIFARE Classic keys",
                         new HelpText("Each sector of a MIFARE Classic card is locked behind a 6-byte key. The app opens sectors that still use a well-known public key and shows only the serial for the rest."),
-                        new HelpText("When some sectors stay locked, you can type one key to try, or import a key dictionary (a .dic/.txt, such as the one shipped with Proxmark tools) and tap \"Try all known keys\" to run the whole list against the locked sectors. Trying keys is safe: Classic cards have no wrong-key lockout."),
+                        new HelpText("When some sectors stay locked, you can type one key to try, or import a dictionary of default keys (a .dic/.txt, such as the one shipped with Proxmark tools) and tap \"Try all default keys\" to run the whole list against the locked sectors. Trying keys is safe: Classic cards have no wrong-key lockout."),
                         new HelpText("A key that opens a sector is remembered for that card's serial, so the same card opens quickly next time. A sector with a genuinely custom key stays closed; only its real key opens it.")),
                 }
                 : [],

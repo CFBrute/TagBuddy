@@ -50,7 +50,7 @@
 
                 <!-- Run a whole imported dictionary against the locked sectors; keys that open a card are remembered -->
                 <VerticalStackLayout x:Name="KeyDictionaryPanel" Spacing="8" IsVisible="False" Margin="0,4,0,0">
-                    <Button x:Name="TryAllKeysButton" Clicked="OnTryAllKeys"
+                    <Button x:Name="TryAllKeysButton" Text="Try all default keys" Clicked="OnTryAllKeys"
                             Padding="12,6" MinimumHeightRequest="38" FontSize="13" />
                     <Button Text="Import a key file (.dic / .txt)" Clicked="OnImportKeys"
                             BackgroundColor="#6B7280" TextColor="White" Padding="12,6" MinimumHeightRequest="38" FontSize="13" />
