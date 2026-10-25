@@ -159,13 +159,13 @@ public sealed partial class NfcReader
             var refused = new List<int>();
             var keysSet = new List<(int, string)>();
             var keyNotes = new List<string>();
-            var sectors = write.Writes.Keys.Select(MifareClassicKeys.SectorOf).Concat(write.NewKeys.Keys).Distinct().Order();
+            var sectors = write.Writes.Keys.Select(MifareClassicKeys.SectorOf).Concat(write.Sectors.Keys).Distinct().Order();
             foreach (int sectorNo in sectors)
             {
                 var pending = write.Writes.Where(p => MifareClassicKeys.SectorOf(p.Key) == sectorNo).OrderBy(p => p.Key).ToList();
-                // A new key is set only once the sector's data is written, and only when a public default key opened
-                // the sector as key A (a blank or unsecured tag) and its access bits are still the standard ones.
-                bool wantsKey = write.NewKeys.TryGetValue(sectorNo, out var newKey);
+                // The trailer (a new key, new rules) is written only once the sector's data is, with the key that opened
+                // the sector, and tried once: never with another key after a refusal.
+                bool wantsKey = write.Sectors.TryGetValue(sectorNo, out var change);
                 foreach (var key in candidates)
                 {
                     foreach (bool useB in new[] { false, true })
@@ -193,8 +193,8 @@ public sealed partial class NfcReader
 
                             if (pending.Count == 0 && wantsKey)
                             {
-                                var (done, why) = SetClassicSectorKey(classic, sectorNo, key, useB, newKey!);
-                                if (done) keysSet.Add((sectorNo, MifareClassicKeys.KeyHex(newKey!)));
+                                var (done, why, keyNow) = WriteClassicTrailer(classic, sectorNo, key, useB, change!);
+                                if (done) keysSet.Add((sectorNo, MifareClassicKeys.KeyHex(keyNow)));
                                 else if (why is not null) keyNotes.Add(why);
                                 wantsKey = false;                           // one attempt: never retried with another key
                             }
@@ -209,51 +209,61 @@ public sealed partial class NfcReader
                     if (pending.Count == 0 && !wantsKey) break;
                 }
                 refused.AddRange(pending.Select(p => p.Key));
-                if (wantsKey) keyNotes.Add($"Sector {sectorNo} did not take a new key: no known key opened it.");
+                if (wantsKey) keyNotes.Add($"Sector {sectorNo} did not take its change: no known key opened it.");
             }
 
             ClassicKeysSet = keysSet;
             if (keysSet.Count > 0)
-                keyNotes.Insert(0, $"Sector{(keysSet.Count == 1 ? "" : "s")} {Ranges(keysSet.Select(k => k.Item1).ToList())} now " +
-                                   $"{(keysSet.Count == 1 ? "has its" : "have their")} new key, which this phone remembers for this tag.");
+                keyNotes.Insert(0, $"Sector{(keysSet.Count == 1 ? "" : "s")} {Ranges(keysSet.Select(k => k.Item1).ToList())} " +
+                                   $"{(keysSet.Count == 1 ? "has its" : "have their")} new key or rules; the key is remembered for this tag.");
             var (ok, note) = Result(write.Layout, written, same, [], refused,
                 "were not changed: no known key opened their sector, its access bits refuse writing, or they could not be read to keep the bytes you did not type", keyNotes);
-            return (ok && keysSet.Count == write.NewKeys.Count, note);
+            return (ok && keysSet.Count == write.Sectors.Count, note);
         }
         finally { try { classic.Close(); } catch { } }
     }
 
-    /// <summary>Gives a sector a new key, as key A and key B, keeping its access bits as they are. The sector was just
-    /// opened with a known key (that is what <paramref name="openedWith"/> is), which is what entitles a change; whether
-    /// the card lets that key rewrite the trailer is up to its access bits, and a refusal is reported. The sector is
-    /// opened with the new key afterwards to confirm it; only then is the key reported as set.</summary>
-    private static (bool Done, string? Why) SetClassicSectorKey(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, byte[] newKey)
+    /// <summary>Writes a sector's trailer with its change: the new key as key A and key B (or the known key kept where
+    /// no new one is given), and the new rules (or the current ones kept). The sector was just opened with a known key,
+    /// which is what entitles a change; whether the card lets that key rewrite the trailer is up to its rules, and a
+    /// refusal is reported. The sector is opened again afterwards to confirm the write; only then is it reported done.
+    /// Returns the key the sector now opens with, for remembering.</summary>
+    private static (bool Done, string? Why, byte[] KeyNow) WriteClassicTrailer(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, SectorChange change)
     {
         int trailer = classic.SectorToBlock(sector) + classic.GetBlockCountInSector(sector) - 1;
         byte[]? current;
         try { current = classic.ReadBlock(trailer); }
         catch { current = null; }
         if (current is not { Length: >= 16 })
-            return (false, $"Sector {sector} did not take a new key: its trailer could not be read.");
+            return (false, $"Sector {sector} did not take its change: its trailer could not be read.", openedWith);
+
+        // The keys read back as zeros (except key B under the factory rules, where it is plain data), so a slot not
+        // given a new key gets the key that opened the sector, or the readable key B. Nothing is ever left unknown.
+        byte[] keyA = change.Key ?? (asKeyB ? openedWith : openedWith);
+        byte[] readableB = current[10..16];
+        byte[] keyB = change.Key ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : openedWith);
+        var keyNow = change.Key ?? openedWith;
+
         try
         {
-            classic.WriteBlock(trailer, MifareClassicKeys.TrailerFor(newKey, current));
+            classic.WriteBlock(trailer, MifareClassicKeys.TrailerFor(keyA, keyB, current, change.Rules));
         }
         catch
         {
             try { classic.Close(); classic.Connect(); classic.Timeout = 1000; } catch { }
-            return (false, $"Sector {sector} did not take a new key: the card refused the write (its access bits may not let " +
-                           $"key {(asKeyB ? 'B' : 'A')} change the keys) or it moved away.");
+            return (false, $"Sector {sector} did not take its change: the card refused the write (its rules may not let " +
+                           $"key {(asKeyB ? 'B' : 'A')} change the trailer) or it moved away.", openedWith);
         }
 
-        // Writing the trailer ends the session; the proof is opening the sector again with the new key.
+        // Writing the trailer ends the session; the proof is opening the sector again.
         try
         {
             classic.Close(); classic.Connect(); classic.Timeout = 1000;
-            if (classic.AuthenticateSectorWithKeyA(sector, newKey) || classic.AuthenticateSectorWithKeyB(sector, newKey)) return (true, null);
+            if (classic.AuthenticateSectorWithKeyA(sector, keyA)) return (true, null, keyA);
+            if (classic.AuthenticateSectorWithKeyB(sector, keyB)) return (true, null, keyB);
         }
         catch { }
-        return (false, $"Sector {sector}: the new key was written but did not open the sector afterwards. Hold the card still and read it again before trying once more.");
+        return (false, $"Sector {sector}: the trailer was written but the sector did not open afterwards. Hold the card still and read it again before trying once more.", keyNow);
     }
 
     // ------------------------------------------------------------------------------------------------ ISO 15693

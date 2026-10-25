@@ -412,12 +412,34 @@ public class TagEditTests
 
         var write = edit.ToWrite();
         Assert.False(write.IsEmpty);
-        Assert.Equal(key, write.NewKeys[1]);
+        Assert.Equal(key, write.Sectors[1].Key);
         Assert.Equal("a new key for sector 1", write.Summary);
 
-        edit.KeyChanged(1);
+        edit.SectorChanged(1);
         Assert.True(edit.CanChangeKey(1));                      // the new key is known too, so it can be changed again
-        Assert.Empty(edit.NewKeys);
+        Assert.Empty(edit.Sectors);
+    }
+
+    [Fact]
+    public void Rules_can_be_changed_for_an_opened_sector_and_equal_rules_are_no_change()
+    {
+        var data = Enumerable.Range(0, 64).ToDictionary(b => b, _ => new byte[16]);
+        data[7] = [0, 0, 0, 0, 0, 0, 0xFF, 0x07, 0x80, 0x69, 0, 0, 0, 0, 0, 0];   // sector 1's trailer: factory rules
+        var read = new SegmentRead(Classic1K, data, new Dictionary<int, string>()) { OpenedSectors = new HashSet<int> { 1 } };
+        var edit = TagEdit.FromTag(read, "04");
+
+        Assert.Equal(SectorRules.Transport, edit.CurrentRules(1));
+        Assert.Null(edit.CurrentRules(2));                      // all zeros: corrupt, not decodable
+
+        var readOnly = SectorRules.Transport.WithData(0, 0b010);
+        Assert.True(edit.SetSectorRules(1, readOnly));
+        Assert.Equal(readOnly, edit.SectorChangeFor(1)!.Rules);
+        Assert.Null(edit.SectorChangeFor(1)!.Key);
+        Assert.Equal("new rules for sector 1", edit.ToWrite().Summary);
+        Assert.False(edit.SetSectorRules(2, readOnly));
+
+        edit.SetSectorRules(1, null);
+        Assert.Empty(edit.Sectors);
     }
 
     [Fact]
@@ -428,22 +450,10 @@ public class TagEditTests
     }
 
     [Fact]
-    public void A_new_trailer_keeps_the_access_bits_as_they_are_and_sets_both_keys()
+    public void Default_keys_are_told_from_others()
     {
-        byte[] key = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];       // not a public default (A0A1A2A3A4A5 is the MAD key)
-        byte[] current = [0, 0, 0, 0, 0, 0, 0xFF, 0x07, 0x80, 0x69, 0, 0, 0, 0, 0, 0];
-        var trailer = MifareClassicKeys.TrailerFor(key, current);
-        Assert.Equal(16, trailer.Length);
-        Assert.Equal(key, trailer[..6]);
-        Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, trailer[6..10]);
-        Assert.Equal(key, trailer[10..]);
-        byte[] custom = [0, 0, 0, 0, 0, 0, 0x78, 0x77, 0x88, 0x00, 0, 0, 0, 0, 0, 0];
-        Assert.Equal(new byte[] { 0x78, 0x77, 0x88, 0x00 }, MifareClassicKeys.TrailerFor(key, custom)[6..10]);
-        Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, MifareClassicKeys.TrailerFor(key, [])[6..10]);
-        Assert.True(MifareClassicKeys.HasTransportAccessBits(current));
-        Assert.False(MifareClassicKeys.HasTransportAccessBits([0, 0, 0, 0, 0, 0, 0x78, 0x77, 0x88, 0x69, 0, 0, 0, 0, 0, 0]));
         Assert.True(MifareClassicKeys.IsDefault([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]));
-        Assert.False(MifareClassicKeys.IsDefault(key));
+        Assert.False(MifareClassicKeys.IsDefault([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]));
     }
 
     [Fact]

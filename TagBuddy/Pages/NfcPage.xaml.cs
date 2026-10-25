@@ -890,7 +890,7 @@ public partial class NfcPage : ContentPage
         {
             // The sectors opened with their new keys: remember them for the tag, and the edit no longer has them pending.
             _keyStore.Remember(record.TagId, keysSet.Select(k => k.Key));
-            if (expected) foreach (var (sector, _) in keysSet) _edit!.KeyChanged(sector);
+            if (expected) foreach (var (sector, _) in keysSet) _edit!.SectorChanged(sector);
             UpdateSectorKeyPanel();
         }
         if (expected && (ok || step is not null))
@@ -1093,8 +1093,12 @@ public partial class NfcPage : ContentPage
         SegmentEdited();
     }
 
-    /// <summary>Shows the key box for the cursor's sector when it may take a key of the person's own, with the key
-    /// already pending for it, and lists every sector with a new key waiting.</summary>
+    /// <summary>The rule pickers' choices, in picker order: data rules and trailer rules from <see cref="MifareClassicKeys"/>.</summary>
+    private static readonly string[] DataRuleItems = MifareClassicKeys.DataRules.Select(r => r.Text).ToArray();
+    private static readonly string[] TrailerRuleItems = MifareClassicKeys.TrailerRules.Select(r => r.Permanent ? "⚠ " + r.Text : r.Text).ToArray();
+
+    /// <summary>Shows the sector box for the cursor's sector when its key is known: the new key, the rules of its blocks
+    /// and of its keys (as read, or as chosen), and every sector with a change waiting.</summary>
     private void UpdateSectorKeyPanel()
     {
         if (_edit is not { Layout.Family: TagFamily.Classic, FromRead: true, Length: > 0 } edit)
@@ -1104,25 +1108,55 @@ public partial class NfcPage : ContentPage
         }
         int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
         bool can = edit.CanChangeKey(sector);
-        SectorKeyPanel.IsVisible = can || edit.NewKeys.Count > 0;
+        SectorKeyPanel.IsVisible = can || edit.Sectors.Count > 0;
         if (!SectorKeyPanel.IsVisible) return;
 
         _renderingSegments = true;
         try
         {
-            SectorKeyTitle.Text = can ? $"Sector {sector}: set a new key" : $"Sector {sector} did not open, so its key cannot be changed";
+            SectorKeyTitle.Text = can ? $"Sector {sector}: key and rules" : $"Sector {sector} did not open, so it cannot be changed";
             SectorKeyEntry.IsVisible = can;
             SectorKeyHint.IsVisible = can;
-            var pending = edit.NewKeyFor(sector);
+            SectorRulesPanel.IsVisible = can;
+            var change = edit.SectorChangeFor(sector);
+            var pending = change?.Key;
             var shown = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var typed) ? typed : null;
             if (pending is null ? shown is not null || !string.IsNullOrEmpty(SectorKeyEntry.Text) : shown is null || !shown.AsSpan().SequenceEqual(pending))
                 SectorKeyEntry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+
+            if (can)
+            {
+                var rules = change?.Rules ?? edit.CurrentRules(sector);
+                bool wide = sector >= 32;
+                Picker[] pickers = [DataRule0Picker, DataRule1Picker, DataRule2Picker];
+                Label[] labels = [DataRule0Label, DataRule1Label, DataRule2Label];
+                for (int g = 0; g < 3; g++)
+                {
+                    labels[g].Text = wide ? $"Blocks {g * 5}-{g * 5 + 4} of the sector" : $"Block {g} of the sector";
+                    if (pickers[g].ItemsSource is null) pickers[g].ItemsSource = DataRuleItems;
+                    pickers[g].SelectedIndex = rules is null ? -1 : MifareClassicKeys.DataRules.ToList().FindIndex(r => r.Bits == rules.Data[g]);
+                }
+                if (TrailerRulePicker.ItemsSource is null) TrailerRulePicker.ItemsSource = TrailerRuleItems;
+                TrailerRulePicker.SelectedIndex = rules is null ? -1 : MifareClassicKeys.TrailerRules.ToList().FindIndex(r => r.Bits == rules.Trailer);
+                RulesUnknownLabel.IsVisible = rules is null;
+                PermanentWarning.IsVisible = change?.Rules?.IsPermanent == true;
+            }
         }
         finally { _renderingSegments = false; }
 
-        SectorKeyList.IsVisible = edit.NewKeys.Count > 0;
-        SectorKeyList.Text = edit.NewKeys.Count == 0 ? "" :
-            "New keys waiting to be written: " + string.Join(", ", edit.NewKeys.OrderBy(k => k.Key).Select(k => $"sector {k.Key} → {MifareClassicKeys.KeyHex(k.Value)}"));
+        UpdateSectorChangeList(edit);
+    }
+
+    private void UpdateSectorChangeList(TagEdit edit)
+    {
+        SectorKeyList.IsVisible = edit.Sectors.Count > 0;
+        SectorKeyList.Text = edit.Sectors.Count == 0 ? "" :
+            "Waiting to be written: " + string.Join("; ", edit.Sectors.OrderBy(k => k.Key).Select(k =>
+                $"sector {k.Key}: " + string.Join(", ", new[]
+                {
+                    k.Value.Key is { } key ? "key " + MifareClassicKeys.KeyHex(key) : null,
+                    k.Value.Rules is { } r ? (r.IsPermanent ? "rules (PERMANENT)" : "rules") : null,
+                }.Where(x => x is not null))));
     }
 
     /// <summary>The key typed for the cursor's sector: a whole key is set for it, anything else drops it.</summary>
@@ -1131,9 +1165,44 @@ public partial class NfcPage : ContentPage
         if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
         int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
         edit.SetSectorKey(sector, MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var key) ? key : null);
-        SectorKeyList.IsVisible = edit.NewKeys.Count > 0;
-        SectorKeyList.Text = edit.NewKeys.Count == 0 ? "" :
-            "New keys waiting to be written: " + string.Join(", ", edit.NewKeys.OrderBy(k => k.Key).Select(k => $"sector {k.Key} → {MifareClassicKeys.KeyHex(k.Value)}"));
+        UpdateSectorChangeList(edit);
+        ArmWrite();
+    }
+
+    /// <summary>A rule picked for the cursor's sector. The rules are set as a whole from the four pickers; when they
+    /// equal what the sector already has, no rule change is pending. A permanent trailer rule is confirmed first.</summary>
+    private async void OnSectorRuleChanged(object? sender, EventArgs e)
+    {
+        if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
+        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
+        if (!edit.CanChangeKey(sector)) return;
+        Picker[] pickers = [DataRule0Picker, DataRule1Picker, DataRule2Picker];
+        if (pickers.Any(p => p.SelectedIndex < 0) || TrailerRulePicker.SelectedIndex < 0) return;
+
+        var trailerRule = MifareClassicKeys.TrailerRules[TrailerRulePicker.SelectedIndex];
+        var chosen = new SectorRules(
+            MifareClassicKeys.DataRules[DataRule0Picker.SelectedIndex].Bits,
+            MifareClassicKeys.DataRules[DataRule1Picker.SelectedIndex].Bits,
+            MifareClassicKeys.DataRules[DataRule2Picker.SelectedIndex].Bits,
+            trailerRule.Bits);
+        var current = edit.CurrentRules(sector);
+
+        if (chosen.IsPermanent && current?.IsPermanent != true && sender == TrailerRulePicker)
+        {
+            bool sure = await DisplayAlertAsync("This can never be undone",
+                $"\"{trailerRule.Text}\" freezes sector {sector}: once written, its keys and rules can never be changed again, " +
+                "by anyone, for the life of the tag. The data blocks keep the rules chosen above, for good.",
+                "I understand, freeze it", "Cancel");
+            if (!sure)
+            {
+                UpdateSectorKeyPanel();   // back to what is pending or read
+                return;
+            }
+        }
+
+        edit.SetSectorRules(sector, current is not null && chosen == current ? null : chosen);
+        PermanentWarning.IsVisible = edit.SectorChangeFor(sector)?.Rules?.IsPermanent == true;
+        UpdateSectorChangeList(edit);
         ArmWrite();
     }
 

@@ -293,7 +293,26 @@
                         <Entry x:Name="SectorKeyEntry" Placeholder="New key: 12 hex digits" MaxLength="17"
                                IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyChanged" />
                         <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
-                               Text="The read opened this sector, so its key is known and can be changed. The new key is written with the tag, as key A and key B; the sector's access rules are kept as they are. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
+                               Text="The read opened this sector, so its key is known and can be changed. A new key is written with the tag, as key A and key B. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
+
+                        <!-- The sector's rules, as read; pick another to change them. Built from the choice, never typed as bytes. -->
+                        <VerticalStackLayout x:Name="SectorRulesPanel" Spacing="4">
+                            <Label Text="Rules" FontSize="13" FontAttributes="Bold" Margin="0,6,0,0" />
+                            <Label FontSize="12" TextColor="Gray"
+                                   Text="What key A and key B may do. The tag enforces these: a write the rules do not allow is refused. They are shown as the tag has them; pick another to change them with the next write." />
+                            <Label x:Name="RulesUnknownLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                   Text="This sector's rules could not be read or are corrupt, so they cannot be changed here." />
+                            <Label x:Name="DataRule0Label" FontSize="12" TextColor="Gray" />
+                            <Picker x:Name="DataRule0Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            <Label x:Name="DataRule1Label" FontSize="12" TextColor="Gray" />
+                            <Picker x:Name="DataRule1Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            <Label x:Name="DataRule2Label" FontSize="12" TextColor="Gray" />
+                            <Picker x:Name="DataRule2Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            <Label Text="The keys and these rules" FontSize="12" TextColor="Gray" />
+                            <Picker x:Name="TrailerRulePicker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            <Label x:Name="PermanentWarning" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                   Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
+                        </VerticalStackLayout>
                         <Label x:Name="SectorKeyList" FontSize="12" />
                     </VerticalStackLayout>
 
