@@ -24,7 +24,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII). For MIFARE Classic cards it
   tries the public default keys (`Services/MifareClassicKeys.cs`) and shows the sectors that open, hex and ASCII;
   a card secured with custom keys stays closed and shows only its serial. It is read-only and never recovers an
-  unknown key, so it opens blank, test and unsecured cards, not secured ones.
+  unknown key, so it opens blank, test and unsecured cards, not secured ones. When some sectors stay locked, a
+  key box appears: enter a 6-byte key (12 hex digits) and hold the card again to open the sectors it unlocks.
+  Trying a wrong key is safe (Classic cards have no wrong-key lockout), so that box says so; the NTAG/Ultralight
+  password box instead warns that a wrong password can lock some tags for good.
 - **NFC** tab, Write: type a link, text or vCard (or load one from Saved) and hold a writable tag to write it as NDEF.
   **Private text** encrypts the text with a passphrase first (`Services/SealedText.cs`): PBKDF2-SHA256 with a
   random salt for the key, AES-256-GCM for the text, stored as an NDEF record of type
