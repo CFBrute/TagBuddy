@@ -83,8 +83,8 @@ public sealed partial class NfcReader
 
     // ------------------------------------------------------------------------------------------------ MIFARE Classic
 
-    /// <summary>Writes data blocks sector by sector. Each sector is opened with the key the person entered or a public
-    /// default, as key A and then key B (a sector's access bits often let only one of them write), and each block is
+    /// <summary>Writes data blocks sector by sector. Each sector is opened with the keys a read tries (the entered key,
+    /// the public defaults, remembered keys), as key A and then key B (a sector's access bits often let only one of them write), and each block is
     /// read back after writing. A sector that no key opens, or that refuses the write, is reported and left as it was.</summary>
     private static (bool Ok, string Note) WriteClassicSegments(Tag tag, SegmentWrite write)
     {
@@ -98,9 +98,9 @@ public sealed partial class NfcReader
             var actual = new SegmentLayout(TagFamily.Classic, MifareClassicKeys.ChipName(classic.Size), 16, classic.BlockCount);
             if (write.WrongChip(actual) is { } wrongChip) return (false, wrongChip);
 
-            var candidates = _manualKey is { } manual
-                ? MifareClassicKeys.Defaults.Select(k => k.Key).Prepend(manual).ToList()
-                : MifareClassicKeys.Defaults.Select(k => k.Key).ToList();
+            // The same keys a read tries, in the same order: the entered key, the public defaults, keys remembered
+            // for cards, and the imported dictionary when "try all" is on.
+            var candidates = ClassicKeyCandidates().Select(k => k.Key).ToList();
 
             int written = 0, same = 0;
             var refused = new List<int>();
