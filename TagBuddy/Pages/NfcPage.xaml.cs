@@ -875,8 +875,8 @@ public partial class NfcPage : ContentPage
                 TagFamily.Type2 => "Pages are 4 bytes. The serial (pages 0-2), page 3 and the lock and password pages are never " +
                                    "written, so an edit cannot lock the tag for good or change its password.",
                 TagFamily.Classic => "Blocks are 16 bytes. Block 0 (the serial) and each sector's trailer (its keys and access bits) " +
-                                     "are never written, so an edit cannot lock you out of a sector. Sectors are opened with the key " +
-                                     "you entered on the Read side, or the public default keys.",
+                                     "are never written, so an edit cannot lock you out of a sector. Sectors are opened with the same " +
+                                     "keys a read tries: the key you entered, the default keys and keys remembered for cards.",
                 _ => "Labels use blocks of 4 or 8 bytes, sometimes more. The label reports its size when written, and nothing is " +
                      "written if it differs from the bytes per block here. Lock commands are never sent.",
             };

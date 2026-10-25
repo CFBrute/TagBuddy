@@ -58,8 +58,8 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   (tag type, an optional serial, the range of segments, and for ISO 15693 the bytes per block, which the label
   must confirm); then only the segments filled in are written. The serial, page 3, lock bits, password pages,
   Classic block 0 and sector trailers are never written, so an edit can neither lock a tag for good nor change
-  how it opens. Classic sectors are opened for writing with the entered key or the public defaults, as key A and
-  then key B. The serial is only ever compared, never written.
+  how it opens. Classic sectors are opened for writing with the same keys a read tries (entered, defaults,
+  remembered), as key A and then key B. The serial is only ever compared, never written.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.
