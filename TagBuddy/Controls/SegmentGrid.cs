@@ -70,6 +70,20 @@ public class SegmentGrid : GraphicsView, IDrawable
         }
     }
 
+    /// <summary>The left of the cursor's cell (in the hex or the text column), for keeping it on screen while typing:
+    /// the hidden input sits there, and Android scrolls to whatever has the keyboard.</summary>
+    public double CursorX
+    {
+        get
+        {
+            if (_edit is not { Length: > 0 } edit) return 0;
+            int size = edit.Layout.SegmentSize;
+            var (_, index) = edit.At(edit.Cursor);
+            int column = edit.InText ? AsciiStart(size) + index : HexStart(index);
+            return ColumnX(column);
+        }
+    }
+
     private List<Row> BuildRows()
     {
         var rows = new List<Row>();
