@@ -68,9 +68,12 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   Classic block 0 and sector trailers are never written, so an edit can neither lock a tag for good nor change
   how it opens. Classic sectors are opened for writing with the same keys a read tries (entered, defaults,
   remembered), as key A and then key B. A sector the read opened, so its key is known (a default, one entered, imported or
-  remembered), can be given a new key from the editor: it is written as key A and key B, the sector's access bits
-  kept as they are, and reported only once the sector opens with the new key; the key is then remembered for the
-  tag (`MifareKeyStore`), so later reads open it and it can be changed again. A sector no key opened cannot. The serial is only ever compared, never written.
+  remembered), can be given a new key and new rules from the editor. The key is written as key A and key B. The rules
+  (access bits) are picked per block and for the keys from the valid combinations in words (`SectorRules`), never
+  typed as bytes, so the plain and inverted halves always agree; a trailer rule that freezes the sector for good is
+  marked and confirmed first. What is not changed is kept from the trailer as read. The write is reported only once
+  the sector opens again; the key is then remembered for the tag (`MifareKeyStore`), so later reads open it. A
+  sector no key opened cannot be changed. On read, each opened sector's rules are spelled out under its blocks. The serial is only ever compared, never written.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.

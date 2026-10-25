@@ -100,4 +100,50 @@ public class MifareClassicTests
         Assert.Null(MifareClassicKeys.DescribeAccess(trailer));
         Assert.Contains("corrupt", Assert.Single(MifareClassicKeys.AccessLines(trailer)));
     }
+
+    [Theory]
+    [InlineData(0xFF, 0x07, 0x80)]   // transport
+    [InlineData(0x78, 0x77, 0x88)]   // common secured
+    [InlineData(0x7F, 0x07, 0x88)]
+    public void Rules_decode_and_encode_back_to_the_same_bytes(byte b6, byte b7, byte b8)
+    {
+        byte[] trailer = [0, 0, 0, 0, 0, 0, b6, b7, b8, 0x69, 0, 0, 0, 0, 0, 0];
+        var rules = MifareClassicKeys.DecodeRules(trailer);
+        Assert.NotNull(rules);
+        Assert.Equal(new[] { b6, b7, b8 }, rules.Encode());
+    }
+
+    [Fact]
+    public void Transport_rules_are_the_factory_bytes_and_not_permanent()
+    {
+        Assert.Equal(MifareClassicKeys.TransportAccessBits, SectorRules.Transport.Encode());
+        Assert.False(SectorRules.Transport.IsPermanent);
+        Assert.True((SectorRules.Transport with { Trailer = 0b010 }).IsPermanent);
+    }
+
+    [Fact]
+    public void Every_rule_encodes_with_matching_inverted_halves()
+    {
+        foreach (var d in MifareClassicKeys.DataRules)
+            foreach (var t in MifareClassicKeys.TrailerRules)
+            {
+                var rules = new SectorRules(d.Bits, 0, d.Bits, t.Bits);
+                byte[] trailer = [.. new byte[6], .. rules.Encode(), 0x69, .. new byte[6]];
+                Assert.Equal(rules, MifareClassicKeys.DecodeRules(trailer));
+            }
+    }
+
+    [Fact]
+    public void A_trailer_is_built_from_keys_and_either_new_or_kept_rules()
+    {
+        byte[] a = [1, 1, 1, 1, 1, 1], b = [2, 2, 2, 2, 2, 2];
+        byte[] current = [0, 0, 0, 0, 0, 0, 0x78, 0x77, 0x88, 0x42, 0, 0, 0, 0, 0, 0];
+        var kept = MifareClassicKeys.TrailerFor(a, b, current, null);
+        Assert.Equal(new byte[] { 0x78, 0x77, 0x88, 0x42 }, kept[6..10]);
+        Assert.Equal(a, kept[..6]);
+        Assert.Equal(b, kept[10..]);
+        var changed = MifareClassicKeys.TrailerFor(a, b, current, SectorRules.Transport);
+        Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x42 }, changed[6..10]);
+        Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, MifareClassicKeys.TrailerFor(a, b, [], null)[6..10]);
+    }
 }

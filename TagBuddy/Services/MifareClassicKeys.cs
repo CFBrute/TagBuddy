@@ -44,11 +44,55 @@ public static class MifareClassicKeys
     /// key A reads and writes every block and both keys, key B is a plain data key. Bytes 6-8 of the trailer.</summary>
     public static readonly byte[] TransportAccessBits = [0xFF, 0x07, 0x80];
 
-    /// <summary>A sector trailer giving the sector <paramref name="key"/> as both key A and key B. The access bits and
-    /// byte 9 are kept from <paramref name="current"/> (the transport ones when the trailer could not be read), so what
-    /// the key may do in the sector does not change; only the key does.</summary>
-    public static byte[] TrailerFor(byte[] key, byte[] current) =>
-        [.. key, .. (current.Length >= 10 ? current[6..10] : [.. TransportAccessBits, (byte)0x69]), .. key];
+    /// <summary>A sector trailer with the given keys, and either the given rules or (null) the rules kept from
+    /// <paramref name="current"/> (the transport ones when the trailer could not be read). Byte 9 is kept.</summary>
+    public static byte[] TrailerFor(byte[] keyA, byte[] keyB, byte[] current, SectorRules? rules)
+    {
+        byte[] bits = rules is { } r ? r.Encode() : current.Length >= 9 ? current[6..9] : TransportAccessBits;
+        byte extra = current.Length >= 10 ? current[9] : (byte)0x69;
+        return [.. keyA, .. bits, extra, .. keyB];
+    }
+
+    /// <summary>The rules a trailer holds, or null when its access bits are corrupt (plain and inverted halves disagree).</summary>
+    public static SectorRules? DecodeRules(byte[] trailer)
+    {
+        if (trailer.Length < 9) return null;
+        byte b6 = trailer[6], b7 = trailer[7], b8 = trailer[8];
+        int c1 = b7 >> 4, c2 = b8 & 0x0F, c3 = b8 >> 4;
+        int nc1 = b6 & 0x0F, nc2 = b6 >> 4, nc3 = b7 & 0x0F;
+        if (((c1 ^ nc1) & 0x0F) != 0x0F || ((c2 ^ nc2) & 0x0F) != 0x0F || ((c3 ^ nc3) & 0x0F) != 0x0F) return null;
+        var bits = new int[4];
+        for (int block = 0; block < 4; block++)
+            bits[block] = (((c1 >> block) & 1) << 2) | (((c2 >> block) & 1) << 1) | ((c3 >> block) & 1);
+        return new SectorRules(bits[0], bits[1], bits[2], bits[3]);
+    }
+
+    /// <summary>The eight rules a data block can have, by their 3-bit code (C1 C2 C3), in words.</summary>
+    public static readonly IReadOnlyList<(int Bits, string Text)> DataRules =
+    [
+        (0b000, "read and write with A or B"),
+        (0b010, "read with A or B, never written"),
+        (0b100, "read with A or B, write with B"),
+        (0b110, "read with A or B, write and increment with B, decrement with A or B (value block)"),
+        (0b001, "read with A or B, decrement with A or B, never written (value block)"),
+        (0b011, "read and write with B only"),
+        (0b101, "read with B only, never written"),
+        (0b111, "never read or written"),
+    ];
+
+    /// <summary>The eight rules for the trailer (who may change the keys and the rules). <c>Permanent</c> marks the four
+    /// that freeze the rules for the life of the sector: once written, nothing in the sector can ever be changed again.</summary>
+    public static readonly IReadOnlyList<(int Bits, string Text, bool Permanent)> TrailerRules =
+    [
+        (0b001, "A changes both keys and the rules; B is plain data (factory setting)", false),
+        (0b000, "A changes both keys; the rules can never be changed; B is plain data", true),
+        (0b011, "B changes both keys and the rules", false),
+        (0b100, "B changes both keys; the rules can never be changed", true),
+        (0b101, "B changes the rules; the keys can never be changed", false),
+        (0b010, "keys and rules can never be changed; B is plain data", true),
+        (0b110, "keys and rules can never be changed", true),
+        (0b111, "keys and rules can never be changed (and the keys are unreadable)", true),
+    ];
 
     /// <summary>What a sector's access bits allow, in words, one line per rule that differs from "key A does
     /// everything". The three bytes (6-8 of the trailer) hold, for each of the four blocks, three bits C1 C2 C3, each
@@ -58,49 +102,16 @@ public static class MifareClassicKeys
     public static IReadOnlyList<string>? DescribeAccess(byte[] trailer)
     {
         if (trailer.Length < 9) return [];
-        byte b6 = trailer[6], b7 = trailer[7], b8 = trailer[8];
-        // Plain bits: C1 in b7 high nibble, C2 in b8 low nibble, C3 in b8 high nibble; inverted in b6 and b7 low.
-        int c1 = b7 >> 4, c2 = b8 & 0x0F, c3 = b8 >> 4;
-        int nc1 = b6 & 0x0F, nc2 = b6 >> 4, nc3 = b7 & 0x0F;
-        if (((c1 ^ nc1) & 0x0F) != 0x0F || ((c2 ^ nc2) & 0x0F) != 0x0F || ((c3 ^ nc3) & 0x0F) != 0x0F) return null;
-
+        if (DecodeRules(trailer) is not { } rules) return null;
         var lines = new List<string>();
         for (int block = 0; block < 3; block++)
-        {
-            int bits = (((c1 >> block) & 1) << 2) | (((c2 >> block) & 1) << 1) | ((c3 >> block) & 1);
-            var rule = DataRule(bits);
-            if (bits != 0) lines.Add($"block {block}: {rule}");
-        }
-        int t = (((c1 >> 3) & 1) << 2) | (((c2 >> 3) & 1) << 1) | ((c3 >> 3) & 1);
-        lines.Add("keys: " + TrailerRule(t));
+            if (rules.Data[block] != 0) lines.Add($"block {block}: {DataRule(rules.Data[block])}");
+        lines.Add("keys: " + TrailerRule(rules.Trailer));
         return lines;
     }
 
-    /// <summary>The access-bit combination's meaning for a data block.</summary>
-    private static string DataRule(int bits) => bits switch
-    {
-        0b000 => "read and write with A or B",
-        0b010 => "read with A or B, never written",
-        0b100 => "read with A or B, write with B",
-        0b110 => "read with A or B, write and increment with B, decrement with A or B (value block)",
-        0b001 => "read with A or B, decrement with A or B, never written (value block)",
-        0b011 => "read and write with B only",
-        0b101 => "read with B only, never written",
-        _ => "never read or written",
-    };
-
-    /// <summary>The access-bit combination's meaning for the trailer: who may change the keys and the rules.</summary>
-    private static string TrailerRule(int bits) => bits switch
-    {
-        0b000 => "A changes both keys; the rules can never be changed; B is plain data",
-        0b010 => "keys and rules can never be changed; B is plain data",
-        0b100 => "B changes both keys; the rules can never be changed",
-        0b110 => "keys and rules can never be changed",
-        0b001 => "A changes both keys and the rules; B is plain data (factory setting)",
-        0b011 => "B changes both keys and the rules",
-        0b101 => "B changes the rules; the keys can never be changed",
-        _ => "keys and rules can never be changed",
-    };
+    public static string DataRule(int bits) => DataRules.First(r => r.Bits == bits).Text;
+    public static string TrailerRule(int bits) => TrailerRules.First(r => r.Bits == bits).Text;
 
     /// <summary>The access rules under a sector header: "  rules: ..." lines, or a warning when the bits are corrupt.</summary>
     public static IEnumerable<string> AccessLines(byte[] trailer)
@@ -109,10 +120,6 @@ public static class MifareClassicKeys
         if (rules is null) return ["  rules: corrupt access bits (plain and inverted halves disagree); this sector may be unusable"];
         return rules.Select(r => "  rules: " + r);
     }
-
-    /// <summary>Whether a trailer's access bits are the transport ones (a sector whose rules were never changed).</summary>
-    public static bool HasTransportAccessBits(byte[] trailer) =>
-        trailer.Length >= 9 && trailer.AsSpan(6, 3).SequenceEqual(TransportAccessBits);
 
     /// <summary>The card's name from its memory size in bytes: "MIFARE Classic 1K" (1024), "4K", "2K" or "Mini" (320).</summary>
     public static string ChipName(int sizeBytes) => sizeBytes switch
@@ -164,5 +171,39 @@ public static class MifareClassicKeys
         for (int i = 0; i < bytes.Length; i++)
             bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
         return bytes;
+    }
+}
+
+/// <summary>A sector's access rules: the 3-bit code of each of the three data groups (blocks 0-2 of a 4-block sector;
+/// on a 16-block sector each covers five blocks) and of the trailer. Built from a choice, never from loose bytes, so the
+/// encoded bits always carry their inverted halves and can never corrupt a sector.</summary>
+public sealed record SectorRules(int Data0, int Data1, int Data2, int Trailer)
+{
+    public static readonly SectorRules Transport = new(0, 0, 0, 0b001);
+
+    public int[] Data => [Data0, Data1, Data2];
+
+    /// <summary>Whether the trailer rule freezes the sector's rules for good.</summary>
+    public bool IsPermanent => MifareClassicKeys.TrailerRules.First(r => r.Bits == Trailer).Permanent;
+
+    public SectorRules WithData(int group, int bits) => group switch
+    {
+        0 => this with { Data0 = bits },
+        1 => this with { Data1 = bits },
+        _ => this with { Data2 = bits },
+    };
+
+    /// <summary>Bytes 6-8 of the trailer: C1 C2 C3 of the four blocks, each stored plain and inverted.</summary>
+    public byte[] Encode()
+    {
+        int c1 = 0, c2 = 0, c3 = 0;
+        int[] all = [Data0, Data1, Data2, Trailer];
+        for (int block = 0; block < 4; block++)
+        {
+            if ((all[block] & 0b100) != 0) c1 |= 1 << block;
+            if ((all[block] & 0b010) != 0) c2 |= 1 << block;
+            if ((all[block] & 0b001) != 0) c3 |= 1 << block;
+        }
+        return [(byte)(((~c2 & 0x0F) << 4) | (~c1 & 0x0F)), (byte)((c1 << 4) | (~c3 & 0x0F)), (byte)((c3 << 4) | c2)];
     }
 }
