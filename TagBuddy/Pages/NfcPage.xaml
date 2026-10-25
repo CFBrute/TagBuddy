@@ -293,7 +293,7 @@
                         <Entry x:Name="SectorKeyEntry" Placeholder="New key: 12 hex digits" MaxLength="17"
                                IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyChanged" />
                         <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
-                               Text="This sector still opens with a public default key, as a blank tag does. Give it a key of your own and it is written with the tag, as key A and key B, with the standard access rules kept so the key can read and write the whole sector. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
+                               Text="The read opened this sector, so its key is known and can be changed. The new key is written with the tag, as key A and key B; the sector's access rules are kept as they are. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
                         <Label x:Name="SectorKeyList" FontSize="12" />
                     </VerticalStackLayout>
 
