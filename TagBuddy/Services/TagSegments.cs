@@ -148,6 +148,25 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
         name.StartsWith("NTAG", StringComparison.OrdinalIgnoreCase) || (name.Length > 0 && "AEIOU".Contains(char.ToUpperInvariant(name[0]))) ? "an" : "a";
 }
 
+/// <summary>What one segment write changed on a tag: for each segment written, the bytes it held just before and the
+/// bytes it holds now. That is enough to undo the write on the tag (write <see cref="Before"/> back, to that same tag
+/// only) and to redo it again.</summary>
+public sealed record SegmentWriteRecord(string TagId, SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Before,
+    IReadOnlyDictionary<int, byte[]> After)
+{
+    /// <summary>Puts the segments back as they were, on the tag they were written to.</summary>
+    public SegmentWrite UndoWrite => new(Layout, TagId, Whole(Before));
+
+    /// <summary>Writes the same change again, after it was undone.</summary>
+    public SegmentWrite RedoWrite => new(Layout, TagId, Whole(After));
+
+    /// <summary>"pages 5-6": which segments the write changed.</summary>
+    public string Segments => $"{Layout.Noun}{(Before.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Before.Keys.Order().ToList())}";
+
+    private static Dictionary<int, byte?[]> Whole(IReadOnlyDictionary<int, byte[]> bytes) =>
+        bytes.ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray());
+}
+
 /// <summary>The segment editor's state: the tag it expects, the range of segments it covers, what the tag held (after
 /// a read), the bytes the person changed, and a cursor that types over them.
 ///

@@ -63,6 +63,14 @@ public partial class NfcPage : ContentPage
     /// <summary>The segment write last armed, so a successful write to the expected tag can be marked as done.</summary>
     private SegmentWrite? _segmentWrite;
 
+    /// <summary>Segment writes already on tags, newest on top: undoing one writes its old bytes back to that tag, and
+    /// moves it to the redo stack; redoing writes the change again. Kept while the app runs.</summary>
+    private readonly Stack<SegmentWriteRecord> _tagUndo = new(), _tagRedo = new();
+
+    /// <summary>An undo or redo on the tag that is armed and waits for the tag, or null.</summary>
+    private enum TagStep { Undo, Redo }
+    private TagStep? _tagStep;
+
     public NfcPage(SavedService saved)
     {
         InitializeComponent();
@@ -137,7 +145,6 @@ public partial class NfcPage : ContentPage
         _nfc.TagDispatched += OnTagDispatched;
         _nfc.Start();
         _active = true;
-        HardwareKeys.Handler = OnHardwareKey;
         ApplyPassword();     // the fields may still hold a password or key from before the tab was left
         ApplyClassicKey();
         if (_writeMode) ArmWrite();
@@ -157,7 +164,6 @@ public partial class NfcPage : ContentPage
     {
         base.OnDisappearing();
         _active = false;
-        if (HardwareKeys.Handler == OnHardwareKey) HardwareKeys.Handler = null;
         _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
         _nfc.TagWritten -= OnTagWritten;
@@ -697,6 +703,16 @@ public partial class NfcPage : ContentPage
         void ArmSegments()
         {
             _segmentWrite = null;
+            UpdateTagHistory();
+            if (_tagStep is { } step && (step == TagStep.Undo ? _tagUndo : _tagRedo).TryPeek(out var record))
+            {
+                // Undoing or redoing a write on the tag takes the next touch, and only on that tag.
+                _nfc.ArmSegmentWrite(step == TagStep.Undo ? record.UndoWrite : record.RedoWrite);
+                ShowStatus(step == TagStep.Undo
+                    ? $"Hold tag {record.TagId} to put {record.Segments} back as they were before the write"
+                    : $"Hold tag {record.TagId} to write the change to {record.Segments} again", ok: true);
+                return;
+            }
             if (_edit is not { } edit) { _nfc.Disarm(); return; }
             if ((_idError ?? _sizeError ?? _rangeError) is { } problem)
             {
@@ -792,13 +808,10 @@ public partial class NfcPage : ContentPage
     {
         Feedback.Tag(ok);
 
-        // The expected tag now holds the edit, so the same touch is not repeated; with any tag expected, it stays armed
-        // to write the next one too.
-        if (ok && WriteType == WriteMode.Segments && _segmentWrite is { ExpectedId: not null } done)
-            _edit?.Commit(done.Writes);
+        if (WriteType == WriteMode.Segments) note = SegmentWritten(ok, note);
 
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
-        WriteStatus.Text = ok ? $"{note}  Hold another tag to do it again." : note;
+        WriteStatus.Text = ok && WriteType != WriteMode.Segments ? $"{note}  Hold another tag to do it again." : note;
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
         UseRawButton.IsVisible = !ok && note.Contains(NfcReader.RawBytesTip)
             && WriteType is WriteMode.Auto or WriteMode.Text or WriteMode.Link;
@@ -844,6 +857,72 @@ public partial class NfcPage : ContentPage
     }
 
     // ---------------------------------------------------------------- segment editor
+
+    /// <summary>After a segment write: keep what it changed for undoing on the tag, move an undo or redo along its
+    /// stacks, and mark the bytes as on the tag when it is the one the edit expects (so the same touch is not
+    /// repeated; with any tag expected, the edit stays armed for the next one). Returns the note to show.</summary>
+    private string SegmentWritten(bool ok, string note)
+    {
+        var record = _nfc.TakeLastSegmentWrite();
+        var step = _tagStep;
+        // Nothing changed on the tag: a refused touch (another tag, say) leaves an undo or redo armed, while one that
+        // found the tag already as it should be has done its job.
+        if (record is null && !(ok && step is not null))
+        {
+            UpdateTagHistory();
+            return note;
+        }
+
+        _tagStep = null;
+        switch (step)
+        {
+            case TagStep.Undo: _tagRedo.Push(_tagUndo.Pop()); note = "Undone on the tag: " + note; break;
+            case TagStep.Redo: _tagUndo.Push(_tagRedo.Pop()); note = "Redone on the tag: " + note; break;
+            default:
+                _tagUndo.Push(record!);
+                _tagRedo.Clear();
+                break;
+        }
+
+        if (record is null) { UpdateTagHistory(); return note; }
+        bool expected = _edit?.ExpectedId is { } id && TagEdit.SameId(id, record.TagId);
+        if (expected && (ok || step is not null))
+            _edit!.Commit(record.After.ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()));
+        SegmentGrid.Invalidate();
+        UpdateSegmentTools();
+        UpdateTagHistory();
+        return note;
+    }
+
+    private void UpdateTagHistory()
+    {
+        bool any = _tagUndo.Count > 0 || _tagRedo.Count > 0;
+        TagHistoryPanel.IsVisible = any;
+        if (!any) return;
+
+        TagHistoryLabel.Text = _tagUndo.TryPeek(out var last)
+            ? $"Last write: tag {last.TagId}, {last.Segments}." + (_tagUndo.Count > 1 ? $" {_tagUndo.Count - 1} earlier write{(_tagUndo.Count == 2 ? "" : "s")} can be undone after it." : "")
+            : $"Undone: tag {_tagRedo.Peek().TagId}, {_tagRedo.Peek().Segments}.";
+        TagUndoButton.IsEnabled = _tagUndo.Count > 0 && _tagStep is null;
+        TagRedoButton.IsEnabled = _tagRedo.Count > 0 && _tagStep is null;
+        TagStepCancelButton.IsVisible = _tagStep is not null;
+    }
+
+    private void OnTagUndo(object? sender, EventArgs e) => StartTagStep(TagStep.Undo);
+    private void OnTagRedo(object? sender, EventArgs e) => StartTagStep(TagStep.Redo);
+
+    private void StartTagStep(TagStep step)
+    {
+        if ((step == TagStep.Undo ? _tagUndo : _tagRedo).Count == 0) return;
+        _tagStep = step;
+        ArmWrite();
+    }
+
+    private void OnTagStepCancel(object? sender, EventArgs e)
+    {
+        _tagStep = null;
+        ArmWrite();
+    }
 
     /// <summary>From a read: edit this tag's pages or blocks, expecting the same tag (serial and chip) at write time.</summary>
     private void OnEditTag(object? sender, EventArgs e)
@@ -921,7 +1000,7 @@ public partial class NfcPage : ContentPage
             (edit.FromRead
                 ? "The bytes are as the tag held them when it was read; only the ones you change are written."
                 : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
-            " Undo and Redo take back or redo a run of typing (Ctrl+Z and Ctrl+Y on a keyboard).";
+            " Undo and Redo take back or redo a run of typing.";
     }
 
     /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
@@ -990,27 +1069,6 @@ public partial class NfcPage : ContentPage
     {
         _edit?.RevertAll();
         SegmentEdited();
-    }
-
-    /// <summary>Hardware keyboard: undo, redo and the cursor keys, while the grid has the keyboard.</summary>
-    private bool OnHardwareKey(EditorKey key)
-    {
-        if (_edit is not { } edit || !_writeMode || !SegmentPanel.IsVisible || !SegmentInput.IsFocused) return false;
-        int size = edit.Layout.SegmentSize;
-        int rowStart = edit.Cursor / size * size;
-        switch (key)
-        {
-            case EditorKey.Undo: edit.Undo(); break;
-            case EditorKey.Redo: edit.Redo(); break;
-            case EditorKey.Left: edit.Move(-1); break;
-            case EditorKey.Right: edit.Move(1); break;
-            case EditorKey.Up: edit.Move(-size); break;
-            case EditorKey.Down: edit.Move(size); break;
-            case EditorKey.Home: edit.Place(rowStart, edit.InText); break;
-            case EditorKey.End: edit.Place(Math.Min(rowStart + size - 1, edit.Length - 1), edit.InText); break;
-        }
-        SegmentEdited();
-        return true;
     }
 
     private void UpdateExpectSummary()

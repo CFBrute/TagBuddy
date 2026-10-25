@@ -278,6 +278,19 @@
                         </ScrollView>
                     </Border>
                     <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
+
+                    <!-- Writes already on a tag: put the old bytes back, or write the change again -->
+                    <VerticalStackLayout x:Name="TagHistoryPanel" Spacing="6" IsVisible="False">
+                        <Label x:Name="TagHistoryLabel" FontSize="13" />
+                        <HorizontalStackLayout Spacing="8">
+                            <Button x:Name="TagUndoButton" Text="Undo on the tag" Clicked="OnTagUndo"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+                            <Button x:Name="TagRedoButton" Text="Redo on the tag" Clicked="OnTagRedo"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+                            <Button x:Name="TagStepCancelButton" Text="Cancel" Clicked="OnTagStepCancel" IsVisible="False"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
                 </VerticalStackLayout>
 
                 <!-- Binary dump: restore a saved tag image -->

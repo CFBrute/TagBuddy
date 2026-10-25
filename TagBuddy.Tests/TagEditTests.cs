@@ -358,6 +358,22 @@ public class TagEditTests
     }
 
     [Fact]
+    public void A_write_record_undoes_to_the_old_bytes_on_that_tag_only()
+    {
+        var record = new SegmentWriteRecord("04:A1", Ntag213,
+            new Dictionary<int, byte[]> { [5] = [1, 2, 3, 4], [6] = [5, 6, 7, 8] },
+            new Dictionary<int, byte[]> { [5] = [9, 2, 3, 4], [6] = [5, 6, 7, 9] });
+        Assert.Equal("pages 5-6", record.Segments);
+
+        var undo = record.UndoWrite;
+        Assert.Equal("04:A1", undo.ExpectedId);
+        Assert.Equal(new byte?[] { 1, 2, 3, 4 }, undo.Writes[5]);
+        Assert.NotNull(undo.WrongTag("04:A2"));
+
+        Assert.Equal(new byte?[] { 5, 6, 7, 9 }, record.RedoWrite.Writes[6]);
+    }
+
+    [Fact]
     public void The_summary_names_the_pages_and_bytes()
     {
         var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte?[]>
