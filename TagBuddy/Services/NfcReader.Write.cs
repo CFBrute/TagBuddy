@@ -87,9 +87,10 @@ public sealed partial class NfcReader
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>The password to use for a tag: the Nintendo key when the tag (or the dump going onto it) is
-    /// Amiibo-style, otherwise none. Guessing on other tags would count against their failed-attempt limit.</summary>
+    /// Amiibo-style, otherwise the password the person typed, or none. The app never guesses one, because a wrong
+    /// guess counts against the tag's wrong-attempt limit.</summary>
     private static byte[]? PasswordFor(Type2Link link, byte[] tagMemory, bool amiiboDump = false) =>
-        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory)) ? AmiiboPassword(link.Uid) : null;
+        Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory)) ? AmiiboPassword(link.Uid) : _manualPassword;
 
     /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
     /// message when the operation cannot proceed.</summary>
@@ -98,19 +99,19 @@ public sealed partial class NfcReader
         int auth0 = ReadAuth0(link, chip);
         if (auth0 < 0 || auth0 >= lastPageTouched) return null;
         if (pwd is null)
-            return $"This tag is password-protected from page {auth0}{(Features.Amiibo ? " and is not Amiibo-style" : "")}, " +
-                   "so this app will not guess its password. Nothing was changed.";
+            return $"This tag is password-protected from page {auth0}. Enter its password above and hold it again. " +
+                   "Nothing was changed.";
         authed = TryAuthenticate(link, pwd);
         if (authed) return null;
 
-        // The handshake fails the same way for a wrong key and for a tag that moved during it, and the
-        // Amiibo key is a fixed formula of the serial, so a slip of the hand is the likelier cause.
+        // The handshake fails the same way for a wrong password and for a tag that moved during it.
+        bool amiibo = Features.Amiibo && _manualPassword is null;
         int limit = ReadAuthLimit(link, chip);
         var limitNote = limit > 0
             ? $" This tag locks for good after {limit} wrong attempts, so do not keep retrying if it fails again."
             : "";
-        return "This tag is password-protected and did not accept the Amiibo key, or it moved away during the " +
-               "handshake. Hold it still and try again. Nothing was changed." + limitNote;
+        return $"This tag is password-protected and did not accept the {(amiibo ? "Amiibo key" : "password")}, or it moved " +
+               "away during the handshake. Hold it still and try again. Nothing was changed." + limitNote;
     }
 
     /// <summary>Writes an NDEF TLV into the user pages of a Type 2 tag, formatting a blank one first.</summary>

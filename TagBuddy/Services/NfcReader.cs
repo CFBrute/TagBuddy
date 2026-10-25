@@ -51,6 +51,13 @@ public sealed partial class NfcReader
     /// it to offer writing raw bytes instead.</summary>
     public const string RawBytesTip = "\"Raw bytes (no NDEF)\" can still store text on it for this app.";
 
+    /// <summary>The 4-byte password the person entered for a protected Type 2 tag, or null. Used to read a tag's
+    /// locked pages and to write a protected tag; the app never guesses one. Shared by the single instance.</summary>
+    private static byte[]? _manualPassword;
+
+    /// <summary>Sets (or clears, with null) the password the next read or write uses for a protected tag.</summary>
+    public void SetManualPassword(byte[]? password) => _manualPassword = password is { Length: 4 } ? password : null;
+
     /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
     public static bool IsAmiiboDump(byte[] bytes) => Type2Memory.IsAmiiboDump(bytes);
 

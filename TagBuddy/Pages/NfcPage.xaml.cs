@@ -120,6 +120,7 @@ public partial class NfcPage : ContentPage
         _nfc.TagDispatched += OnTagDispatched;
         _nfc.Start();
         _active = true;
+        ApplyPassword();   // the field may still hold a password from before the tab was left
         if (_writeMode) ArmWrite();
         OnTagDispatched();
     }
@@ -142,10 +143,30 @@ public partial class NfcPage : ContentPage
         _nfc.TagWritten -= OnTagWritten;
         _nfc.TagDispatched -= OnTagDispatched;
         _nfc.Disarm();
+        _nfc.SetManualPassword(null);   // not kept once the tab is left
         _nfc.Stop();
     }
 
     private void OnOpenSettings(object? sender, EventArgs e) => _nfc.OpenSettings();
+
+    // ---------------------------------------------------------------- tag password
+
+    private void OnTogglePassword(object? sender, EventArgs e)
+    {
+        PasswordPanel.IsVisible = !PasswordPanel.IsVisible;
+        PasswordToggle.Text = PasswordPanel.IsVisible ? "Tag password  ▾" : "Tag password  ▸";
+    }
+
+    private void OnPasswordChanged(object? sender, TextChangedEventArgs e) => ApplyPassword();
+
+    private void ApplyPassword() =>
+        _nfc.SetManualPassword(TagPassword.TryParse(PasswordEntry.Text, out var pwd) ? pwd : null);
+
+    private void OnPasswordDefault(object? sender, EventArgs e)
+    {
+        PasswordEntry.Text = "FFFFFFFF";
+        PasswordEntry.Unfocus();
+    }
 
     // ---------------------------------------------------------------- mode switch
 
