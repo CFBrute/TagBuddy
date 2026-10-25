@@ -17,7 +17,8 @@ public sealed record NfcTagInfo(
     byte[]? RawMemory = null,
     string? ChipName = null,
     bool NeedsPassword = false,
-    bool NeedsClassicKey = false)
+    bool NeedsClassicKey = false,
+    SegmentRead? Segments = null)
 {
     /// <summary>The first link or text record: what a QR code with the same purpose would contain.</summary>
     public string? Content
@@ -40,6 +41,9 @@ public sealed record NfcTagInfo(
 
     /// <summary>True when the full page memory was read and can be saved as a binary file.</summary>
     public bool HasRawMemory => RawMemory is { Length: > 0 };
+
+    /// <summary>True when the segment editor can write some of what was read.</summary>
+    public bool CanEdit => Segments is { } s && TagEdit.FromTag(s, Id).Segments.Count > 0;
 
     /// <summary>Serial number without separators, safe for a file name.</summary>
     public string SerialForFileName => Id.Replace(":", "");
