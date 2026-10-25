@@ -1,0 +1,16 @@
+# Line endings: git stores text files with LF and checks them out with the platform's own ending, CRLF on
+# Windows and LF elsewhere. Diffs then show only real changes, whichever editor or tool wrote the file.
+* text=auto
+
+# Never converted.
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.bin binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary
