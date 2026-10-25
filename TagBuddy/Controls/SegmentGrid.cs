@@ -1,0 +1,188 @@
+using TagBuddy.Services;
+
+namespace TagBuddy.Controls;
+
+/// <summary>The segment editor's view of a <see cref="TagEdit"/>, laid out like the read view's memory: one row per page
+/// or block ("005  48 65 6C 6C  Hell"), MIFARE Classic blocks under their sector, the rows that are never written greyed
+/// with what they hold. Tapping a byte, in the hex or the text column, puts the edit's cursor there; the page then
+/// sends the keyboard's typing to the edit.
+///
+/// <para>Every character is drawn in its own fixed-width cell, so what is drawn and what a tap hits are computed the same
+/// way whatever font the phone has. Typed bytes are drawn in the accent colour, bytes not known (set up by hand) as ··,
+/// and the cursor as a highlight on its nibble or character, echoed faintly in the other column.</para></summary>
+public class SegmentGrid : GraphicsView, IDrawable
+{
+    private const float FontSize = 13f, CharWidth = 8.2f, LineHeight = 22f, Pad = 6f, Baseline = 15.5f;
+
+    /// <summary>"005" and two spaces before the hex.</summary>
+    private const int NumberColumns = 5;
+
+    /// <summary>A row: a segment, or (MIFARE Classic) the header of the sector below.</summary>
+    private sealed record Row(int Segment, string? Header);
+
+    private TagEdit? _edit;
+    private List<Row> _rows = [];
+
+    /// <summary>A byte was tapped and the cursor placed on it.</summary>
+    public event Action? CursorPlaced;
+
+    public SegmentGrid()
+    {
+        Drawable = this;
+        var tap = new TapGestureRecognizer();
+        tap.Tapped += OnTapped;
+        GestureRecognizers.Add(tap);
+    }
+
+    public TagEdit? Edit
+    {
+        get => _edit;
+        set { _edit = value; Refresh(); }
+    }
+
+    /// <summary>Lays the rows out again (after the range or the edit changed) and redraws.</summary>
+    public void Refresh()
+    {
+        _rows = BuildRows();
+        int size = _edit?.Layout.SegmentSize ?? 4;
+        // As wide as the rows need: a role is only written on the rows that are never written.
+        int roles = _edit is { } edit
+            ? _rows.Where(r => r.Header is null && edit.WhyNotWritable(r.Segment) is not null)
+                   .Select(r => edit.RoleOf(r.Segment).Length).DefaultIfEmpty(0).Max()
+            : 0;
+        int headers = _rows.Select(r => r.Header?.Length ?? 0).DefaultIfEmpty(0).Max();
+        int columns = Math.Max(roles > 0 ? RoleStart(size) + roles : AsciiStart(size) + size, headers);
+        WidthRequest = Pad * 2 + columns * CharWidth;
+        HeightRequest = Pad * 2 + Math.Max(1, _rows.Count) * LineHeight;
+        Invalidate();
+    }
+
+    /// <summary>The top of the cursor's row, for keeping it on screen while typing.</summary>
+    public double CursorY
+    {
+        get
+        {
+            if (_edit is not { Length: > 0 } edit) return 0;
+            var (segment, _) = edit.At(edit.Cursor);
+            int row = _rows.FindIndex(r => r.Header is null && r.Segment == segment);
+            return Pad + Math.Max(0, row) * LineHeight;
+        }
+    }
+
+    private List<Row> BuildRows()
+    {
+        var rows = new List<Row>();
+        if (_edit is not { } edit) return rows;
+        for (int s = edit.From; s <= edit.To; s++)
+        {
+            if (edit.Layout.Family == TagFamily.Classic && (s == edit.From || MifareClassicKeys.SectorOf(s) != MifareClassicKeys.SectorOf(s - 1)))
+            {
+                int sector = MifareClassicKeys.SectorOf(s);
+                bool closed = edit.RoleOf(s) == "sector not opened";
+                rows.Add(new Row(s, $"Sector {sector:D2}{(closed ? " · not opened" : "")}"));
+            }
+            rows.Add(new Row(s, null));
+        }
+        return rows;
+    }
+
+    // ------------------------------------------------------------------------------------------------ columns
+
+    /// <summary>The column of byte <paramref name="k"/> in the hex: two digits and a space each, one more space every
+    /// four bytes, as the read view groups them.</summary>
+    private static int HexStart(int k) => NumberColumns + k * 3 + k / 4;
+    private static int AsciiStart(int size) => HexStart(size - 1) + 2 + 2;
+    private static int RoleStart(int size) => AsciiStart(size) + size + 2;
+
+    // ------------------------------------------------------------------------------------------------ drawing
+
+    public void Draw(ICanvas canvas, RectF dirtyRect)
+    {
+        if (_edit is not { } edit) return;
+        bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
+        var text = dark ? Color.FromArgb("#F3F4F6") : Color.FromArgb("#111827");
+        var dim = Color.FromArgb(dark ? "#6B7280" : "#9CA3AF");
+        var typed = Color.FromArgb(dark ? "#F5A623" : "#C2410C");
+        var cursor = Color.FromArgb("#F5A623").WithAlpha(0.5f);
+        var echo = Color.FromArgb("#F5A623").WithAlpha(0.2f);
+
+        canvas.Font = new Microsoft.Maui.Graphics.Font("monospace");
+        canvas.FontSize = FontSize;
+        int size = edit.Layout.SegmentSize;
+        var (cursorSegment, cursorIndex) = edit.Cursor < edit.Length ? edit.At(edit.Cursor) : (-1, -1);
+
+        for (int r = 0; r < _rows.Count; r++)
+        {
+            float y = Pad + r * LineHeight;
+            if (y > dirtyRect.Bottom || y + LineHeight < dirtyRect.Top) continue;
+            var row = _rows[r];
+            if (row.Header is { } header)
+            {
+                Cell(canvas, header, 0, y, header.Length, dim);
+                continue;
+            }
+
+            int s = row.Segment;
+            bool writable = edit.WhyNotWritable(s) is null;
+            Cell(canvas, s.ToString("D3"), 0, y, 3, dim);
+
+            for (int k = 0; k < size; k++)
+            {
+                byte? value = edit.ValueAt(s, k);
+                var color = !writable || value is null ? dim : edit.IsEdited(s, k) ? typed : text;
+
+                if (s == cursorSegment && k == cursorIndex)
+                {
+                    canvas.FillColor = edit.InText ? echo : cursor;
+                    canvas.FillRectangle(ColumnX(HexStart(k) + (edit.InText ? 0 : edit.Nibble)), y + 2, CharWidth * (edit.InText ? 2 : 1), LineHeight - 4);
+                    canvas.FillColor = edit.InText ? cursor : echo;
+                    canvas.FillRectangle(ColumnX(AsciiStart(size) + k), y + 2, CharWidth, LineHeight - 4);
+                }
+
+                Cell(canvas, value?.ToString("X2") ?? "··", HexStart(k), y, 2, color);
+                var ch = value switch { null => "·", >= 0x20 and < 0x7F => ((char)value).ToString(), _ => "." };
+                Cell(canvas, ch, AsciiStart(size) + k, y, 1, color);
+            }
+
+            if (!writable && edit.RoleOf(s) is { Length: > 0 } role)
+                Cell(canvas, role, RoleStart(size), y, role.Length, dim);
+        }
+    }
+
+    private static float ColumnX(int column) => Pad + column * CharWidth;
+
+    /// <summary>Draws text into its cells: each character in its own cell, so the columns line up in any font. Drawn at a
+    /// point (centre, baseline), not into a box: laying text out in a box this narrow can loop when a glyph is wider.</summary>
+    private static void Cell(ICanvas canvas, string value, int column, float y, int width, Color color)
+    {
+        canvas.FontColor = color;
+        for (int i = 0; i < value.Length && i < width; i++)
+            canvas.DrawString(value[i].ToString(), ColumnX(column + i) + CharWidth / 2, y + Baseline, HorizontalAlignment.Center);
+    }
+
+    // ------------------------------------------------------------------------------------------------ tapping
+
+    private void OnTapped(object? sender, TappedEventArgs e)
+    {
+        if (_edit is not { } edit || e.GetPosition(this) is not { } point) return;
+        int r = (int)((point.Y - Pad) / LineHeight);
+        if (r < 0 || r >= _rows.Count || _rows[r].Header is not null) return;
+
+        int size = edit.Layout.SegmentSize;
+        int column = (int)Math.Floor((point.X - Pad) / CharWidth);
+        bool inText = column >= AsciiStart(size) - 1;
+        int k = 0, nibble = 0;
+        if (inText) k = Math.Clamp(column - AsciiStart(size), 0, size - 1);
+        else
+        {
+            for (int j = 0; j < size; j++) if (column >= HexStart(j)) k = j;
+            nibble = column - HexStart(k) == 1 ? 1 : 0;
+        }
+
+        int position = edit.PositionOf(_rows[r].Segment, k);
+        if (position < 0) return;                       // a row that is never written
+        edit.Place(position, inText, nibble);
+        Invalidate();
+        CursorPlaced?.Invoke();
+    }
+}

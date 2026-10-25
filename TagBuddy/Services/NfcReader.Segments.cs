@@ -64,8 +64,13 @@ public sealed partial class NfcReader
         var lockedPages = new List<int>();
         int written = 0, same = 0;
 
-        foreach (var (page, data) in write.Writes.OrderBy(p => p.Key))
+        var targets = new Dictionary<int, byte[]>();
+        var unread = new List<int>();
+        foreach (var (page, wanted) in write.Writes.OrderBy(p => p.Key))
         {
+            var current = before.Length >= (page + 1) * 4 ? before.AsSpan(page * 4, 4) : [];
+            if (SegmentWrite.Merge(wanted, current) is not { } data) { unread.Add(page); continue; }
+            targets[page] = data;
             if (SamePage(before, page, data)) { same++; continue; }
             if (locked[page]) { lockedPages.Add(page); continue; }
             if (!WritePageWithRetry(link, page, data, pwd, ref authed, out var error))
@@ -77,8 +82,12 @@ public sealed partial class NfcReader
         }
 
         var after = ReadMemory(link, chip);
-        var wrong = write.Writes.Keys.Where(p => !locked[p] && !SamePage(after, p, write.Writes[p])).Order().ToList();
-        return Result(write.Layout, written, same, wrong, lockedPages, "locked for good and kept their old content", notes);
+        var wrong = targets.Keys.Where(p => !locked[p] && !SamePage(after, p, targets[p])).Order().ToList();
+        if (unread.Count > 0)
+            notes.Add($"{Pluralise(unread.Count, "page")} {Ranges(unread)} could not be read to keep the bytes you did not type, so " +
+                      $"{(unread.Count == 1 ? "it was" : "they were")} not written.");
+        var (ok, note) = Result(write.Layout, written, same, wrong, lockedPages, "locked for good and kept their old content", notes);
+        return (ok && unread.Count == 0, note);
     }
 
     // ------------------------------------------------------------------------------------------------ MIFARE Classic
@@ -119,8 +128,10 @@ public sealed partial class NfcReader
                             if (!opened) continue;
                             while (pending.Count > 0)
                             {
-                                var (block, data) = pending[0];
+                                var (block, wanted) = pending[0];
                                 var current = classic.ReadBlock(block);
+                                var data = SegmentWrite.Merge(wanted, current is { Length: >= 16 } ? current.AsSpan(0, 16) : []);
+                                if (data is null) break;                    // cannot keep the bytes not typed: next key
                                 if (current is { Length: >= 16 } && current.AsSpan(0, 16).SequenceEqual(data)) { same++; pending.RemoveAt(0); continue; }
                                 classic.WriteBlock(block, data);
                                 var check = classic.ReadBlock(block);
@@ -142,7 +153,7 @@ public sealed partial class NfcReader
             }
 
             return Result(write.Layout, written, same, [], refused,
-                "were not changed: no known key opened their sector, or the sector's access bits refuse writing", []);
+                "were not changed: no known key opened their sector, its access bits refuse writing, or they could not be read to keep the bytes you did not type", []);
         }
         finally { try { classic.Close(); } catch { } }
     }
@@ -168,9 +179,10 @@ public sealed partial class NfcReader
 
             int written = 0, same = 0;
             var refused = new List<int>();
-            foreach (var (block, data) in write.Writes.OrderBy(p => p.Key))
+            foreach (var (block, wanted) in write.Writes.OrderBy(p => p.Key))
             {
                 var current = Iso15693ReadBlock(nfcV, uid, block);
+                if (SegmentWrite.Merge(wanted, current) is not { } data) { refused.Add(block); continue; }
                 if (current is not null && current.AsSpan().SequenceEqual(data)) { same++; continue; }
                 if (Iso15693WriteBlock(nfcV, uid, block, data) && Iso15693ReadBlock(nfcV, uid, block) is { } check
                     && check.AsSpan().SequenceEqual(data)) { written++; continue; }
@@ -179,7 +191,7 @@ public sealed partial class NfcReader
                     return (false, $"Write failed at block {block} after {written} blocks: the label moved away. Hold it still and try again.");
                 refused.Add(block);
             }
-            return Result(write.Layout, written, same, [], refused, "refused the write (locked or protected) and kept their old content", []);
+            return Result(write.Layout, written, same, [], refused, "were not changed: locked or protected, or not readable to keep the bytes you did not type", []);
         }
         finally { try { nfcV.Close(); } catch { } }
     }

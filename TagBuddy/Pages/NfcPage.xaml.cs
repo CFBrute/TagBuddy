@@ -52,9 +52,13 @@ public partial class NfcPage : ContentPage
     /// input (each field's own problem, so fixing one does not hide another).</summary>
     private TagEdit? _edit;
     private List<SegmentLayout> _segmentLayouts = [];
-    private bool _segmentAsText;
     private bool _renderingSegments;
-    private string? _idError, _rangeError, _sizeError, _editorError;
+    private string? _idError, _rangeError, _sizeError;
+
+    /// <summary>What the hidden input field holds between keystrokes: typing adds to it, backspace takes from it, and it
+    /// is put back after each, so every key is seen as a change.</summary>
+    private const string InputSentinel = "  ";
+    private bool _resettingInput;
 
     /// <summary>The segment write last armed, so a successful write to the expected tag can be marked as done.</summary>
     private SegmentWrite? _segmentWrite;
@@ -71,6 +75,7 @@ public partial class NfcPage : ContentPage
             EraseHint.Text = "Clears every user page of the tag (all zeros with an empty NDEF message). The serial number and one-time pages are untouched. Save a dump first if you may want the content back.";
         }
 
+        SegmentGrid.CursorPlaced += OnSegmentCursorPlaced;
         WriteTypePicker.SelectedIndex = 0;
         SetMode(write: false);
         SetPasswordMode(asText: false);   // hex by default, the way RFID tools show a password
@@ -132,6 +137,7 @@ public partial class NfcPage : ContentPage
         _nfc.TagDispatched += OnTagDispatched;
         _nfc.Start();
         _active = true;
+        HardwareKeys.Handler = OnHardwareKey;
         ApplyPassword();     // the fields may still hold a password or key from before the tab was left
         ApplyClassicKey();
         if (_writeMode) ArmWrite();
@@ -151,6 +157,7 @@ public partial class NfcPage : ContentPage
     {
         base.OnDisappearing();
         _active = false;
+        if (HardwareKeys.Handler == OnHardwareKey) HardwareKeys.Handler = null;
         _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
         _nfc.TagWritten -= OnTagWritten;
@@ -691,7 +698,7 @@ public partial class NfcPage : ContentPage
         {
             _segmentWrite = null;
             if (_edit is not { } edit) { _nfc.Disarm(); return; }
-            if ((_idError ?? _sizeError ?? _rangeError ?? _editorError) is { } problem)
+            if ((_idError ?? _sizeError ?? _rangeError) is { } problem)
             {
                 _nfc.Disarm();
                 ShowStatus(problem, ok: false);
@@ -843,7 +850,6 @@ public partial class NfcPage : ContentPage
     {
         if (_last is not { Segments: { } read } tag) return;
         _edit = TagEdit.FromTag(read, tag.Id);
-        _segmentAsText = false;
         SetMode(write: true);
         ShowEdit(expand: false);
         if (WriteType != WriteMode.Segments) WriteTypePicker.SelectedIndex = (int)WriteMode.Segments;   // arms the write
@@ -889,26 +895,122 @@ public partial class NfcPage : ContentPage
         UpdateExpectSummary();
     }
 
-    /// <summary>Puts the edit into the editor in the current view (hex lines, or text).</summary>
+    /// <summary>Shows the edit in the grid (after it was replaced, or its range changed).</summary>
     private void RenderSegments()
     {
         if (_edit is not { } edit) return;
-        bool was = _renderingSegments;
-        _renderingSegments = true;
-        try { SegmentEditor.Text = _segmentAsText ? edit.FormatText() : edit.FormatHex(); }
-        finally { _renderingSegments = was; }
-        _editorError = null;
+        SegmentGrid.Edit = edit;
+        UpdateSegmentTools();
+    }
 
-        Palette.Select(SegmentHexButton, !_segmentAsText);
-        Palette.Select(SegmentTextButton, _segmentAsText);
+    /// <summary>The column buttons, undo and redo, the hint, and the hidden input next to the cursor's row.</summary>
+    private void UpdateSegmentTools()
+    {
+        if (_edit is not { } edit) return;
+        Palette.Select(SegmentHexButton, !edit.InText);
+        Palette.Select(SegmentTextButton, edit.InText);
+        SegmentUndoButton.IsEnabled = edit.CanUndo;
+        SegmentRedoButton.IsEnabled = edit.CanRedo;
+        SegmentRevertButton.IsEnabled = edit.Changes.Count > 0;
+        SegmentInput.Margin = new Thickness(0, SegmentGrid.CursorY, 0, 0);
+
         string noun = edit.Layout.Noun;
-        SegmentHint.Text = (_segmentAsText
-                ? $@"Text runs over the {noun}s from {edit.From} on. \xHH is one byte in hex (\x00 is a zero byte), \\ a backslash. " +
-                  $"Shortening the text clears the {noun}s it no longer reaches to zeros."
-                : $"One line per {noun}: its number, then {edit.Layout.SegmentSize} bytes in hex. A line with no bytes is left as the tag has it.")
-            + (edit.FromRead
-                ? $" The {noun}s start as the tag held them when it was read; only the {noun}s you change are written."
-                : $" Only the {noun}s you fill in are written.");
+        SegmentHint.Text =
+            $"Tap a byte to put the cursor there, then type: hex digits in the hex column, any text in the text column. " +
+            $"Typing writes over the bytes and runs on into the next {noun}; backspace puts a byte back as it was. Grey rows are never written. " +
+            (edit.FromRead
+                ? "The bytes are as the tag held them when it was read; only the ones you change are written."
+                : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
+            " Undo and Redo take back or redo a run of typing (Ctrl+Z and Ctrl+Y on a keyboard).";
+    }
+
+    /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
+    private void SegmentEdited()
+    {
+        SegmentGrid.Invalidate();
+        UpdateSegmentTools();
+        ArmWrite();
+    }
+
+    /// <summary>A byte was tapped: the keyboard's typing goes there.</summary>
+    private void OnSegmentCursorPlaced()
+    {
+        ResetInput();
+        SegmentInput.Focus();
+        UpdateSegmentTools();
+    }
+
+    private void ResetInput()
+    {
+        _resettingInput = true;
+        try
+        {
+            SegmentInput.Text = InputSentinel;
+            SegmentInput.CursorPosition = InputSentinel.Length;
+        }
+        finally { _resettingInput = false; }
+    }
+
+    /// <summary>Keystrokes from the hidden input: characters typed (or pasted) after the sentinel, or backspaces that
+    /// shortened it. In the hex column only hex digits count; in the text column every character does.</summary>
+    private void OnSegmentInput(object? sender, TextChangedEventArgs e)
+    {
+        if (_resettingInput || _edit is not { } edit) return;
+        var text = e.NewTextValue ?? string.Empty;
+        if (text.Length < InputSentinel.Length)
+        {
+            for (int i = text.Length; i < InputSentinel.Length; i++) edit.Backspace();
+        }
+        else if (text.Length > InputSentinel.Length)
+        {
+            var typed = text.StartsWith(InputSentinel, StringComparison.Ordinal) ? text[InputSentinel.Length..] : text[..^InputSentinel.Length];
+            bool ended = edit.InText
+                ? edit.TypeText(typed) < Encoding.UTF8.GetByteCount(typed)
+                : typed.Where(Uri.IsHexDigit).Any(c => !edit.TypeHex(c));
+            if (ended) Notice.Show($"That is the end of {edit.Layout.Noun}s {edit.From}-{edit.To}");
+        }
+        ResetInput();
+        SegmentEdited();
+    }
+
+    /// <summary>Enter: to the start of the next row (Android closes the keyboard on Enter, so it is opened again).</summary>
+    private void OnSegmentInputCompleted(object? sender, EventArgs e)
+    {
+        if (_edit is not { } edit) return;
+        int size = edit.Layout.SegmentSize;
+        edit.Place(Math.Min((edit.Cursor / size + 1) * size, Math.Max(0, edit.Length - 1)), edit.InText);
+        SegmentEdited();
+        SegmentInput.Focus();
+    }
+
+    private void OnSegmentUndo(object? sender, EventArgs e) { if (_edit?.Undo() == true) SegmentEdited(); }
+    private void OnSegmentRedo(object? sender, EventArgs e) { if (_edit?.Redo() == true) SegmentEdited(); }
+
+    private void OnSegmentRevert(object? sender, EventArgs e)
+    {
+        _edit?.RevertAll();
+        SegmentEdited();
+    }
+
+    /// <summary>Hardware keyboard: undo, redo and the cursor keys, while the grid has the keyboard.</summary>
+    private bool OnHardwareKey(EditorKey key)
+    {
+        if (_edit is not { } edit || !_writeMode || !SegmentPanel.IsVisible || !SegmentInput.IsFocused) return false;
+        int size = edit.Layout.SegmentSize;
+        int rowStart = edit.Cursor / size * size;
+        switch (key)
+        {
+            case EditorKey.Undo: edit.Undo(); break;
+            case EditorKey.Redo: edit.Redo(); break;
+            case EditorKey.Left: edit.Move(-1); break;
+            case EditorKey.Right: edit.Move(1); break;
+            case EditorKey.Up: edit.Move(-size); break;
+            case EditorKey.Down: edit.Move(size); break;
+            case EditorKey.Home: edit.Place(rowStart, edit.InText); break;
+            case EditorKey.End: edit.Place(Math.Min(rowStart + size - 1, edit.Length - 1), edit.InText); break;
+        }
+        SegmentEdited();
+        return true;
     }
 
     private void UpdateExpectSummary()
@@ -982,29 +1084,16 @@ public partial class NfcPage : ContentPage
         ArmWrite();
     }
 
-    private void OnSegmentEditorChanged(object? sender, TextChangedEventArgs e)
-    {
-        if (_renderingSegments || _edit is not { } edit) return;
-        _editorError = _segmentAsText ? edit.ApplyText(SegmentEditor.Text) : edit.ApplyHex(SegmentEditor.Text);
-        ArmWrite();
-    }
+    private void OnSegmentHex(object? sender, EventArgs e) => SetSegmentColumn(inText: false);
+    private void OnSegmentText(object? sender, EventArgs e) => SetSegmentColumn(inText: true);
 
-    private void OnSegmentHex(object? sender, EventArgs e) => SetSegmentView(asText: false);
-    private void OnSegmentText(object? sender, EventArgs e) => SetSegmentView(asText: true);
-
-    /// <summary>Switches between the hex and text views of the same bytes; not while the current view has an error,
-    /// which would lose what was typed.</summary>
-    private void SetSegmentView(bool asText)
+    /// <summary>Moves the cursor to the hex or the text column of the same byte.</summary>
+    private void SetSegmentColumn(bool inText)
     {
-        if (asText == _segmentAsText) return;
-        if (_editorError is not null)
-        {
-            Notice.Show("Fix the editor first: " + _editorError);
-            return;
-        }
-        _segmentAsText = asText;
-        RenderSegments();
-        ArmWrite();
+        if (_edit is not { } edit) return;
+        edit.Place(edit.Cursor, inText);
+        SegmentEdited();
+        OnSegmentCursorPlaced();
     }
 
     // ---------------------------------------------------------------- dumps (write side)
