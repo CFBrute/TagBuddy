@@ -16,7 +16,8 @@ public sealed record NfcTagInfo(
     IReadOnlyList<string>? MemoryDump = null,
     byte[]? RawMemory = null,
     string? ChipName = null,
-    bool NeedsPassword = false)
+    bool NeedsPassword = false,
+    bool NeedsClassicKey = false)
 {
     /// <summary>The first link or text record: what a QR code with the same purpose would contain.</summary>
     public string? Content

@@ -121,7 +121,8 @@ public partial class NfcPage : ContentPage
         _nfc.TagDispatched += OnTagDispatched;
         _nfc.Start();
         _active = true;
-        ApplyPassword();   // the field may still hold a password from before the tab was left
+        ApplyPassword();     // the fields may still hold a password or key from before the tab was left
+        ApplyClassicKey();
         if (_writeMode) ArmWrite();
         OnTagDispatched();
     }
@@ -145,6 +146,7 @@ public partial class NfcPage : ContentPage
         _nfc.TagDispatched -= OnTagDispatched;
         _nfc.Disarm();
         _nfc.SetManualPassword(null);   // not kept once the tab is left
+        _nfc.SetManualClassicKey(null);
         _nfc.Stop();
     }
 
@@ -198,6 +200,13 @@ public partial class NfcPage : ContentPage
         PasswordEntry.Unfocus();
     }
 
+    // ---------------------------------------------------------------- MIFARE Classic key
+
+    private void OnClassicKeyChanged(object? sender, TextChangedEventArgs e) => ApplyClassicKey();
+
+    private void ApplyClassicKey() =>
+        _nfc.SetManualClassicKey(MifareClassicKeys.TryParseKey(ClassicKeyEntry.Text, out var key) ? key : null);
+
     // ---------------------------------------------------------------- mode switch
 
     private void OnReadMode(object? sender, EventArgs e) => SetMode(write: false);
@@ -231,6 +240,9 @@ public partial class NfcPage : ContentPage
                 : "This tag is password-protected. Enter its password, then hold the tag again to read the locked pages.");
         else
             PasswordPanel.IsVisible = false;   // read fully; nothing to unlock
+
+        // A MIFARE Classic card with sectors the default keys did not open: offer a custom key.
+        ClassicKeyPanel.IsVisible = tag.NeedsClassicKey;
 
         TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
 

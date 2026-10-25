@@ -24,6 +24,18 @@ public static class MifareClassicKeys
         (Hex("AABBCCDDEEFF"), "common"),
     ];
 
+    /// <summary>Reads a key the person typed: 12 hex digits, with spaces, colons and dashes between them ignored.
+    /// Anything else is rejected. A Classic sector has no wrong-key lockout, so trying a wrong key does no harm.</summary>
+    public static bool TryParseKey(string? text, out byte[] key)
+    {
+        key = [];
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var hex = new string(text.Where(Uri.IsHexDigit).ToArray());
+        if (hex.Length != 12) return false;
+        key = Hex(hex);
+        return true;
+    }
+
     /// <summary>"FFFFFFFFFFFF" from a 6-byte key, the way keys are usually written.</summary>
     public static string KeyHex(byte[] key) => string.Concat(key.Select(b => b.ToString("X2")));
 
