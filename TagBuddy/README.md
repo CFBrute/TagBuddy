@@ -44,7 +44,9 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   tried on a different tag held to the phone (that tag gets the default), so one tag's password cannot count
   against another's wrong-attempt limit. Each tag's default is tried at most once per run: once it fails on a
   tag it is not tried on that tag again, and a tag read as default is then written with it (the write says so).
-  Auto-trying the default can be turned off on the Settings tab. The password is kept only while the tab is open.
+  The default is auto-tried only when the tag confirms it has no wrong-attempt lock-out (AUTHLIM 0); when that
+  byte cannot be read (a read-protected tag hides it), the default is not tried and the password box appears, so
+  an automatic attempt never risks locking a tag. Auto-trying the default can also be turned off on the Settings tab. The password is kept only while the tab is open.
   A wrong one can count against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),

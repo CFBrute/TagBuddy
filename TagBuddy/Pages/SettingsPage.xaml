@@ -36,7 +36,7 @@
                         OnColor="{StaticResource Primary}" VerticalOptions="Center" />
             </Grid>
             <Label FontSize="12" TextColor="Gray"
-                   Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. A wrong attempt can count against a tag's lock-out limit, so each tag's default is tried at most once per session." />
+                   Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. To avoid locking a tag, the default is tried only when the tag confirms it has no wrong-attempt lock-out, and at most once per tag each session." />
 
             <!-- Display -->
             <Label Text="Display" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />

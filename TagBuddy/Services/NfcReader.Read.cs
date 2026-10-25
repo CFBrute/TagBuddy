@@ -134,8 +134,11 @@ public sealed partial class NfcReader
                         string serial = ToHex(link.Uid);
                         bool amiiboAuto = Features.Amiibo && LooksAmiibo(rawMemory);
                         byte[]? manual = ManualPasswordFor(serial);
-                        // Try the default only when it is not already known to fail on this tag (and the setting is on).
-                        bool autoDefault = !amiiboAuto && manual is null && ShouldTryDefault(serial);
+                        // Try the default only when it is not already known to fail on this tag (and the setting is
+                        // on), and only when the tag confirms it has no wrong-attempt lock-out (AUTHLIM == 0); if that
+                        // cannot be read, do not risk an automatic attempt.
+                        bool autoDefault = !amiiboAuto && manual is null && ShouldTryDefault(serial)
+                            && ReadAuthLimit(link, chip) == 0;
                         byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? (autoDefault ? TagPassword.FactoryDefault : null);
 
                         if (pwd is not null && TryAuthenticate(link, pwd, singleAttempt: autoDefault))
