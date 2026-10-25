@@ -42,8 +42,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   characters with the Hex/Text switch) and hold the tag again: the read then reaches the locked pages, or the
   write goes through (`Services/TagPassword.cs`). A password belongs to the tag it was entered for; it is never
   tried on a different tag held to the phone (that tag gets the default), so one tag's password cannot count
-  against another's wrong-attempt limit. The password is kept only while the tab is open. A wrong one can count
-  against a tag's wrong-attempt limit, so the box warns about that.
+  against another's wrong-attempt limit. Each tag's default is tried at most once per run: once it fails on a
+  tag it is not tried on that tag again, and a tag read as default is then written with it (the write says so).
+  Auto-trying the default can be turned off on the Settings tab. The password is kept only while the tab is open.
+  A wrong one can count against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as

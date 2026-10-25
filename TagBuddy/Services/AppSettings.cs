@@ -8,6 +8,7 @@ public static class AppSettings
     private const string SoundKey = "sound";
     private const string MaxBrightnessKey = "max-brightness";
     private const string NfcSoundKey = "nfc-sound";
+    private const string AutoTryDefaultKey = "nfc-auto-default";
 
     /// <summary>Whether Android plays its own sound when the NFC tab finds a tag. Off silences it while the app reads
     /// or writes; a private tag that opens the app from outside still gets Android's sound, before the app is involved.</summary>
@@ -15,6 +16,15 @@ public static class AppSettings
     {
         get => Preferences.Default.Get(NfcSoundKey, true);
         set => Preferences.Default.Set(NfcSoundKey, value);
+    }
+
+    /// <summary>Whether a password-protected NTAG/Ultralight is tried once with the factory default FFFFFFFF on
+    /// read and write. On by default, for the common case of a tag whose password was left at the default. Off,
+    /// nothing is tried automatically; the password box appears and the FFFFFFFF button is still there.</summary>
+    public static bool AutoTryDefaultPassword
+    {
+        get => Preferences.Default.Get(AutoTryDefaultKey, true);
+        set => Preferences.Default.Set(AutoTryDefaultKey, value);
     }
 
     /// <summary>Whether link previews and site icons load by themselves as soon as a link is shown or saved. Off,

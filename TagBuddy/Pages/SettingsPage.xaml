@@ -30,6 +30,14 @@
             <Label FontSize="12" TextColor="Gray"
                    Text="The sound Android plays when the NFC tab finds a tag. Off keeps it quiet while you read or write tags here. A private tag that opens Tag Buddy from outside the app still gets Android's sound." />
 
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Try the default tag password" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="AutoDefaultSwitch" Toggled="OnAutoDefaultToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <Label FontSize="12" TextColor="Gray"
+                   Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. A wrong attempt can count against a tag's lock-out limit, so each tag's default is tried at most once per session." />
+
             <!-- Display -->
             <Label Text="Display" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
