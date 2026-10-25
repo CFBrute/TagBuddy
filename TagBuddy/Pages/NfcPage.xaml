@@ -129,6 +129,9 @@
                                FontSize="12" TextColor="Gray"
                                HorizontalTextAlignment="Center" />
 
+                        <!-- Opens the write tab with these pages or blocks to edit, expecting this same tag -->
+                        <Button x:Name="EditTagButton" Text="Edit and write to this tag" Clicked="OnEditTag"
+                                IsVisible="False" />
                         <Grid x:Name="DumpButtons" ColumnDefinitions="*,*" ColumnSpacing="10">
                             <Button Grid.Column="0" Text="Save dump" Clicked="OnSaveDump" />
                             <Button Grid.Column="1" Text="Share .bin file" Clicked="OnShareDump"
@@ -155,9 +158,6 @@
                         </Border>
                         <Button Text="Copy memory as text" Clicked="OnCopyMemory"
                                 BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
-                        <!-- Opens the write tab with these pages or blocks to edit, expecting this same tag -->
-                        <Button x:Name="EditTagButton" Text="Edit and write to this tag" Clicked="OnEditTag"
-                                HorizontalOptions="Center" IsVisible="False" />
                     </VerticalStackLayout>
 
                     <Label Text="Hold another tag to read it"
@@ -258,6 +258,13 @@
                         <Button x:Name="SegmentRevertButton" Grid.Column="5" Text="Revert" Clicked="OnSegmentRevert"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </Grid>
+                    <!-- Quick fills: the cursor's segment, or every writable segment in the range, to 00 -->
+                    <HorizontalStackLayout Spacing="6">
+                        <Button x:Name="SegmentZeroRowButton" Text="Row to 00" Clicked="OnSegmentZeroRow"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentZeroAllButton" Text="All to 00" Clicked="OnSegmentZeroAll"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                    </HorizontalStackLayout>
 
                     <!-- The pages or blocks, laid out like the read view; tap a byte to put the cursor there -->
                     <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="4"

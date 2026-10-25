@@ -176,8 +176,8 @@ public sealed record SegmentWriteRecord(string TagId, SegmentLayout Layout, IRea
 /// steps back and puts the byte back as it was. A byte nobody typed is kept as the tag has it: after a read that is the
 /// byte read, set up by hand it is unknown (shown as ··) and the tag's own byte is kept when writing.</para>
 ///
-/// <para>Each run of typing or deleting is one step for <see cref="Undo"/> and <see cref="Redo"/>; placing the cursor
-/// elsewhere starts a new one.</para></summary>
+/// <para>Every keystroke (a hex digit, a character, a backspace) is one step for <see cref="Undo"/> and
+/// <see cref="Redo"/>, as are a paste, a fill with zeros and a revert.</para></summary>
 public sealed class TagEdit
 {
     /// <summary>What the tag held, per segment (null bytes: not known). Every segment the read reached, writable or not.</summary>
@@ -188,9 +188,6 @@ public sealed class TagEdit
     private Dictionary<int, byte?[]> _edits = [];
 
     private readonly Stack<Snapshot> _undo = new(), _redo = new();
-    private EditKind? _run;
-
-    private enum EditKind { Type, Delete }
     private sealed record Snapshot(Dictionary<int, byte?[]> Edits, int Cursor, int Nibble, bool InText);
 
     public SegmentLayout Layout { get; }
@@ -315,18 +312,16 @@ public sealed class TagEdit
         }
         _undo.Clear();
         _redo.Clear();
-        _run = null;
     }
 
     // ------------------------------------------------------------------------------------------------ cursor and typing
 
-    /// <summary>Puts the cursor on a byte of the run, in the hex or the text column. Starts a new undo step.</summary>
+    /// <summary>Puts the cursor on a byte of the run, in the hex or the text column.</summary>
     public void Place(int position, bool inText, int nibble = 0)
     {
         Cursor = Math.Clamp(position, 0, Length);
         InText = inText;
         Nibble = inText ? 0 : Math.Clamp(nibble, 0, 1);
-        _run = null;
     }
 
     /// <summary>Moves the cursor by a number of bytes (a row is one segment).</summary>
@@ -337,7 +332,7 @@ public sealed class TagEdit
     public bool TypeHex(char digit)
     {
         if (!Uri.IsHexDigit(digit) || Cursor >= Length) return false;
-        Begin(EditKind.Type);
+        Begin();
         var (segment, index) = At(Cursor);
         int value = Convert.ToInt32(digit.ToString(), 16);
         int current = ValueAt(segment, index) ?? 0;
@@ -352,7 +347,7 @@ public sealed class TagEdit
     public int TypeText(string text)
     {
         if (text.Length == 0 || Cursor >= Length) return 0;
-        Begin(EditKind.Type);
+        Begin();
         int written = 0;
         foreach (var b in Encoding.UTF8.GetBytes(text))
         {
@@ -372,7 +367,7 @@ public sealed class TagEdit
         if (!InText && Nibble == 1) { Nibble = 0; }           // the cursor is inside the byte: go back to its start
         else if (Cursor > 0) Cursor--;
         else return;
-        Begin(EditKind.Delete);
+        Begin();
         var (segment, index) = At(Cursor);
         Clear(segment, index);
         Nibble = 0;
@@ -382,10 +377,19 @@ public sealed class TagEdit
     public void RevertAll()
     {
         if (_edits.Count == 0) return;
-        _run = null;
-        Begin(EditKind.Delete);
+        Begin();
         _edits.Clear();
-        _run = null;
+    }
+
+    /// <summary>Sets every byte of one writable segment, or (null) of every writable segment in the range, to
+    /// <paramref name="value"/>: a quick way to clear a block or the whole tag to 00. One undo step.</summary>
+    public void Fill(byte value, int? segment = null)
+    {
+        List<int> targets = segment is { } one ? (_segmentIndex.ContainsKey(one) ? [one] : []) : _segments;
+        if (!targets.Any(s => Enumerable.Range(0, Layout.SegmentSize).Any(i => ValueAt(s, i) != value))) return;   // already so
+        Begin();
+        foreach (var s in targets)
+            for (int i = 0; i < Layout.SegmentSize; i++) Set(s, i, value);
     }
 
     public bool CanUndo => _undo.Count > 0;
@@ -403,17 +407,14 @@ public sealed class TagEdit
         Cursor = Math.Clamp(s.Cursor, 0, Length);
         Nibble = s.Nibble;
         InText = s.InText;
-        _run = null;
         return true;
     }
 
-    /// <summary>Starts an undo step unless this edit continues the current run of the same kind.</summary>
-    private void Begin(EditKind kind)
+    /// <summary>Starts an undo step: what the edit is now, to come back to.</summary>
+    private void Begin()
     {
-        if (_run == kind) return;
         _undo.Push(Take());
         _redo.Clear();
-        _run = kind;
     }
 
     private Snapshot Take() => new(Copy(_edits), Cursor, Nibble, InText);

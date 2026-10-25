@@ -55,7 +55,8 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   hex then text, Classic blocks under their sector, rows that are never written greyed with what they hold. Tap any
   byte, in the hex or the text column, to put the cursor there, and type: it works like overwrite mode in a hex
   editor, hex digits a nibble at a time or characters as UTF-8, running on into the next segment; backspace puts a
-  byte back as it was. Undo and Redo take back a run of typing. A write that
+  byte back as it was. Undo and Redo go back or forward one keystroke at a time; "Page/Block to 00"
+  and "All to 00" clear the cursor's segment or every writable one in the range (also undoable). A write that
   reached a tag can be undone too: the writer keeps what each segment held just before it wrote, so "Undo on the
   tag" writes those bytes back (to that same tag only, its serial is checked) and "Redo on the tag" writes the
   change again; the writes of the session are kept newest first, so earlier ones can be undone in turn. The edit expects
