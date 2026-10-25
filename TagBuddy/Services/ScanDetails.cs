@@ -112,45 +112,41 @@ public static class ScanDetails
         }
     }
 
-    /// <summary>Breaks well-known payloads (Wi-Fi, contact cards) into readable fields.</summary>
+    /// <summary>Breaks well-known payloads (Wi-Fi, contact cards, calendar events, web links) into readable fields.
+    /// Wi-Fi, contacts and events are read by the same parsers that hand them to other apps (<see cref="Handoff"/>),
+    /// so what the details show is what "Join", "Add to contacts" or "Add to calendar" would use.</summary>
     public static IEnumerable<(string Label, string Value)> DescribeStructuredContent(string value)
     {
         var v = value.Trim();
 
-        if (v.StartsWith("WIFI:", StringComparison.OrdinalIgnoreCase))
+        if (WifiNetwork.TryParse(v, out var network))
         {
-            foreach (Match m in Regex.Matches(v[5..], @"(?<k>[A-Z]):(?<v>(?:\\.|[^;])*);"))
-            {
-                var field = m.Groups["v"].Value.Replace("\\;", ";").Replace("\\:", ":").Replace("\\\\", "\\");
-                switch (m.Groups["k"].Value)
-                {
-                    case "S": yield return ("Network", field); break;
-                    case "T": yield return ("Security", field.Length == 0 ? "open" : field); break;
-                    case "P": yield return ("Password", new string('•', Math.Min(field.Length, 12)) + $"  ({field.Length} characters)"); break;
-                    case "H": yield return ("Hidden network", field.Equals("true", StringComparison.OrdinalIgnoreCase) ? "yes" : "no"); break;
-                }
-            }
+            yield return ("Network", network.Ssid);
+            yield return ("Security", network.IsOpen ? "open" : network.Security);
+            if (network.Password is { } password)
+                yield return ("Password", new string('•', Math.Min(password.Length, 12)) + $"  ({password.Length} characters)");
+            if (network.Hidden) yield return ("Hidden network", "yes");
             yield break;
         }
 
-        if (v.StartsWith("BEGIN:VCARD", StringComparison.OrdinalIgnoreCase))
+        if (ContactCard.TryParse(v, out var card))
         {
-            foreach (var line in v.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var trimmed = line.Trim();
-                var colon = trimmed.IndexOf(':');
-                if (colon <= 0) continue;
-                var key = trimmed[..colon].Split(';')[0].ToUpperInvariant();
-                var val = trimmed[(colon + 1)..];
-                switch (key)
-                {
-                    case "FN": yield return ("Name", val); break;
-                    case "ORG": yield return ("Organisation", val); break;
-                    case "TEL": yield return ("Phone", val); break;
-                    case "EMAIL": yield return ("Email", val); break;
-                    case "URL": yield return ("Website", val); break;
-                }
-            }
+            if (card.Name is { } name) yield return ("Name", name);
+            if (card.Organization is { } org) yield return ("Organisation", org);
+            if (card.Title is { } title) yield return ("Title", title);
+            foreach (var phone in card.Phones) yield return ("Phone", phone);
+            foreach (var email in card.Emails) yield return ("Email", email);
+            if (card.Address is { } address) yield return ("Address", address);
+            if (card.Url is { } url) yield return ("Website", url);
+            yield break;
+        }
+
+        if (CalendarEvent.TryParse(v, out var calendarEvent))
+        {
+            if (calendarEvent.Title is { } title) yield return ("Event", title);
+            if (calendarEvent.Start is { } start) yield return ("Starts", FormatTime(start, calendarEvent.AllDay));
+            if (calendarEvent.End is { } end) yield return ("Ends", FormatTime(end, calendarEvent.AllDay));
+            if (calendarEvent.Location is { } location) yield return ("Where", location);
             yield break;
         }
 
@@ -167,6 +163,11 @@ public static class ScanDetails
                 yield return parameter;
         }
     }
+
+    /// <summary>An event time in the phone's own time zone; a date alone for all-day events (which are dates, not
+    /// moments, so they are not shifted between zones).</summary>
+    internal static string FormatTime(DateTimeOffset time, bool allDay) =>
+        allDay ? time.UtcDateTime.ToString("yyyy-MM-dd") : time.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
     /// <summary>Key/value pairs from the query string and from a query hidden in the fragment (#...?a=b).
     /// Values that look like secrets are shortened so the screen does not expose them in full.</summary>

@@ -32,7 +32,9 @@ public static class GrayDecoder
         var reader = new BarcodeReaderGeneric
         {
             AutoRotate = true,
-            Options = { TryHarder = true, TryInverted = true },
+            // ReturnCodabarStartEnd: keep a Codabar's A-D start and stop letters, which are part of the code
+            // (libraries use them); without it "A1234B" reads as "1234" and a saved or regenerated copy differs.
+            Options = { TryHarder = true, TryInverted = true, ReturnCodabarStartEnd = true },
         };
         return reader.Decode(source);
     }
