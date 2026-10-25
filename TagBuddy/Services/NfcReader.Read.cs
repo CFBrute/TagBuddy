@@ -245,6 +245,7 @@ public sealed partial class NfcReader
         segments = null;
         var blocks = new Dictionary<int, byte[]>();
         var closed = new Dictionary<int, string>();
+        var defaultKeySectors = new HashSet<int>();
         try
         {
             classic.Connect();
@@ -268,6 +269,7 @@ public sealed partial class NfcReader
 
                 opened++;
                 found.Add((sector, MifareClassicKeys.KeyHex(key.Value.Key)));
+                if (MifareClassicKeys.IsDefault(key.Value.Key)) defaultKeySectors.Add(sector);
                 lines.Add(MifareClassicKeys.SectorHeader(sector, key.Value.Key, key.Value.Slot, key.Value.Name));
                 int first = classic.SectorToBlock(sector);
                 int count = classic.GetBlockCountInSector(sector);
@@ -294,7 +296,7 @@ public sealed partial class NfcReader
             details.Add(("Access", MifareClassicKeys.AccessSummary(opened, sectors)));
             if (opened > 0)
                 segments = new SegmentRead(new SegmentLayout(TagFamily.Classic, MifareClassicKeys.ChipName(classic.Size), 16,
-                    classic.BlockCount), blocks, closed);
+                    classic.BlockCount), blocks, closed) { DefaultKeySectors = defaultKeySectors };
             return opened > 0 ? lines : null;
         }
         catch (Exception ex)

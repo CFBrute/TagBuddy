@@ -93,13 +93,25 @@ public sealed record SegmentLayout(TagFamily Family, string ChipName, int Segmen
 
 /// <summary>What a read learned for the editor: the tag's layout, the content of each segment it could read, and the
 /// segments it must not write (with why: a page locked for good, a sector no known key opened).</summary>
-public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Data, IReadOnlyDictionary<int, string> Blocked);
+public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Data, IReadOnlyDictionary<int, string> Blocked)
+{
+    /// <summary>MIFARE Classic sectors that opened with one of the built-in public default keys: a blank or unsecured
+    /// tag's sectors, the only ones the editor offers a key of the person's own for.</summary>
+    public IReadOnlySet<int> DefaultKeySectors { get; init; } = new HashSet<int>();
+}
 
 /// <summary>An armed segment write: for each segment the bytes to put there, where null keeps the byte the tag has
 /// (read just before writing), and the tag they are meant for. Built from a <see cref="TagEdit"/>, checked against the
 /// tag held to the phone before anything is written.</summary>
 public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IReadOnlyDictionary<int, byte?[]> Writes)
 {
+    /// <summary>MIFARE Classic sectors to give a new key (A and B both), after their data is written. Only a sector
+    /// that still opens with a public default key takes one, and its access bits stay the standard ones, so the new
+    /// key can read and write the whole sector and nothing is ever locked out.</summary>
+    public IReadOnlyDictionary<int, byte[]> NewKeys { get; init; } = new Dictionary<int, byte[]>();
+
+    public bool IsEmpty => Writes.Count == 0 && NewKeys.Count == 0;
+
     /// <summary>Why the tag with this serial is not the one the edit is for, or null when it is (or any tag will do).</summary>
     public string? WrongTag(string id) =>
         ExpectedId is null || TagEdit.SameId(ExpectedId, id) ? null
@@ -138,8 +150,13 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
         get
         {
             int bytes = Writes.Values.Sum(w => w.Count(b => b is not null));
-            return $"{Layout.Noun}{(Writes.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Writes.Keys.Order().ToList())} " +
-                   $"({bytes} byte{(bytes == 1 ? "" : "s")})";
+            var parts = new List<string>();
+            if (Writes.Count > 0)
+                parts.Add($"{Layout.Noun}{(Writes.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Writes.Keys.Order().ToList())} " +
+                          $"({bytes} byte{(bytes == 1 ? "" : "s")})");
+            if (NewKeys.Count > 0)
+                parts.Add($"a new key for sector{(NewKeys.Count == 1 ? "" : "s")} {Type2Memory.Ranges(NewKeys.Keys.Order().ToList())}");
+            return string.Join(" and ", parts);
         }
     }
 
@@ -187,6 +204,11 @@ public sealed class TagEdit
     /// <summary>The bytes typed, per segment (null: not typed, the tag's byte stays).</summary>
     private Dictionary<int, byte?[]> _edits = [];
 
+    private readonly HashSet<int> _defaultKeySectors;
+
+    /// <summary>New keys for MIFARE Classic sectors, by sector. Not part of the typing history.</summary>
+    private readonly Dictionary<int, byte[]> _newKeys = [];
+
     private readonly Stack<Snapshot> _undo = new(), _redo = new();
     private sealed record Snapshot(Dictionary<int, byte?[]> Edits, int Cursor, int Nibble, bool InText);
 
@@ -207,11 +229,13 @@ public sealed class TagEdit
     public int Nibble { get; private set; }
     public bool InText { get; private set; }
 
-    private TagEdit(SegmentLayout layout, Dictionary<int, byte?[]> original, Dictionary<int, string> blocked, bool fromRead)
+    private TagEdit(SegmentLayout layout, Dictionary<int, byte?[]> original, Dictionary<int, string> blocked, bool fromRead,
+        IEnumerable<int>? defaultKeySectors = null)
     {
         Layout = layout;
         _original = original;
         _blocked = blocked;
+        _defaultKeySectors = [.. defaultKeySectors ?? []];
         FromRead = fromRead;
         From = layout.FirstWritable;
         To = layout.Count > 0 || layout.Family != TagFamily.Iso15693 ? layout.LastWritable : layout.FirstWritable + 15;
@@ -223,7 +247,7 @@ public sealed class TagEdit
         new(read.Layout,
             read.Data.Where(p => p.Value.Length == read.Layout.SegmentSize)
                      .ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()),
-            read.Blocked.ToDictionary(p => p.Key, p => p.Value), fromRead: true)
+            read.Blocked.ToDictionary(p => p.Key, p => p.Value), fromRead: true, read.DefaultKeySectors)
         { ExpectedId = id };
 
     /// <summary>An empty edit for a tag type chosen by hand: every byte unknown, nothing written until typed.</summary>
@@ -297,7 +321,36 @@ public sealed class TagEdit
         Segments.Where(s => _edits.TryGetValue(s, out var e) && e.Any(b => b is not null))
                 .ToDictionary(s => s, s => _edits[s].ToArray());
 
-    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes);
+    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes) { NewKeys = _newKeys.ToDictionary(p => p.Key, p => p.Value.ToArray()) };
+
+    /// <summary>Whether anything would be written: typed bytes or a new sector key.</summary>
+    public bool HasChanges => _newKeys.Count > 0 || Changes.Count > 0;
+
+    // ------------------------------------------------------------------------------------------------ sector keys
+
+    /// <summary>Whether a MIFARE Classic sector may be given a key of the person's own: it was read, and it opened with
+    /// a public default key, so it is a blank or unsecured tag's sector (a sector with someone's own key is left alone).</summary>
+    public bool CanChangeKey(int sector) => Layout.Family == TagFamily.Classic && FromRead && _defaultKeySectors.Contains(sector);
+
+    /// <summary>Sets (or, with null, drops) the new key for a sector. False when the sector cannot take one.</summary>
+    public bool SetSectorKey(int sector, byte[]? key)
+    {
+        if (!CanChangeKey(sector)) return false;
+        if (key is { Length: 6 }) _newKeys[sector] = key.ToArray();
+        else _newKeys.Remove(sector);
+        return true;
+    }
+
+    public byte[]? NewKeyFor(int sector) => _newKeys.TryGetValue(sector, out var k) ? k.ToArray() : null;
+
+    public IReadOnlyDictionary<int, byte[]> NewKeys => _newKeys;
+
+    /// <summary>After the tag took a new key for a sector: it is no longer a default-key sector, and the change is done.</summary>
+    public void KeyChanged(int sector)
+    {
+        _newKeys.Remove(sector);
+        _defaultKeySectors.Remove(sector);
+    }
 
     /// <summary>After a successful write: the tag now holds these bytes, so they are no longer changes. The history is
     /// cleared, since undoing would now mean changing the tag back.</summary>
@@ -376,6 +429,7 @@ public sealed class TagEdit
     /// <summary>Puts every byte back as the tag had it. One undo step.</summary>
     public void RevertAll()
     {
+        _newKeys.Clear();
         if (_edits.Count == 0) return;
         Begin();
         _edits.Clear();

@@ -396,6 +396,54 @@ public class TagEditTests
     }
 
     [Fact]
+    public void A_sector_that_opened_with_a_default_key_can_take_a_key_of_ones_own()
+    {
+        var data = Enumerable.Range(0, 64).ToDictionary(b => b, _ => new byte[16]);
+        var read = new SegmentRead(Classic1K, data, new Dictionary<int, string>()) { DefaultKeySectors = new HashSet<int> { 1 } };
+        var edit = TagEdit.FromTag(read, "04:A1:B2:C3");
+        byte[] key = [1, 2, 3, 4, 5, 6];
+
+        Assert.True(edit.CanChangeKey(1));
+        Assert.False(edit.CanChangeKey(2));                     // opened with a custom or remembered key: left alone
+        Assert.True(edit.SetSectorKey(1, key));
+        Assert.False(edit.SetSectorKey(2, key));
+        Assert.True(edit.HasChanges);
+        Assert.Empty(edit.Changes);
+
+        var write = edit.ToWrite();
+        Assert.False(write.IsEmpty);
+        Assert.Equal(key, write.NewKeys[1]);
+        Assert.Equal("a new key for sector 1", write.Summary);
+
+        edit.KeyChanged(1);
+        Assert.False(edit.CanChangeKey(1));
+        Assert.Empty(edit.NewKeys);
+    }
+
+    [Fact]
+    public void A_blank_edit_or_a_type2_tag_never_offers_a_key()
+    {
+        Assert.False(TagEdit.Blank(Classic1K).CanChangeKey(1));
+        Assert.False(TagEdit.FromTag(ReadNtag213(), "04").CanChangeKey(1));
+    }
+
+    [Fact]
+    public void A_new_trailer_keeps_the_standard_access_bits_and_sets_both_keys()
+    {
+        byte[] key = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];       // not a public default (A0A1A2A3A4A5 is the MAD key)
+        byte[] current = [0, 0, 0, 0, 0, 0, 0xFF, 0x07, 0x80, 0x69, 0, 0, 0, 0, 0, 0];
+        var trailer = MifareClassicKeys.TrailerFor(key, current);
+        Assert.Equal(16, trailer.Length);
+        Assert.Equal(key, trailer[..6]);
+        Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, trailer[6..10]);
+        Assert.Equal(key, trailer[10..]);
+        Assert.True(MifareClassicKeys.HasTransportAccessBits(current));
+        Assert.False(MifareClassicKeys.HasTransportAccessBits([0, 0, 0, 0, 0, 0, 0x78, 0x77, 0x88, 0x69, 0, 0, 0, 0, 0, 0]));
+        Assert.True(MifareClassicKeys.IsDefault([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]));
+        Assert.False(MifareClassicKeys.IsDefault(key));
+    }
+
+    [Fact]
     public void A_write_record_undoes_to_the_old_bytes_on_that_tag_only()
     {
         var record = new SegmentWriteRecord("04:A1", Ntag213,

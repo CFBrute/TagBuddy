@@ -722,7 +722,7 @@ public partial class NfcPage : ContentPage
             }
 
             var write = edit.ToWrite();
-            if (write.Writes.Count == 0)
+            if (write.IsEmpty)
             {
                 _nfc.Disarm();
                 ShowStatus(edit.FromRead
@@ -886,6 +886,13 @@ public partial class NfcPage : ContentPage
 
         if (record is null) { UpdateTagHistory(); return note; }
         bool expected = _edit?.ExpectedId is { } id && TagEdit.SameId(id, record.TagId);
+        if (NfcReader.ClassicKeysSet is { Count: > 0 } keysSet)
+        {
+            // The sectors opened with their new keys: remember them for the tag, and the edit no longer has them pending.
+            _keyStore.Remember(record.TagId, keysSet.Select(k => k.Key));
+            if (expected) foreach (var (sector, _) in keysSet) _edit!.KeyChanged(sector);
+            UpdateSectorKeyPanel();
+        }
         if (expected && (ok || step is not null))
             _edit!.Commit(record.After.ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()));
         SegmentGrid.Invalidate();
@@ -990,8 +997,9 @@ public partial class NfcPage : ContentPage
         Palette.Select(SegmentTextButton, edit.InText);
         SegmentUndoButton.IsEnabled = edit.CanUndo;
         SegmentRedoButton.IsEnabled = edit.CanRedo;
-        SegmentRevertButton.IsEnabled = edit.Changes.Count > 0;
+        SegmentRevertButton.IsEnabled = edit.HasChanges;
         SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
+        UpdateSectorKeyPanel();
         // The hidden input follows the cursor, across as well as down: Android scrolls to the view with the keyboard,
         // so an input left at the far left pulled the grid back to its start on every keystroke and tap.
         double left = Math.Max(0, Math.Min(SegmentGrid.CursorX, SegmentGrid.WidthRequest - SegmentInput.WidthRequest));
@@ -1083,6 +1091,50 @@ public partial class NfcPage : ContentPage
     {
         _edit?.Fill(0x00);
         SegmentEdited();
+    }
+
+    /// <summary>Shows the key box for the cursor's sector when it may take a key of the person's own, with the key
+    /// already pending for it, and lists every sector with a new key waiting.</summary>
+    private void UpdateSectorKeyPanel()
+    {
+        if (_edit is not { Layout.Family: TagFamily.Classic, FromRead: true, Length: > 0 } edit)
+        {
+            SectorKeyPanel.IsVisible = false;
+            return;
+        }
+        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
+        bool can = edit.CanChangeKey(sector);
+        SectorKeyPanel.IsVisible = can || edit.NewKeys.Count > 0;
+        if (!SectorKeyPanel.IsVisible) return;
+
+        _renderingSegments = true;
+        try
+        {
+            SectorKeyTitle.Text = can ? $"Sector {sector}: set your own key" : $"Sector {sector} already has its own key";
+            SectorKeyEntry.IsVisible = can;
+            SectorKeyHint.IsVisible = can;
+            var pending = edit.NewKeyFor(sector);
+            var shown = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var typed) ? typed : null;
+            if (pending is null ? shown is not null || !string.IsNullOrEmpty(SectorKeyEntry.Text) : shown is null || !shown.AsSpan().SequenceEqual(pending))
+                SectorKeyEntry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+        }
+        finally { _renderingSegments = false; }
+
+        SectorKeyList.IsVisible = edit.NewKeys.Count > 0;
+        SectorKeyList.Text = edit.NewKeys.Count == 0 ? "" :
+            "New keys waiting to be written: " + string.Join(", ", edit.NewKeys.OrderBy(k => k.Key).Select(k => $"sector {k.Key} → {MifareClassicKeys.KeyHex(k.Value)}"));
+    }
+
+    /// <summary>The key typed for the cursor's sector: a whole key is set for it, anything else drops it.</summary>
+    private void OnSectorKeyChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
+        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
+        edit.SetSectorKey(sector, MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var key) ? key : null);
+        SectorKeyList.IsVisible = edit.NewKeys.Count > 0;
+        SectorKeyList.Text = edit.NewKeys.Count == 0 ? "" :
+            "New keys waiting to be written: " + string.Join(", ", edit.NewKeys.OrderBy(k => k.Key).Select(k => $"sector {k.Key} → {MifareClassicKeys.KeyHex(k.Value)}"));
+        ArmWrite();
     }
 
     private void OnSegmentRevert(object? sender, EventArgs e)
