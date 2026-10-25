@@ -15,7 +15,11 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   "Advanced options" exposes the error-correction level (L/M/Q/H) and the quiet-zone margin.
 - **Text under the image** (both Generate tabs): the text printed under the code in shared and saved images.
   It follows the content until edited; position, size, distance and max width are ratios of the code.
-- **NFC** tab, Read: hold a tag or card to the phone. Shows its serial number, radio/chip type and NDEF capacity,
+- **NFC** tab, Read: hold a tag or card to the phone. Shows its serial number, radio and protocol, and the chip
+  behind it, worked out from the small public identifiers any card answers with even when the app cannot read it
+  (`Services/CardTypes.cs`): the SAK byte of an ISO 14443-A card (MIFARE Classic, Ultralight/NTAG, Plus, DESFire),
+  an ISO 15693 label's manufacturer and NXP ICODE product, a FeliCa system code, and a DESFire's generation and
+  size from its public version. It also shows NDEF capacity,
   decodes NDEF records (text, links, MIME, external) and offers the same actions as a scanned code for the content.
   For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII). For MIFARE Classic cards it
   tries the public default keys (`Services/MifareClassicKeys.cs`) and shows the sectors that open, hex and ASCII;
