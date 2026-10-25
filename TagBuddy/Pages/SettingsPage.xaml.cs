@@ -21,6 +21,39 @@ public partial class SettingsPage : ContentPage
         _loading = false;
         ShowBrightnessHint();
         ShowPreviewHint();
+
+        KeySection.IsVisible = Features.MifareKeyTools;
+        ShowKeyStoreInfo();
+    }
+
+    private readonly MifareKeyStore _keyStore = new();
+
+    private void ShowKeyStoreInfo()
+    {
+        if (!Features.MifareKeyTools) return;
+        int cards = _keyStore.RememberedCardCount();
+        int imported = _keyStore.ImportedCount();
+        KeyStoreInfo.Text = $"Keys that opened a card are remembered to open it quickly next time: {cards} {(cards == 1 ? "card" : "cards")} so far. Imported dictionary: {imported:N0} keys.";
+        ForgetKeysButton.IsEnabled = cards > 0;
+        ClearImportedButton.IsEnabled = imported > 0;
+    }
+
+    private async void OnForgetRememberedKeys(object? sender, EventArgs e)
+    {
+        if (!await DisplayAlertAsync("Forget tag keys", "Forget the keys remembered for every card? Reading them again re-learns the keys.", "Forget", "Cancel"))
+            return;
+        _keyStore.ClearRemembered();
+        ShowKeyStoreInfo();
+        Notice.Show("Remembered tag keys forgotten");
+    }
+
+    private async void OnClearImportedKeys(object? sender, EventArgs e)
+    {
+        if (!await DisplayAlertAsync("Clear imported keys", "Remove the imported key dictionary? You can import it again on the NFC tab.", "Clear", "Cancel"))
+            return;
+        _keyStore.ClearImported();
+        ShowKeyStoreInfo();
+        Notice.Show("Imported keys cleared");
     }
 
     private void OnVibrateToggled(object? sender, ToggledEventArgs e)

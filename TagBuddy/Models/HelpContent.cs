@@ -312,9 +312,11 @@ public static class HelpContent
                 "Vibrate on scan and NFC: a short buzz when a code is read or a tag is read or written.",
                 "Beep when a code is scanned: a short beep when the camera reads a code. It stays quiet while the phone is on silent or vibrate.",
                 "Android's NFC sound: the sound Android itself plays when the NFC tab finds a tag. Turn it off for quiet reading and writing. A private tag that opens Tag Buddy from outside the app still gets Android's sound.",
+                "Try the default tag password: when a protected NTAG/Ultralight is read, try the factory default FFFFFFFF once (only when the tag reports no wrong-attempt lock-out). Off, you get a one-tap button to try it on the next read instead.",
                 "Always show codes at maximum brightness: a code shown full screen starts at 100% instead of double your normal brightness.",
                 "Load link previews automatically: fetch previews for web links as soon as they appear. Off, nothing is fetched until you tap a preview.",
-                "Clear stored previews and icons: forget every stored preview; they load again when needed."),
+                "Clear stored previews and icons: forget every stored preview; they load again when needed.",
+                "MIFARE Classic keys: \"Forget remembered tag keys\" drops the keys learned per card; \"Clear imported keys\" removes the dictionary you imported on the NFC tab."),
             new HelpSeeAlso("show", "previews"),
         ]),
 
