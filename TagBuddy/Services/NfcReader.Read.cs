@@ -125,19 +125,32 @@ public sealed partial class NfcReader
                     // Read-protected pages (PROT=1): present a password and read again. The Amiibo key is a formula
                     // of the serial, so it is always tried; any other tag is tried only with a password the person
                     // typed, because a wrong guess counts against the tag's wrong-attempt limit.
+                    // Read-protected pages (PROT=1): try a password and read again. For an Amiibo the key is a
+                    // formula of the serial, tried on its own. For any other tag, the password the person entered
+                    // for THIS tag is tried, or, if none, the factory default FFFFFFFF once (a single well-known
+                    // guess, as for MIFARE Classic). A password entered for a different tag is never tried here.
                     if (chip is { TotalPages: > 0 } && rawMemory.Length < chip.TotalPages * 4)
                     {
+                        string serial = ToHex(link.Uid);
                         bool amiiboAuto = Features.Amiibo && LooksAmiibo(rawMemory);
-                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : _manualPassword;
-                        if (pwd is not null && TryAuthenticate(link, pwd))
+                        byte[]? manual = ManualPasswordFor(serial);
+                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? TagPassword.FactoryDefault;
+                        bool triedDefault = !amiiboAuto && manual is null;
+
+                        if (TryAuthenticate(link, pwd))
+                        {
                             rawMemory = ReadMemory(link, chip);
+                            if (triedDefault && rawMemory.Length >= chip.TotalPages * 4)
+                                details.Add(("Password", "Read with the factory default password (FFFFFFFF); this tag still has it."));
+                        }
+
                         // Still short, and not an Amiibo we open on our own: the person must supply the password.
                         if (rawMemory.Length < chip.TotalPages * 4 && !amiiboAuto)
                         {
                             needsPassword = true;
-                            details.Add(("Password", _manualPassword is null
-                                ? "Some pages are password-protected and were not read."
-                                : "That password did not open the protected pages."));
+                            details.Add(("Password", manual is not null
+                                ? "That password did not open the protected pages."
+                                : "Some pages are password-protected (not the default). Enter the password to read them."));
                         }
                     }
 

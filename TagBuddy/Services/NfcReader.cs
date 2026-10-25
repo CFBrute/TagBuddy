@@ -51,12 +51,24 @@ public sealed partial class NfcReader
     /// it to offer writing raw bytes instead.</summary>
     public const string RawBytesTip = "\"Raw bytes (no NDEF)\" can still store text on it for this app.";
 
-    /// <summary>The 4-byte password the person entered for a protected Type 2 tag, or null. Used to read a tag's
-    /// locked pages and to write a protected tag; the app never guesses one. Shared by the single instance.</summary>
+    /// <summary>The 4-byte password the person entered, and the serial of the tag they entered it for. A password
+    /// belongs to one tag: it is tried only on that tag, never on a different one held to the phone, because a
+    /// wrong attempt can count against the new tag's wrong-attempt limit.</summary>
     private static byte[]? _manualPassword;
+    private static string? _manualPasswordSerial;
 
-    /// <summary>Sets (or clears, with null) the password the next read or write uses for a protected tag.</summary>
-    public void SetManualPassword(byte[]? password) => _manualPassword = password is { Length: 4 } ? password : null;
+    /// <summary>Sets (or clears, with null) the password a read or write uses, bound to the tag <paramref
+    /// name="serial"/> it is for.</summary>
+    public void SetManualPassword(byte[]? password, string? serial)
+    {
+        _manualPassword = password is { Length: 4 } ? password : null;
+        _manualPasswordSerial = _manualPassword is null ? null : serial;
+    }
+
+    /// <summary>The entered password, but only when it was entered for the tag with this serial.</summary>
+    private static byte[]? ManualPasswordFor(string serial) =>
+        _manualPassword is not null && string.Equals(serial, _manualPasswordSerial, StringComparison.OrdinalIgnoreCase)
+            ? _manualPassword : null;
 
     /// <summary>The 6-byte MIFARE Classic key the person entered, tried before the public defaults, or null. A
     /// Classic sector has no wrong-key lockout, so trying one does no harm.</summary>
