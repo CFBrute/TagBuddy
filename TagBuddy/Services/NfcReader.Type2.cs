@@ -96,13 +96,13 @@ public sealed partial class NfcReader
         return cfg is null ? -1 : cfg[3];
     }
 
-    /// <summary>AUTHLIM from CFG1: how many wrong passwords the tag tolerates before it locks for good
-    /// (0 means no limit), or 0 if unknown.</summary>
-    private static int ReadAuthLimit(Type2Link link, Type2Chip? chip)
+    /// <summary>AUTHLIM from CFG1: how many wrong passwords the tag tolerates before it locks for good (0 means no
+    /// limit), or null when it cannot be read (the config page is itself protected, so the limit is unknown).</summary>
+    private static int? ReadAuthLimit(Type2Link link, Type2Chip? chip)
     {
-        if (chip is null || chip.ConfigPage < 0) return 0;
+        if (chip is null || chip.ConfigPage < 0) return null;
         var cfg1 = link.Read(chip.ConfigPage + 1);
-        return cfg1 is null ? 0 : cfg1[0] & 0x07;
+        return cfg1 is null ? null : cfg1[0] & 0x07;
     }
 
     private static bool IsType2(Tag tag)

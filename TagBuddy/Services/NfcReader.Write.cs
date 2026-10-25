@@ -113,6 +113,14 @@ public sealed partial class NfcReader
         bool amiibo = Features.Amiibo && !manualBound && pwd.SequenceEqual(AmiiboPassword(link.Uid));
         bool usingDefault = !manualBound && !amiibo;   // the factory default fallback: an automatic guess
         bool knownDefault = usingDefault && DefaultKnownWorks(serial);   // seen on an earlier read this session
+        int? limit = ReadAuthLimit(link, chip);
+
+        // An automatic guess of the default is only made when the tag confirms it has no lock-out (AUTHLIM == 0).
+        // When that cannot be read, do not risk an attempt; ask for the password instead. A tag already read as
+        // default this session is trusted without re-checking.
+        if (usingDefault && !knownDefault && limit != 0)
+            return $"This tag is password-protected from page {auth0}, and whether a wrong attempt could lock it " +
+                   "cannot be read, so the default was not tried. Enter its password and hold it again. Nothing was changed.";
 
         // A wrong automatic guess (the default) ticks the tag's limit, so spend at most one attempt on it.
         authed = TryAuthenticate(link, pwd, singleAttempt: usingDefault);
@@ -129,7 +137,6 @@ public sealed partial class NfcReader
         // The handshake fails the same way for a wrong password and for a tag that moved during it.
         string which = amiibo ? "Amiibo key" : manualBound ? "password" : "factory default password (FFFFFFFF)";
         string next = manualBound || amiibo ? "Hold it still and try again." : "Enter the tag's password and hold it again.";
-        int limit = ReadAuthLimit(link, chip);
         var limitNote = limit > 0
             ? $" This tag locks for good after {limit} wrong attempts, so do not keep retrying if it fails again."
             : "";
