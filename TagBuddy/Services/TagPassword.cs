@@ -11,12 +11,28 @@ public static class TagPassword
     /// <summary>The factory password of a fresh NTAG/Ultralight, and a common choice when one is set by hand.</summary>
     public static readonly byte[] FactoryDefault = [0xFF, 0xFF, 0xFF, 0xFF];
 
-    /// <summary>Reads 8 hex digits (spaces, colons and dashes between them are ignored) into the 4 password bytes.
-    /// Anything else is rejected, so a half-typed password is never sent to a tag.</summary>
-    public static bool TryParse(string? text, out byte[] password)
+    /// <summary>Reads the person's input into the 4 password bytes. As hex: 8 hex digits, with spaces, colons and
+    /// dashes between them ignored. As text: exactly 4 characters, each a single byte (0-255). Anything else is
+    /// rejected, so a half-typed password is never sent to a tag.</summary>
+    public static bool TryParse(string? text, bool asText, out byte[] password)
     {
         password = [];
-        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (string.IsNullOrEmpty(text)) return false;
+
+        if (asText)
+        {
+            if (text.Length != 4) return false;
+            var chars = new byte[4];
+            for (int i = 0; i < 4; i++)
+            {
+                // Printable ASCII only: an accented or emoji character is stored as different bytes by different
+                // tools (one byte or several), so what the tag actually holds would be a guess. Use hex for those.
+                if (text[i] is < ' ' or > '~') return false;
+                chars[i] = (byte)text[i];
+            }
+            password = chars;
+            return true;
+        }
 
         var hex = new string(text.Where(Uri.IsHexDigit).ToArray());
         if (hex.Length != 8) return false;
@@ -27,6 +43,9 @@ public static class TagPassword
         password = bytes;
         return true;
     }
+
+    /// <summary>Reads hex input (the default form, the way RFID tools show a password).</summary>
+    public static bool TryParse(string? text, out byte[] password) => TryParse(text, asText: false, out password);
 
     /// <summary>"FF:FF:FF:FF" for showing a password back; empty for none.</summary>
     public static string Format(byte[]? password) =>

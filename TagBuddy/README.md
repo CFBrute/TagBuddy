@@ -35,7 +35,8 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   Writable NDEF tags only; the serial number is never changed and locked cards cannot be written.
   **Tag password**: when a read cannot reach protected pages, or a write is refused because the tag is
   protected, a password box appears (it is never shown before that). Enter the tag's 4-byte password (8 hex
-  digits; a new NTAG/Ultralight's factory password is FFFFFFFF, offered as a button) and hold the tag again:
+  digits, or 4 characters with the Hex/Text switch; a new NTAG/Ultralight's factory password is FFFFFFFF, offered
+  as a button) and hold the tag again:
   the read then reaches the locked pages, or the write goes through (`Services/TagPassword.cs`). The password is
   kept only while the tab is open. The app never guesses a password; a wrong one can count against a tag's
   wrong-attempt limit, so the box warns about that.
