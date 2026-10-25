@@ -13,6 +13,7 @@ namespace TagBuddy.Controls;
 public class SegmentGrid : GraphicsView, IDrawable
 {
     private const float FontSize = 13f, CharWidth = 8.2f, LineHeight = 22f, Pad = 6f, Baseline = 15.5f;
+    private static readonly Microsoft.Maui.Graphics.Font MonoFont = new("monospace");
 
     /// <summary>"005" and two spaces before the hex.</summary>
     private const int NumberColumns = 5;
@@ -106,7 +107,7 @@ public class SegmentGrid : GraphicsView, IDrawable
         var cursor = Color.FromArgb("#F5A623").WithAlpha(0.5f);
         var echo = Color.FromArgb("#F5A623").WithAlpha(0.2f);
 
-        canvas.Font = new Microsoft.Maui.Graphics.Font("monospace");
+        canvas.Font = MonoFont;
         canvas.FontSize = FontSize;
         int size = edit.Layout.SegmentSize;
         var (cursorSegment, cursorIndex) = edit.Cursor < edit.Length ? edit.At(edit.Cursor) : (-1, -1);
@@ -151,13 +152,14 @@ public class SegmentGrid : GraphicsView, IDrawable
 
     private static float ColumnX(int column) => Pad + column * CharWidth;
 
-    /// <summary>Draws text into its cells: each character in its own cell, so the columns line up in any font. Drawn at a
-    /// point (centre, baseline), not into a box: laying text out in a box this narrow can loop when a glyph is wider.</summary>
+    /// <summary>Draws a cell's text in one left-aligned call, anchored at the cell's column. One short string per cell
+    /// (not one per character) keeps the draw count and per-glyph measuring down — the per-keystroke cost that made
+    /// the editor crawl — while re-anchoring each cell keeps the columns lined up in a monospace font.</summary>
     private static void Cell(ICanvas canvas, string value, int column, float y, int width, Color color)
     {
+        if (value.Length == 0) return;
         canvas.FontColor = color;
-        for (int i = 0; i < value.Length && i < width; i++)
-            canvas.DrawString(value[i].ToString(), ColumnX(column + i) + CharWidth / 2, y + Baseline, HorizontalAlignment.Center);
+        canvas.DrawString(value.Length > width ? value[..width] : value, ColumnX(column), y + Baseline, HorizontalAlignment.Left);
     }
 
     // ------------------------------------------------------------------------------------------------ tapping
