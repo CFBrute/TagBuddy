@@ -41,14 +41,19 @@ public static class MifareClassicKeys
 
     /// <summary>The header line above a sector's blocks: which key opened it, and what that key is known as.</summary>
     public static string SectorHeader(int sector, byte[] key, char slot, string name) =>
-        $"Sector {sector:D2}  ·  key {slot} {KeyHex(key)} ({name})";
+        $"Sector {sector:D2} · key {slot} {KeyHex(key)} ({name})";
 
     /// <summary>A sector the public keys did not open.</summary>
-    public static string LockedSector(int sector) => $"Sector {sector:D2}  ·  locked (custom key, not read)";
+    public static string LockedSector(int sector) => $"Sector {sector:D2} · locked (custom key, not read)";
 
-    /// <summary>One block as "block: hex  ascii".</summary>
-    public static string FormatBlock(int block, byte[] data) =>
-        $"  {block:D3}: {string.Join(":", data.Select(b => b.ToString("X2")))}  {Ascii(data)}";
+    /// <summary>One block as "block  hex  ascii", the 16 hex bytes in four-byte groups so the eye can scan them,
+    /// and the readable characters after. No per-byte colons: they only widen the line.</summary>
+    public static string FormatBlock(int block, byte[] data)
+    {
+        var groups = Enumerable.Range(0, (data.Length + 3) / 4)
+            .Select(g => string.Concat(data.Skip(g * 4).Take(4).Select(b => b.ToString("X2"))));
+        return $"  {block:D3}  {string.Join(" ", groups)}  {Ascii(data)}";
+    }
 
     /// <summary>What the Access detail says after a read, given how many of the sectors opened.</summary>
     public static string AccessSummary(int opened, int total) => opened switch

@@ -27,18 +27,18 @@ public class MifareClassicTests
 
     [Fact]
     public void A_sector_header_names_the_key_that_opened_it() =>
-        Assert.Equal("Sector 00  ·  key A FFFFFFFFFFFF (factory default)",
+        Assert.Equal("Sector 00 · key A FFFFFFFFFFFF (factory default)",
             MifareClassicKeys.SectorHeader(0, [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], 'A', "factory default"));
 
     [Fact]
     public void A_locked_sector_says_it_was_not_read() =>
-        Assert.Equal("Sector 15  ·  locked (custom key, not read)", MifareClassicKeys.LockedSector(15));
+        Assert.Equal("Sector 15 · locked (custom key, not read)", MifareClassicKeys.LockedSector(15));
 
     [Fact]
     public void A_block_is_hex_and_ascii()
     {
         byte[] data = [0x48, 0x69, 0x00, 0x7F, 0x41, 0x42, 0x43, 0x44, 0, 0, 0, 0, 0, 0, 0, 0];
-        Assert.Equal("  004: 48:69:00:7F:41:42:43:44:00:00:00:00:00:00:00:00  Hi..ABCD........",
+        Assert.Equal("  004  4869007F 41424344 00000000 00000000  Hi..ABCD........",
             MifareClassicKeys.FormatBlock(4, data));
     }
 
