@@ -39,6 +39,31 @@ public class TagPasswordTests
     }
 
     [Fact]
+    public void Four_characters_parse_as_text()
+    {
+        Assert.True(TagPassword.TryParse("pass", asText: true, out var pwd));
+        Assert.Equal("pass"u8.ToArray(), pwd);
+    }
+
+    [Theory]
+    [InlineData("abc")]        // too short
+    [InlineData("abcde")]      // too long
+    [InlineData("caf\u00E9")]   // the accented e is not a single byte
+    public void Text_that_is_not_four_single_bytes_is_rejected(string text)
+    {
+        Assert.False(TagPassword.TryParse(text, asText: true, out var pwd));
+        Assert.Empty(pwd);
+    }
+
+    [Fact]
+    public void The_same_text_and_its_hex_give_the_same_bytes()
+    {
+        Assert.True(TagPassword.TryParse("pass", asText: true, out var fromText));
+        Assert.True(TagPassword.TryParse("70617373", asText: false, out var fromHex));
+        Assert.Equal(fromText, fromHex);
+    }
+
+    [Fact]
     public void Format_shows_the_password_back()
     {
         Assert.Equal("FF:FF:FF:FF", TagPassword.Format(TagPassword.FactoryDefault));

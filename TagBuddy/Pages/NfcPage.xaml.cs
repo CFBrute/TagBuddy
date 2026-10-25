@@ -62,6 +62,7 @@ public partial class NfcPage : ContentPage
 
         WriteTypePicker.SelectedIndex = 0;
         SetMode(write: false);
+        SetPasswordMode(asText: false);   // hex by default, the way RFID tools show a password
     }
 
     /// <summary>Something arrived from Saved: switch to write mode and arm it.</summary>
@@ -163,10 +164,33 @@ public partial class NfcPage : ContentPage
         }
     }
 
+    /// <summary>Whether the password box reads what is typed as text (4 characters) instead of hex (8 digits).</summary>
+    private bool _passwordAsText;
+
+    private void OnPasswordHexMode(object? sender, EventArgs e) => SetPasswordMode(asText: false);
+    private void OnPasswordTextMode(object? sender, EventArgs e) => SetPasswordMode(asText: true);
+
+    private void SetPasswordMode(bool asText)
+    {
+        _passwordAsText = asText;
+        Palette.Select(HexModeButton, !asText);
+        Palette.Select(TextModeButton, asText);
+        PasswordEntry.MaxLength = asText ? 4 : 11;
+        PasswordEntry.Placeholder = asText ? "4 characters, e.g. pass" : "8 hex digits, e.g. FFFFFFFF";
+        PasswordDefaultButton.IsVisible = !asText;   // FFFFFFFF is a hex default
+        PasswordFormatHint.Text = asText
+            ? "A tag's password is 4 bytes, here as 4 typed characters. It is kept only while this tab is open."
+            : "A tag's password is 4 bytes, shown as 8 hex digits; a new NTAG/Ultralight's factory password is FFFFFFFF. It is kept only while this tab is open.";
+        PasswordEntry.Text = string.Empty;
+        ApplyPassword();
+    }
+
     private void OnPasswordChanged(object? sender, TextChangedEventArgs e) => ApplyPassword();
 
+    private bool HasTypedPassword => TagPassword.TryParse(PasswordEntry.Text, _passwordAsText, out _);
+
     private void ApplyPassword() =>
-        _nfc.SetManualPassword(TagPassword.TryParse(PasswordEntry.Text, out var pwd) ? pwd : null);
+        _nfc.SetManualPassword(TagPassword.TryParse(PasswordEntry.Text, _passwordAsText, out var pwd) ? pwd : null);
 
     private void OnPasswordDefault(object? sender, EventArgs e)
     {
@@ -202,7 +226,7 @@ public partial class NfcPage : ContentPage
 
         // Protected pages the read could not reach: offer the password, then the person holds the tag again.
         if (tag.NeedsPassword)
-            RevealPassword(TagPassword.TryParse(PasswordEntry.Text, out _)
+            RevealPassword(HasTypedPassword
                 ? "That password did not open this tag. Check it and hold the tag again, or try another."
                 : "This tag is password-protected. Enter its password, then hold the tag again to read the locked pages.");
         else
@@ -596,7 +620,7 @@ public partial class NfcPage : ContentPage
 
         // The write was refused because the tag is password-protected: offer the password, then hold it again.
         if (!ok && note.Contains("password-protected"))
-            RevealPassword(TagPassword.TryParse(PasswordEntry.Text, out _)
+            RevealPassword(HasTypedPassword
                 ? "That password did not open this tag for writing. Check it and hold the tag again."
                 : "This tag is password-protected. Enter its password, then hold the tag again to write it.");
 

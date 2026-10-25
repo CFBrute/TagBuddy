@@ -18,14 +18,20 @@
             <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"
                                  Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
                 <Label x:Name="PasswordInfo" FontSize="13" FontAttributes="Bold" />
+                <HorizontalStackLayout Spacing="6">
+                    <Button x:Name="HexModeButton" Text="Hex" Clicked="OnPasswordHexMode"
+                            Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
+                    <Button x:Name="TextModeButton" Text="Text" Clicked="OnPasswordTextMode"
+                            Padding="14,4" MinimumHeightRequest="34" FontSize="13" />
+                </HorizontalStackLayout>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <Entry x:Name="PasswordEntry" Placeholder="8 hex digits, e.g. FFFFFFFF" MaxLength="11"
                            TextChanged="OnPasswordChanged" />
-                    <Button Grid.Column="1" Text="FFFFFFFF" Clicked="OnPasswordDefault"
+                    <Button x:Name="PasswordDefaultButton" Grid.Column="1" Text="FFFFFFFF" Clicked="OnPasswordDefault"
                             BackgroundColor="#6B7280" TextColor="White" FontSize="12" Padding="10,4" />
                 </Grid>
-                <Label FontSize="12" TextColor="Gray"
-                       Text="A tag's password is 4 bytes (8 hex digits); a new NTAG/Ultralight's factory password is FFFFFFFF. It is kept only while this tab is open." />
+                <Label x:Name="PasswordFormatHint" FontSize="12" TextColor="Gray"
+                       Text="A tag's password is 4 bytes, shown as 8 hex digits; a new NTAG/Ultralight's factory password is FFFFFFFF. It is kept only while this tab is open." />
                 <Label FontSize="12" TextColor="#DC2626"
                        Text="Warning: some tags lock for good after a few wrong passwords. Only enter one you know." />
             </VerticalStackLayout>
