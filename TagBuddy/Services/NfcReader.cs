@@ -58,6 +58,13 @@ public sealed partial class NfcReader
     /// <summary>Sets (or clears, with null) the password the next read or write uses for a protected tag.</summary>
     public void SetManualPassword(byte[]? password) => _manualPassword = password is { Length: 4 } ? password : null;
 
+    /// <summary>The 6-byte MIFARE Classic key the person entered, tried before the public defaults, or null. A
+    /// Classic sector has no wrong-key lockout, so trying one does no harm.</summary>
+    private static byte[]? _manualKey;
+
+    /// <summary>Sets (or clears, with null) the MIFARE Classic key the next read tries before the default keys.</summary>
+    public void SetManualClassicKey(byte[]? key) => _manualKey = key is { Length: 6 } ? key : null;
+
     /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
     public static bool IsAmiiboDump(byte[] bytes) => Type2Memory.IsAmiiboDump(bytes);
 

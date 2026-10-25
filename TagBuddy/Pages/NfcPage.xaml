@@ -36,6 +36,16 @@
                        Text="Warning: some tags lock for good after a few wrong passwords. Only enter one you know." />
             </VerticalStackLayout>
 
+            <!-- MIFARE Classic sector key, shown only when some sectors stayed locked after the default keys. -->
+            <VerticalStackLayout x:Name="ClassicKeyPanel" Spacing="8" IsVisible="False"
+                                 Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                <Label Text="Some sectors use a custom key" FontSize="13" FontAttributes="Bold" />
+                <Entry x:Name="ClassicKeyEntry" Placeholder="12 hex digits, e.g. A0A1A2A3A4A5" MaxLength="17"
+                       TextChanged="OnClassicKeyChanged" />
+                <Label FontSize="12" TextColor="Gray"
+                       Text="A MIFARE Classic key is 6 bytes (12 hex digits). Enter one and hold the card again to open the sectors it unlocks. Trying a wrong key is safe: Classic cards have no wrong-key lockout. The key is kept only while this tab is open." />
+            </VerticalStackLayout>
+
             <!-- ===================== READ ===================== -->
             <VerticalStackLayout x:Name="ReadSection" Spacing="12">
 

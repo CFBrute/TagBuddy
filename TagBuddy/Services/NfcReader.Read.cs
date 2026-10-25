@@ -31,6 +31,7 @@ public sealed partial class NfcReader
         List<string>? memory = null;
         byte[]? rawMemory = null;
         bool needsPassword = false;
+        bool needsClassicKey = false;
         string? chipName = null;
         byte[]? ndefBytes = null;
         int? sak = null;
@@ -74,8 +75,8 @@ public sealed partial class NfcReader
                 isClassic = true;
                 details.Add(("Chip", $"MIFARE Classic {classic.Size * 8 / 1024}K, {classic.SectorCount} sectors"));
                 details.Add(("Card", "MIFARE Classic"));
-                // Try the public default keys and show whatever opens; a card with custom keys shows only its serial.
-                memory = ReadClassic(classic, details);
+                // Try the entered key and the public defaults; show whatever opens. Sectors with another custom key stay closed.
+                memory = ReadClassic(classic, details, out needsClassicKey);
             }
         }
 
@@ -188,14 +189,15 @@ public sealed partial class NfcReader
         if (rawMemory is not null && memory is { Count: > 0 })
             details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
 
-        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName, needsPassword);
+        return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName, needsPassword, needsClassicKey);
     }
 
     /// <summary>Opens as many sectors of a MIFARE Classic card as the public default keys allow and returns their
     /// blocks as "sector / block" lines, or null when nothing opened. Only the keys everyone knows are tried
     /// (<see cref="MifareClassicKeys"/>); a card with custom keys stays closed. Read-only.</summary>
-    private static List<string>? ReadClassic(MifareClassic classic, List<(string, string)> details)
+    private static List<string>? ReadClassic(MifareClassic classic, List<(string, string)> details, out bool anyLocked)
     {
+        anyLocked = false;
         try
         {
             classic.Connect();
@@ -209,6 +211,7 @@ public sealed partial class NfcReader
                 var key = AuthenticateClassicSector(classic, sector);
                 if (key is null)
                 {
+                    anyLocked = true;
                     lines.Add(MifareClassicKeys.LockedSector(sector));
                     continue;
                 }
@@ -246,10 +249,15 @@ public sealed partial class NfcReader
         }
     }
 
-    /// <summary>The first public key that opens a sector, as key A or key B, or null.</summary>
+    /// <summary>The first key that opens a sector, as key A or key B, or null. The key the person typed is tried
+    /// first, then the public defaults.</summary>
     private static (byte[] Key, char Slot, string Name)? AuthenticateClassicSector(MifareClassic classic, int sector)
     {
-        foreach (var (key, name) in MifareClassicKeys.Defaults)
+        var candidates = _manualKey is { } manual
+            ? MifareClassicKeys.Defaults.Prepend((manual, "entered")).ToList()
+            : MifareClassicKeys.Defaults;
+
+        foreach (var (key, name) in candidates)
         {
             try { if (classic.AuthenticateSectorWithKeyA(sector, key)) return (key, 'A', name); } catch { }
             try { if (classic.AuthenticateSectorWithKeyB(sector, key)) return (key, 'B', name); } catch { }

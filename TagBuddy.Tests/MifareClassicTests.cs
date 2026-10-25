@@ -43,6 +43,29 @@ public class MifareClassicTests
     }
 
     [Theory]
+    [InlineData("A0A1A2A3A4A5")]
+    [InlineData("a0a1a2a3a4a5")]
+    [InlineData("A0:A1:A2:A3:A4:A5")]
+    [InlineData("A0 A1 A2 A3 A4 A5")]
+    public void TryParseKey_reads_twelve_hex_digits(string text)
+    {
+        Assert.True(MifareClassicKeys.TryParseKey(text, out var key));
+        Assert.Equal(new byte[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }, key);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("A0A1A2A3A4")]      // 10 digits, too short
+    [InlineData("A0A1A2A3A4A5A6")]  // 14 digits, too long
+    [InlineData("A0A1A2A3A4AG")]    // not hex
+    public void TryParseKey_rejects_anything_but_six_bytes(string? text)
+    {
+        Assert.False(MifareClassicKeys.TryParseKey(text, out var key));
+        Assert.Empty(key);
+    }
+
+    [Theory]
     [InlineData(0, 16, "Secure item")]
     [InlineData(3, 16, "3 of 16 sectors")]
     [InlineData(16, 16, "All 16 sectors")]
