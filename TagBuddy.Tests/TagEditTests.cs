@@ -204,27 +204,65 @@ public class TagEditTests
     }
 
     [Fact]
-    public void Undo_takes_back_a_run_of_typing_and_redo_puts_it_back()
+    public void Undo_takes_back_one_keystroke_at_a_time_and_redo_puts_it_back()
     {
         var edit = TagEdit.Blank(Ntag213);
         At(edit, 4, 0, text: true);
         edit.TypeText("a");
-        edit.TypeText("b");                                      // the same run
-        At(edit, 10, 0, text: true);
-        edit.TypeText("c");                                      // a new run: the cursor was placed
+        edit.TypeText("b");
 
         Assert.True(edit.Undo());
-        Assert.Equal([4], edit.Changes.Keys);
-        Assert.Equal(edit.PositionOf(10, 0), edit.Cursor);
+        Assert.Null(edit.ValueAt(4, 1));
+        Assert.Equal((byte)'a', edit.ValueAt(4, 0));
+        Assert.Equal(edit.PositionOf(4, 1), edit.Cursor);       // the cursor goes back with it
         Assert.True(edit.Undo());
         Assert.Empty(edit.Changes);
         Assert.False(edit.Undo());
 
         Assert.True(edit.Redo());
-        Assert.Equal((byte)'b', edit.ValueAt(4, 1));
         Assert.True(edit.Redo());
-        Assert.Equal([4, 10], edit.Changes.Keys);
+        Assert.Equal((byte)'b', edit.ValueAt(4, 1));
         Assert.False(edit.CanRedo);
+    }
+
+    [Fact]
+    public void Each_hex_digit_and_backspace_is_its_own_step()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 0);
+        Hex(edit, "AB");
+        edit.Backspace();
+        edit.Undo();                                             // takes back the backspace
+        Assert.Equal((byte)0xAB, edit.ValueAt(5, 0));
+        edit.Undo();                                             // takes back the "B"
+        Assert.Equal((byte)0xA5, edit.ValueAt(5, 0));
+    }
+
+    [Fact]
+    public void A_row_or_everything_can_be_set_to_zeros_in_one_step()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        edit.Fill(0x00, 5);
+        Assert.Equal([5], edit.Changes.Keys);
+        Assert.Equal(new byte?[] { 0, 0, 0, 0 }, edit.Changes[5]);
+
+        edit.Fill(0x00);
+        Assert.Equal(36, edit.Changes.Count);                   // pages 4-39: page 4 held 04, so it changes too
+        Assert.All(edit.Segments, s => Assert.Equal((byte)0, edit.ValueAt(s, 0)));
+        edit.Undo();
+        Assert.Equal([5], edit.Changes.Keys);
+    }
+
+    [Fact]
+    public void Zeros_over_zeros_are_no_change_and_a_closed_row_is_left_alone()
+    {
+        var data = Enumerable.Range(0, 45).ToDictionary(p => p, _ => new byte[4]);
+        var edit = TagEdit.FromTag(new SegmentRead(Ntag213, data, new Dictionary<int, string> { [6] = "locked" }), "04");
+        edit.Fill(0x00);
+        Assert.Empty(edit.Changes);
+        edit.Fill(0xFF, 6);
+        Assert.Empty(edit.Changes);
+        Assert.False(edit.CanUndo);
     }
 
     [Fact]

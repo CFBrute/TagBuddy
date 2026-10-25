@@ -991,6 +991,7 @@ public partial class NfcPage : ContentPage
         SegmentUndoButton.IsEnabled = edit.CanUndo;
         SegmentRedoButton.IsEnabled = edit.CanRedo;
         SegmentRevertButton.IsEnabled = edit.Changes.Count > 0;
+        SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
         SegmentInput.Margin = new Thickness(0, SegmentGrid.CursorY, 0, 0);
 
         string noun = edit.Layout.Noun;
@@ -1000,7 +1001,8 @@ public partial class NfcPage : ContentPage
             (edit.FromRead
                 ? "The bytes are as the tag held them when it was read; only the ones you change are written."
                 : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
-            " Undo and Redo take back or redo a run of typing.";
+            $" \"{(noun == "page" ? "Page" : "Block")} to 00\" clears the cursor's {noun}, \"All to 00\" every {noun} shown. " +
+            "Undo and Redo go back or forward one keystroke at a time.";
     }
 
     /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
@@ -1064,6 +1066,21 @@ public partial class NfcPage : ContentPage
 
     private void OnSegmentUndo(object? sender, EventArgs e) { if (_edit?.Undo() == true) SegmentEdited(); }
     private void OnSegmentRedo(object? sender, EventArgs e) { if (_edit?.Redo() == true) SegmentEdited(); }
+
+    /// <summary>The cursor's page or block to 00 (one undo step; written like any other change).</summary>
+    private void OnSegmentZeroRow(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit) return;
+        edit.Fill(0x00, edit.At(edit.Cursor).Segment);
+        SegmentEdited();
+    }
+
+    /// <summary>Every writable page or block in the range to 00: clearing the tag, short of what is never written.</summary>
+    private void OnSegmentZeroAll(object? sender, EventArgs e)
+    {
+        _edit?.Fill(0x00);
+        SegmentEdited();
+    }
 
     private void OnSegmentRevert(object? sender, EventArgs e)
     {
