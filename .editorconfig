@@ -1,0 +1,6 @@
+# What editors write. Git normalises line endings on commit anyway (.gitattributes); this keeps Visual Studio
+# and other editors from arguing over them on a Windows machine.
+root = true
+
+[*]
+end_of_line = crlf
