@@ -75,7 +75,8 @@ public sealed class FrameDecoder
         var reader = new BarcodeReaderGeneric
         {
             AutoRotate = true,
-            Options = { TryHarder = tryHarder, TryInverted = tryInverted, PossibleFormats = Formats },
+            // ReturnCodabarStartEnd: keep a Codabar's A-D start and stop letters (see GrayDecoder).
+            Options = { TryHarder = tryHarder, TryInverted = tryInverted, PossibleFormats = Formats, ReturnCodabarStartEnd = true },
         };
         reader.ResultPointFound += _ => _points++;
         return reader;
