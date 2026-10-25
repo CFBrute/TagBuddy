@@ -6,6 +6,12 @@ namespace TagBuddy;
 /// "unreachable code" warnings.</summary>
 public static class Features
 {
+    /// <summary>Importing a MIFARE Classic key dictionary and running it against a card's locked sectors, with the
+    /// keys that opened a card remembered for next time. In both editions: the app tries only keys that are either
+    /// public defaults or supplied by the person (nothing is bundled), reads the person's own cards, and a Classic
+    /// sector has no wrong-key lockout, so this is the same kind of operation other Play Store tag tools offer.</summary>
+    public static readonly bool MifareKeyTools = true;
+
 #if PLAY_STORE
     public const string Edition = "Play Store";
     public static readonly bool Amiibo = false;

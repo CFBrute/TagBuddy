@@ -76,10 +76,19 @@ public sealed partial class NfcReader
     private static readonly HashSet<string> _defaultWorks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _defaultFailed = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Whether to try the factory default on this tag: it is known to open it, or the setting is on and
-    /// it is not already known to fail on this tag.</summary>
+    /// <summary>Armed by the "try the default on the next read" button: one forced factory-default attempt even
+    /// when the setting is off and even if it failed before. The read path still skips it unless the tag confirms
+    /// no wrong-attempt lock-out. Cleared after the read that uses it.</summary>
+    private static bool _tryDefaultOnce;
+
+    /// <summary>Arms (or clears) a single factory-default attempt on the next read, regardless of the setting.</summary>
+    public void SetTryDefaultOnce(bool on) => _tryDefaultOnce = on;
+
+    /// <summary>Whether to try the factory default on this tag: it is known to open it, the one-shot is armed, or
+    /// the setting is on and it is not already known to fail on this tag.</summary>
     private static bool ShouldTryDefault(string serial) =>
-        _defaultWorks.Contains(serial) || (AppSettings.AutoTryDefaultPassword && !_defaultFailed.Contains(serial));
+        _defaultWorks.Contains(serial) || _tryDefaultOnce
+        || (AppSettings.AutoTryDefaultPassword && !_defaultFailed.Contains(serial));
 
     private static void RecordDefault(string serial, bool worked)
     {
@@ -99,6 +108,29 @@ public sealed partial class NfcReader
 
     /// <summary>Sets (or clears, with null) the MIFARE Classic key the next read tries before the default keys.</summary>
     public void SetManualClassicKey(byte[]? key) => _manualKey = key is { Length: 6 } ? key : null;
+
+    /// <summary>Keys found to open this or other cards, tried right after the built-in defaults on every read.</summary>
+    private static IReadOnlyList<byte[]> _rememberedClassicKeys = [];
+
+    /// <summary>A large imported dictionary, tried only when <see cref="_tryAllClassicKeys"/> is set.</summary>
+    private static IReadOnlyList<byte[]> _dictionaryClassicKeys = [];
+
+    /// <summary>Whether the next read runs the whole imported dictionary against locked sectors (a few thousand
+    /// safe attempts, a few seconds). One read's choice; the page turns it off again afterwards.</summary>
+    private static bool _tryAllClassicKeys;
+
+    /// <summary>Which keys the last read found to open sectors: (sector, 12-hex key). The page remembers these for
+    /// the card so it opens quickly next time.</summary>
+    public static IReadOnlyList<(int Sector, string Key)> ClassicKeysFound { get; private set; } = [];
+
+    /// <summary>Sets the extra MIFARE Classic keys a read tries beyond the built-in defaults: <paramref name="remembered"/>
+    /// always (small), and <paramref name="dictionary"/> only when <paramref name="tryAll"/> is set (large).</summary>
+    public void SetClassicKeySearch(IReadOnlyList<byte[]> remembered, IReadOnlyList<byte[]> dictionary, bool tryAll)
+    {
+        _rememberedClassicKeys = remembered;
+        _dictionaryClassicKeys = dictionary;
+        _tryAllClassicKeys = tryAll;
+    }
 
     /// <summary>A Type 2 dump with the Nintendo capability container and NTAG215-sized content.</summary>
     public static bool IsAmiiboDump(byte[] bytes) => Type2Memory.IsAmiiboDump(bytes);
