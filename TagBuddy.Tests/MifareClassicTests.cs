@@ -71,4 +71,33 @@ public class MifareClassicTests
     [InlineData(16, 16, "All 16 sectors")]
     public void The_access_summary_matches_how_many_opened(int opened, int total, string expected) =>
         Assert.Contains(expected, MifareClassicKeys.AccessSummary(opened, total));
+
+    [Fact]
+    public void Factory_access_bits_mean_key_A_does_everything()
+    {
+        byte[] trailer = [0, 0, 0, 0, 0, 0, 0xFF, 0x07, 0x80, 0x69, 0, 0, 0, 0, 0, 0];
+        var rules = MifareClassicKeys.DescribeAccess(trailer);
+        Assert.NotNull(rules);
+        var line = Assert.Single(rules);
+        Assert.StartsWith("keys: A changes both keys and the rules", line);
+    }
+
+    [Fact]
+    public void A_typical_secured_sector_is_spelled_out()
+    {
+        // 78 77 88: data blocks "read A or B, write B", trailer "B changes keys and rules".
+        byte[] trailer = [0, 0, 0, 0, 0, 0, 0x78, 0x77, 0x88, 0x69, 0, 0, 0, 0, 0, 0];
+        var rules = MifareClassicKeys.DescribeAccess(trailer)!;
+        Assert.Equal(4, rules.Count);
+        Assert.Equal("block 0: read with A or B, write with B", rules[0]);
+        Assert.Equal("keys: B changes both keys and the rules", rules[3]);
+    }
+
+    [Fact]
+    public void Corrupt_access_bits_are_flagged()
+    {
+        byte[] trailer = [0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0x80, 0x69, 0, 0, 0, 0, 0, 0];
+        Assert.Null(MifareClassicKeys.DescribeAccess(trailer));
+        Assert.Contains("corrupt", Assert.Single(MifareClassicKeys.AccessLines(trailer)));
+    }
 }

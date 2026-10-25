@@ -283,6 +283,7 @@ public sealed partial class NfcReader
                         {
                             lines.Add(MifareClassicKeys.FormatBlock(block, data[..16]));
                             blocks[block] = data[..16];
+                            if (b == count - 1) lines.AddRange(MifareClassicKeys.AccessLines(data[..16]));   // the trailer: the sector's rules
                         }
                     }
                     catch

@@ -50,6 +50,66 @@ public static class MifareClassicKeys
     public static byte[] TrailerFor(byte[] key, byte[] current) =>
         [.. key, .. (current.Length >= 10 ? current[6..10] : [.. TransportAccessBits, (byte)0x69]), .. key];
 
+    /// <summary>What a sector's access bits allow, in words, one line per rule that differs from "key A does
+    /// everything". The three bytes (6-8 of the trailer) hold, for each of the four blocks, three bits C1 C2 C3, each
+    /// stored twice (plain and inverted) as a check. Blocks 0-2 are the data blocks (on a 16-block sector, each of the
+    /// three bits covers five blocks), block 3 is the trailer: the keys and these very bits.
+    /// Returns null when the bits are corrupt (plain and inverted halves disagree): such a sector is dead for good.</summary>
+    public static IReadOnlyList<string>? DescribeAccess(byte[] trailer)
+    {
+        if (trailer.Length < 9) return [];
+        byte b6 = trailer[6], b7 = trailer[7], b8 = trailer[8];
+        // Plain bits: C1 in b7 high nibble, C2 in b8 low nibble, C3 in b8 high nibble; inverted in b6 and b7 low.
+        int c1 = b7 >> 4, c2 = b8 & 0x0F, c3 = b8 >> 4;
+        int nc1 = b6 & 0x0F, nc2 = b6 >> 4, nc3 = b7 & 0x0F;
+        if (((c1 ^ nc1) & 0x0F) != 0x0F || ((c2 ^ nc2) & 0x0F) != 0x0F || ((c3 ^ nc3) & 0x0F) != 0x0F) return null;
+
+        var lines = new List<string>();
+        for (int block = 0; block < 3; block++)
+        {
+            int bits = (((c1 >> block) & 1) << 2) | (((c2 >> block) & 1) << 1) | ((c3 >> block) & 1);
+            var rule = DataRule(bits);
+            if (bits != 0) lines.Add($"block {block}: {rule}");
+        }
+        int t = (((c1 >> 3) & 1) << 2) | (((c2 >> 3) & 1) << 1) | ((c3 >> 3) & 1);
+        lines.Add("keys: " + TrailerRule(t));
+        return lines;
+    }
+
+    /// <summary>The access-bit combination's meaning for a data block.</summary>
+    private static string DataRule(int bits) => bits switch
+    {
+        0b000 => "read and write with A or B",
+        0b010 => "read with A or B, never written",
+        0b100 => "read with A or B, write with B",
+        0b110 => "read with A or B, write and increment with B, decrement with A or B (value block)",
+        0b001 => "read with A or B, decrement with A or B, never written (value block)",
+        0b011 => "read and write with B only",
+        0b101 => "read with B only, never written",
+        _ => "never read or written",
+    };
+
+    /// <summary>The access-bit combination's meaning for the trailer: who may change the keys and the rules.</summary>
+    private static string TrailerRule(int bits) => bits switch
+    {
+        0b000 => "A changes both keys; the rules can never be changed; B is plain data",
+        0b010 => "keys and rules can never be changed; B is plain data",
+        0b100 => "B changes both keys; the rules can never be changed",
+        0b110 => "keys and rules can never be changed",
+        0b001 => "A changes both keys and the rules; B is plain data (factory setting)",
+        0b011 => "B changes both keys and the rules",
+        0b101 => "B changes the rules; the keys can never be changed",
+        _ => "keys and rules can never be changed",
+    };
+
+    /// <summary>The access rules under a sector header: "  rules: ..." lines, or a warning when the bits are corrupt.</summary>
+    public static IEnumerable<string> AccessLines(byte[] trailer)
+    {
+        var rules = DescribeAccess(trailer);
+        if (rules is null) return ["  rules: corrupt access bits (plain and inverted halves disagree); this sector may be unusable"];
+        return rules.Select(r => "  rules: " + r);
+    }
+
     /// <summary>Whether a trailer's access bits are the transport ones (a sector whose rules were never changed).</summary>
     public static bool HasTransportAccessBits(byte[] trailer) =>
         trailer.Length >= 9 && trailer.AsSpan(6, 3).SequenceEqual(TransportAccessBits);
