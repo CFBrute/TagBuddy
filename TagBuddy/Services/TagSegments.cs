@@ -218,6 +218,7 @@ public sealed class TagEdit
         FromRead = fromRead;
         From = layout.FirstWritable;
         To = layout.Count > 0 || layout.Family != TagFamily.Iso15693 ? layout.LastWritable : layout.FirstWritable + 15;
+        RecomputeSegments();
     }
 
     /// <summary>An edit of the tag just read, expecting that same tag (its serial and chip).</summary>
@@ -234,12 +235,23 @@ public sealed class TagEdit
     public string? WhyNotWritable(int segment) =>
         Layout.WhyNotWritable(segment) ?? (_blocked.TryGetValue(segment, out var why) ? why : null);
 
-    /// <summary>The writable segments in the range, in order: together they make the run the cursor moves over.</summary>
-    public IReadOnlyList<int> Segments =>
-        Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+    /// <summary>The writable segments in the range, in order: together they make the run the cursor moves over. Cached
+    /// because the drawing, cursor maths and write all read it many times; it changes only when the range does, so it
+    /// is rebuilt in the constructor and in <see cref="SetRange"/>, not on every read (that made the editor crawl).</summary>
+    private List<int> _segments = [];
+    private Dictionary<int, int> _segmentIndex = [];
+
+    public IReadOnlyList<int> Segments => _segments;
+
+    private void RecomputeSegments()
+    {
+        _segments = Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+        _segmentIndex = new Dictionary<int, int>(_segments.Count);
+        for (int i = 0; i < _segments.Count; i++) _segmentIndex[_segments[i]] = i;
+    }
 
     /// <summary>How many writable bytes the range has.</summary>
-    public int Length => Segments.Count * Layout.SegmentSize;
+    public int Length => _segments.Count * Layout.SegmentSize;
 
     /// <summary>Limits the edit to segments <paramref name="from"/>-<paramref name="to"/>. Returns why not, or null.</summary>
     public string? SetRange(int from, int to)
@@ -250,6 +262,7 @@ public sealed class TagEdit
             return $"{Capital(Layout.Noun)}s {first}-{last} can be edited on {(Layout.Family == TagFamily.Iso15693 && Layout.Count == 0 ? "a label" : "this tag")}.";
         From = from;
         To = to;
+        RecomputeSegments();
         Place(0, InText);
         return null;
     }
@@ -273,18 +286,14 @@ public sealed class TagEdit
     /// <summary>The segment and byte at a position of the run.</summary>
     public (int Segment, int Index) At(int position)
     {
-        var segments = Segments;
         int size = Layout.SegmentSize;
-        position = Math.Clamp(position, 0, Math.Max(0, segments.Count * size - 1));
-        return (segments.Count == 0 ? From : segments[position / size], position % size);
+        position = Math.Clamp(position, 0, Math.Max(0, _segments.Count * size - 1));
+        return (_segments.Count == 0 ? From : _segments[position / size], position % size);
     }
 
     /// <summary>The run position of a byte, or -1 when its segment is not writable or not in the range.</summary>
-    public int PositionOf(int segment, int index)
-    {
-        int k = Segments.ToList().IndexOf(segment);
-        return k < 0 ? -1 : k * Layout.SegmentSize + Math.Clamp(index, 0, Layout.SegmentSize - 1);
-    }
+    public int PositionOf(int segment, int index) =>
+        _segmentIndex.TryGetValue(segment, out var k) ? k * Layout.SegmentSize + Math.Clamp(index, 0, Layout.SegmentSize - 1) : -1;
 
     /// <summary>The segments to write, with the typed bytes (null for those kept as the tag has them).</summary>
     public IReadOnlyDictionary<int, byte?[]> Changes =>
