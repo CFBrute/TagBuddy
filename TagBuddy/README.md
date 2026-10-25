@@ -17,7 +17,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   It follows the content until edited; position, size, distance and max width are ratios of the code.
 - **NFC** tab, Read: hold a tag or card to the phone. Shows its serial number, radio/chip type and NDEF capacity,
   decodes NDEF records (text, links, MIME, external) and offers the same actions as a scanned code for the content.
-  For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII).
+  For NTAG/Ultralight tags it also dumps the full readable memory (hex and ASCII). For MIFARE Classic cards it
+  tries the public default keys (`Services/MifareClassicKeys.cs`) and shows the sectors that open, hex and ASCII;
+  a card secured with custom keys stays closed and shows only its serial. It is read-only and never recovers an
+  unknown key, so it opens blank, test and unsecured cards, not secured ones.
 - **NFC** tab, Write: type a link, text or vCard (or load one from Saved) and hold a writable tag to write it as NDEF.
   **Private text** encrypts the text with a passphrase first (`Services/SealedText.cs`): PBKDF2-SHA256 with a
   random salt for the key, AES-256-GCM for the text, stored as an NDEF record of type

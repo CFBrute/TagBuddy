@@ -76,16 +76,16 @@
                                          Padding="12"
                                          BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
 
-                    <!-- Full readable memory of a Type 2 tag (NTAG/Ultralight/Amiibo) -->
+                    <!-- Readable memory: every page of a Type 2 tag, or the opened sectors of a MIFARE Classic card -->
                     <VerticalStackLayout x:Name="MemoryPanel" Spacing="8" IsVisible="False">
-                        <Label Text="Readable memory"
+                        <Label x:Name="MemoryTitle" Text="Readable memory"
                                FontAttributes="Bold"
                                HorizontalTextAlignment="Center" />
-                        <Label Text="Every page of this tag's memory. Save it as a binary dump to keep a backup that can be written back to the tag later."
+                        <Label x:Name="MemoryDescription" Text="Every page of this tag's memory. Save it as a binary dump to keep a backup that can be written back to the tag later."
                                FontSize="12" TextColor="Gray"
                                HorizontalTextAlignment="Center" />
 
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <Grid x:Name="DumpButtons" ColumnDefinitions="*,*" ColumnSpacing="10">
                             <Button Grid.Column="0" Text="Save dump" Clicked="OnSaveDump" />
                             <Button Grid.Column="1" Text="Share .bin file" Clicked="OnShareDump"
                                     BackgroundColor="#6B7280" TextColor="White" />

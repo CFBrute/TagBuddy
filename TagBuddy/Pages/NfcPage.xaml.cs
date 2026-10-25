@@ -218,8 +218,28 @@ public partial class NfcPage : ContentPage
             AddDetail("Private text", $"{sealedBytes.Length - SealedText.Overhead} bytes, encrypted with a passphrase (AES-256-GCM)");
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
-        if (tag.RawMemory is { Length: > 0 } memory) MemoryMapView.Show(MemoryOverview, MemoryLabel, memory, tag.ChipName);
-        else MemoryLabel.Text = string.Empty;
+        if (tag.RawMemory is { Length: > 0 } memory)
+        {
+            // Type 2 tag: the full page memory, shown with its map, saveable as a backup.
+            MemoryTitle.Text = "Readable memory";
+            MemoryDescription.Text = "Every page of this tag's memory. Save it as a binary dump to keep a backup that can be written back to the tag later.";
+            DumpButtons.IsVisible = true;
+            MemoryOverview.IsVisible = true;
+            MemoryMapView.Show(MemoryOverview, MemoryLabel, memory, tag.ChipName);
+        }
+        else if (tag.HasMemoryDump)
+        {
+            // MIFARE Classic: the sectors the common default keys opened. Not a backup, so no dump buttons.
+            MemoryTitle.Text = "Card data";
+            MemoryDescription.Text = "The sectors that opened with common default keys. A card secured with custom keys shows only its serial number.";
+            DumpButtons.IsVisible = false;
+            MemoryOverview.IsVisible = false;
+            MemoryLabel.Text = string.Join("\n", tag.MemoryDump!);
+        }
+        else
+        {
+            MemoryLabel.Text = string.Empty;
+        }
     }
 
     /// <summary>The tag's content, or what it is when there is none to show: the private text once unlocked.</summary>

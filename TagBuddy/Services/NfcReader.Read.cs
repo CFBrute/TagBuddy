@@ -59,8 +59,9 @@ public sealed partial class NfcReader
             {
                 isClassic = true;
                 details.Add(("Chip", $"MIFARE Classic {classic.Size * 8 / 1024}K, {classic.SectorCount} sectors"));
-                details.Add(("Card", "Access card (MIFARE Classic)"));
-                details.Add(("Access", "Secure item: data sectors are key-protected; only the serial number is readable"));
+                details.Add(("Card", "MIFARE Classic"));
+                // Try the public default keys and show whatever opens; a card with custom keys shows only its serial.
+                memory = ReadClassic(classic, details);
             }
         }
 
@@ -152,10 +153,76 @@ public sealed partial class NfcReader
         if (records.Count == 0 && !details.Any(d => d.Item1 is "Access" or "Card" or "Data"))
             details.Add(("Content", "No NDEF content found on this tag"));
 
-        if (memory is { Count: > 0 })
+        if (rawMemory is not null && memory is { Count: > 0 })
             details.Add(("Memory", $"{memory.Count} pages readable ({memory.Count * 4} bytes)"));
 
         return new NfcTagInfo(ToHex(tag.GetId()), techs, details, records, memory, rawMemory, chipName);
+    }
+
+    /// <summary>Opens as many sectors of a MIFARE Classic card as the public default keys allow and returns their
+    /// blocks as "sector / block" lines, or null when nothing opened. Only the keys everyone knows are tried
+    /// (<see cref="MifareClassicKeys"/>); a card with custom keys stays closed. Read-only.</summary>
+    private static List<string>? ReadClassic(MifareClassic classic, List<(string, string)> details)
+    {
+        try
+        {
+            classic.Connect();
+            classic.Timeout = 1000;
+            int sectors = classic.SectorCount;
+            var lines = new List<string>();
+            int opened = 0;
+
+            for (int sector = 0; sector < sectors; sector++)
+            {
+                var key = AuthenticateClassicSector(classic, sector);
+                if (key is null)
+                {
+                    lines.Add(MifareClassicKeys.LockedSector(sector));
+                    continue;
+                }
+
+                opened++;
+                lines.Add(MifareClassicKeys.SectorHeader(sector, key.Value.Key, key.Value.Slot, key.Value.Name));
+                int first = classic.SectorToBlock(sector);
+                int count = classic.GetBlockCountInSector(sector);
+                for (int b = 0; b < count; b++)
+                {
+                    int block = first + b;
+                    try
+                    {
+                        var data = classic.ReadBlock(block);
+                        if (data is { Length: >= 16 }) lines.Add(MifareClassicKeys.FormatBlock(block, data[..16]));
+                    }
+                    catch
+                    {
+                        lines.Add($"  {block:D3}: could not be read");
+                    }
+                }
+            }
+
+            details.Add(("Access", MifareClassicKeys.AccessSummary(opened, sectors)));
+            return opened > 0 ? lines : null;
+        }
+        catch (Exception ex)
+        {
+            details.Add(("Access", "Secure item: data sectors are key-protected. (" + ex.Message + ")"));
+            return null;
+        }
+        finally
+        {
+            try { classic.Close(); } catch { }
+        }
+    }
+
+    /// <summary>The first public key that opens a sector, as key A or key B, or null.</summary>
+    private static (byte[] Key, char Slot, string Name)? AuthenticateClassicSector(MifareClassic classic, int sector)
+    {
+        foreach (var (key, name) in MifareClassicKeys.Defaults)
+        {
+            try { if (classic.AuthenticateSectorWithKeyA(sector, key)) return (key, 'A', name); } catch { }
+            try { if (classic.AuthenticateSectorWithKeyB(sector, key)) return (key, 'B', name); } catch { }
+        }
+        return null;
     }
 
     /// <summary>Adds what the page layout reveals: Amiibo content, lock bits, password protection.</summary>
