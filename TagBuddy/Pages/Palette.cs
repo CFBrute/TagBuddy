@@ -20,4 +20,15 @@ internal static class Palette
         button.BackgroundColor = selected ? Accent : Neutral;
         button.TextColor = selected ? AccentText : Colors.White;
     }
+
+    /// <summary>Styles a tab the way the QR/Barcode top tabs look: no filled background, the text and an underline in
+    /// the accent colour when selected, grey text and no underline when not.</summary>
+    public static void SelectTab(Button button, BoxView underline, bool selected)
+    {
+        button.BackgroundColor = Colors.Transparent;
+        button.BorderWidth = 0;
+        button.TextColor = selected ? Accent : Neutral;
+        button.FontAttributes = selected ? FontAttributes.Bold : FontAttributes.None;
+        underline.Color = selected ? Accent : Colors.Transparent;
+    }
 }

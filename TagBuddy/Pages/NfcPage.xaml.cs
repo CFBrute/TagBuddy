@@ -100,9 +100,17 @@ public partial class NfcPage : ContentPage
     }
 
     /// <summary>Something arrived from Saved: switch to write mode and arm it.</summary>
-    protected override async void OnNavigatedTo(NavigatedToEventArgs args)
+    protected override void OnNavigatedTo(NavigatedToEventArgs args)
     {
         base.OnNavigatedTo(args);
+        // Handed over from another tab (a saved read to show or edit, a dump or text to write): apply it once the page
+        // has appeared and laid out. Doing it straight here showed nothing the first time a saved tag was opened after
+        // launch — it rendered only when opened a second time — because the view was built before its first layout.
+        Dispatcher.Dispatch(async () => await ApplyIncomingAsync());
+    }
+
+    private async Task ApplyIncomingAsync()
+    {
         try
         {
             if (IncomingText is { Length: > 0 } text)
@@ -386,8 +394,8 @@ public partial class NfcPage : ContentPage
         ReadSection.IsVisible = !write;
         WriteSection.IsVisible = write;
 
-        Palette.Select(ReadModeButton, !write);
-        Palette.Select(WriteModeButton, write);
+        Palette.SelectTab(ReadModeButton, ReadUnderline, !write);
+        Palette.SelectTab(WriteModeButton, WriteUnderline, write);
 
         if (write) ArmWrite();
         else _nfc.Disarm();
@@ -1122,6 +1130,7 @@ public partial class NfcPage : ContentPage
                      "written if it differs from the bytes per block here. Lock commands are never sent.",
             };
             _idError = _rangeError = _sizeError = null;
+            SelectSegmentTab(sectors: false);   // always open on the byte grid
             RenderSegments();
         }
         finally { _renderingSegments = false; }
@@ -1148,6 +1157,23 @@ public partial class NfcPage : ContentPage
         SegmentRedoButton.IsEnabled = edit.CanRedo;
         SegmentRevertButton.IsEnabled = edit.HasChanges;
         SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
+
+        // Sector keys & rules live on their own tab for a MIFARE Classic card; other tags have no sectors, so the
+        // tab bar is hidden and only the grid shows.
+        bool classic = edit.Layout.Family == TagFamily.Classic;
+        SegmentTabBar.IsVisible = classic;
+        if (!classic) { EditTab.IsVisible = true; SectorsTab.IsVisible = false; }
+
+        // Block 0 (UID) editing: shown only for a read MIFARE Classic card; the switch reflects whether it is unlocked.
+        BlockZeroPanel.IsVisible = edit.CanEditBlockZero;
+        if (BlockZeroSwitch.IsToggled != edit.AllowBlockZero)
+        {
+            bool wasRendering = _renderingSegments;
+            _renderingSegments = true;
+            BlockZeroSwitch.IsToggled = edit.AllowBlockZero;
+            _renderingSegments = wasRendering;
+        }
+
         UpdateSectorKeyPanel();
         // The hidden input follows the cursor, across as well as down: Android scrolls to the view with the keyboard,
         // so an input left at the far left pulled the grid back to its start on every keystroke and tap.
@@ -1164,6 +1190,18 @@ public partial class NfcPage : ContentPage
             $" \"{(noun == "page" ? "Page" : "Block")} to 00\" clears the cursor's {noun}, \"All to 00\" every {noun} shown. " +
             "Undo and Redo go back or forward one keystroke at a time; \"Reset byte\" puts the byte under the cursor back as the tag had it and steps left, " +
             "so it walks back over a change wherever the cursor is put.";
+    }
+
+    private void OnEditTabSelected(object? sender, EventArgs e) => SelectSegmentTab(sectors: false);
+    private void OnSectorsTabSelected(object? sender, EventArgs e) => SelectSegmentTab(sectors: true);
+
+    /// <summary>Switches between the Edit tab (the byte grid) and the Sector keys &amp; rules tab.</summary>
+    private void SelectSegmentTab(bool sectors)
+    {
+        EditTab.IsVisible = !sectors;
+        SectorsTab.IsVisible = sectors;
+        Palette.SelectTab(EditTabButton, EditUnderline, !sectors);
+        Palette.SelectTab(SectorsTabButton, SectorsUnderline, sectors);
     }
 
     /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
@@ -1256,52 +1294,119 @@ public partial class NfcPage : ContentPage
 
     /// <summary>Shows the sector box for the cursor's sector when its key is known: the new key, the rules of its blocks
     /// and of its keys (as read, or as chosen), and every sector with a change waiting.</summary>
+    private static int DataRuleIndex(int bits) => MifareClassicKeys.DataRules.ToList().FindIndex(r => r.Bits == bits);
+
     private void UpdateSectorKeyPanel()
     {
         if (_edit is not { Layout.Family: TagFamily.Classic, FromRead: true, Length: > 0 } edit)
         {
-            SectorKeyPanel.IsVisible = false;
+            SectorChoosePanel.IsVisible = AllSectorsPanel.IsVisible = SectorKeyPanel.IsVisible = SectorsEmptyLabel.IsVisible = false;
             return;
         }
+
+        var changeable = edit.ChangeableSectors.ToList();
         int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
         bool can = edit.CanChangeKey(sector);
-        SectorKeyPanel.IsVisible = can || edit.Sectors.Count > 0;
-        if (!SectorKeyPanel.IsVisible) return;
 
         _renderingSegments = true;
         try
         {
-            SectorKeyTitle.Text = can ? $"Sector {sector}: key and rules" : $"Sector {sector} did not open, so it cannot be changed";
-            SectorKeyEntry.IsVisible = can;
-            SectorKeyHint.IsVisible = can;
-            SectorRulesPanel.IsVisible = can;
-            var change = edit.SectorChangeFor(sector);
-            var pending = change?.Key;
-            var shown = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var typed) ? typed : null;
-            if (pending is null ? shown is not null || !string.IsNullOrEmpty(SectorKeyEntry.Text) : shown is null || !shown.AsSpan().SequenceEqual(pending))
-                SectorKeyEntry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+            // The sector chooser and the "all sectors" action show whenever any sector can be changed.
+            SectorChoosePanel.IsVisible = AllSectorsPanel.IsVisible = changeable.Count > 0;
+            SectorsEmptyLabel.IsVisible = changeable.Count == 0;
+            if (SectorPicker.ItemsSource is not List<string> items || items.Count != changeable.Count)
+                SectorPicker.ItemsSource = changeable.Select(s => $"Sector {s}").ToList();
+            SectorPicker.SelectedIndex = changeable.IndexOf(sector);
+            if (AllBlocksPicker.ItemsSource is null) AllBlocksPicker.ItemsSource = DataRuleItems;
+            if (AllSectorsPicker.ItemsSource is null) { AllSectorsPicker.ItemsSource = DataRuleItems; AllSectorsPicker.Title = "Set every sector's data blocks to…"; }
 
-            if (can)
+            SectorKeyPanel.IsVisible = can || edit.Sectors.Count > 0;
+            if (SectorKeyPanel.IsVisible)
             {
-                var rules = change?.Rules ?? edit.CurrentRules(sector);
-                bool wide = sector >= 32;
-                Picker[] pickers = [DataRule0Picker, DataRule1Picker, DataRule2Picker];
-                Label[] labels = [DataRule0Label, DataRule1Label, DataRule2Label];
-                for (int g = 0; g < 3; g++)
+                SectorKeyTitle.Text = can ? $"Sector {sector}: key and rules" : $"Sector {sector} did not open, so it cannot be changed";
+                SectorKeyEntry.IsVisible = can;
+                SectorKeyHint.IsVisible = can;
+                SectorKeyAPanel.IsVisible = can;
+                SectorRulesPanel.IsVisible = can;
+                var change = edit.SectorChangeFor(sector);
+                var pending = change?.Key;
+                var shown = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var typed) ? typed : null;
+                if (pending is null ? shown is not null || !string.IsNullOrEmpty(SectorKeyEntry.Text) : shown is null || !shown.AsSpan().SequenceEqual(pending))
+                    SectorKeyEntry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+
+                var pendingA = change?.KeyAData;
+                var shownA = MifareClassicKeys.TryParseKey(SectorKeyAEntry.Text, out var typedA) ? typedA : null;
+                if (pendingA is null ? shownA is not null || !string.IsNullOrEmpty(SectorKeyAEntry.Text) : shownA is null || !shownA.AsSpan().SequenceEqual(pendingA))
+                    SectorKeyAEntry.Text = pendingA is null ? string.Empty : MifareClassicKeys.KeyHex(pendingA);
+
+                if (can)
                 {
-                    labels[g].Text = wide ? $"Blocks {g * 5}-{g * 5 + 4} of the sector" : $"Block {g} of the sector";
-                    if (pickers[g].ItemsSource is null) pickers[g].ItemsSource = DataRuleItems;
-                    pickers[g].SelectedIndex = rules is null ? -1 : MifareClassicKeys.DataRules.ToList().FindIndex(r => r.Bits == rules.Data[g]);
+                    var rules = change?.Rules ?? edit.CurrentRules(sector);
+                    bool wide = sector >= 32;
+                    Picker[] pickers = [DataRule0Picker, DataRule1Picker, DataRule2Picker];
+                    Label[] labels = [DataRule0Label, DataRule1Label, DataRule2Label];
+                    for (int g = 0; g < 3; g++)
+                    {
+                        labels[g].Text = wide ? $"Blocks {g * 5}-{g * 5 + 4} of the sector" : $"Block {g} of the sector";
+                        if (pickers[g].ItemsSource is null) pickers[g].ItemsSource = DataRuleItems;
+                        pickers[g].SelectedIndex = rules is null ? -1 : DataRuleIndex(rules.Data[g]);
+                    }
+                    // "All data blocks" shows the common rule when the three match, otherwise nothing.
+                    AllBlocksPicker.SelectedIndex = rules is not null && rules.Data0 == rules.Data1 && rules.Data1 == rules.Data2
+                        ? DataRuleIndex(rules.Data0) : -1;
+                    if (TrailerRulePicker.ItemsSource is null) TrailerRulePicker.ItemsSource = TrailerRuleItems;
+                    TrailerRulePicker.SelectedIndex = rules is null ? -1 : MifareClassicKeys.TrailerRules.ToList().FindIndex(r => r.Bits == rules.Trailer);
+                    RulesUnknownLabel.IsVisible = rules is null;
+                    PermanentWarning.IsVisible = change?.Rules?.IsPermanent == true;
                 }
-                if (TrailerRulePicker.ItemsSource is null) TrailerRulePicker.ItemsSource = TrailerRuleItems;
-                TrailerRulePicker.SelectedIndex = rules is null ? -1 : MifareClassicKeys.TrailerRules.ToList().FindIndex(r => r.Bits == rules.Trailer);
-                RulesUnknownLabel.IsVisible = rules is null;
-                PermanentWarning.IsVisible = change?.Rules?.IsPermanent == true;
             }
         }
         finally { _renderingSegments = false; }
 
         UpdateSectorChangeList(edit);
+    }
+
+    /// <summary>Picked another sector in the Sectors tab: move the cursor to its first editable block, so the panel
+    /// (which follows the cursor) shows that sector.</summary>
+    private void OnSectorPicked(object? sender, EventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit) return;
+        var changeable = edit.ChangeableSectors.ToList();
+        if (SectorPicker.SelectedIndex < 0 || SectorPicker.SelectedIndex >= changeable.Count) return;
+        int sector = changeable[SectorPicker.SelectedIndex];
+        int block = edit.Segments.Where(b => MifareClassicKeys.SectorOf(b) == sector).DefaultIfEmpty(-1).First();
+        if (block < 0) return;
+        edit.Place(edit.PositionOf(block, 0), edit.InText);
+        SegmentEdited();
+    }
+
+    /// <summary>One choice that sets all three data blocks of the cursor's sector to the same rule.</summary>
+    private void OnAllBlocksRuleChanged(object? sender, EventArgs e)
+    {
+        if (_renderingSegments || _edit is not { Length: > 0 } edit || AllBlocksPicker.SelectedIndex < 0) return;
+        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
+        edit.SetAllDataRules(sector, MifareClassicKeys.DataRules[AllBlocksPicker.SelectedIndex].Bits);
+        UpdateSectorKeyPanel();
+        ArmWrite();
+    }
+
+    /// <summary>One choice that sets the same data-block rule on every sector that opened. Confirmed first; the picker
+    /// is an action, not a kept choice, so it resets afterwards.</summary>
+    private async void OnAllSectorsRuleChanged(object? sender, EventArgs e)
+    {
+        if (_renderingSegments || _edit is not { Length: > 0 } edit || AllSectorsPicker.SelectedIndex < 0) return;
+        var rule = MifareClassicKeys.DataRules[AllSectorsPicker.SelectedIndex];
+        int count = edit.ChangeableSectors.Count;
+        bool sure = await DisplayAlertAsync("Set every sector?",
+            $"Set all data blocks of every opened sector ({count}) to \"{rule.Text}\"? Each sector's keys and trailer rule " +
+            "stay as they are, and nothing is written until you hold the tag.", "Set all", "Cancel");
+        _renderingSegments = true;
+        AllSectorsPicker.SelectedIndex = -1;
+        _renderingSegments = false;
+        if (!sure) return;
+        edit.SetAllSectorsDataRules(rule.Bits);
+        UpdateSectorKeyPanel();
+        ArmWrite();
     }
 
     private void UpdateSectorChangeList(TagEdit edit)
@@ -1312,6 +1417,7 @@ public partial class NfcPage : ContentPage
                 $"sector {k.Key}: " + string.Join(", ", new[]
                 {
                     k.Value.Key is { } key ? "key " + MifareClassicKeys.KeyHex(key) : null,
+                    k.Value.KeyAData is { } ka ? "key A data " + MifareClassicKeys.KeyHex(ka) : null,
                     k.Value.Rules is { } r ? (r.IsPermanent ? "rules (PERMANENT)" : "rules") : null,
                 }.Where(x => x is not null))));
     }
@@ -1321,9 +1427,56 @@ public partial class NfcPage : ContentPage
     {
         if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
         int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
-        edit.SetSectorKey(sector, MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var key) ? key : null);
+        bool full = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var key);
+        edit.SetSectorKey(sector, full ? key : null);
+        if (full) ClearEntry(SectorKeyAEntry);   // a whole key clears any key-A-as-data for the sector
         UpdateSectorChangeList(edit);
         ArmWrite();
+    }
+
+    /// <summary>Six bytes typed to store in key A for the cursor's sector (keeping key B); anything else drops it.</summary>
+    private void OnSectorKeyADataChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
+        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
+        bool full = MifareClassicKeys.TryParseKey(SectorKeyAEntry.Text, out var key);
+        edit.SetSectorKeyAData(sector, full ? key : null);
+        if (full) ClearEntry(SectorKeyEntry);   // key-A-as-data clears any whole-key change for the sector
+        UpdateSectorChangeList(edit);
+        ArmWrite();
+    }
+
+    /// <summary>Clears an entry without its TextChanged handler treating it as input.</summary>
+    private void ClearEntry(Entry entry)
+    {
+        if (entry.Text.Length == 0) return;
+        bool wasRendering = _renderingSegments;
+        _renderingSegments = true;
+        entry.Text = string.Empty;
+        _renderingSegments = wasRendering;
+    }
+
+    /// <summary>Unlocks or locks editing of block 0 (the UID). Only a magic/clone card can take the write; a warning
+    /// is shown before it is unlocked.</summary>
+    private async void OnBlockZeroToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_renderingSegments || _edit is not { } edit) return;
+        if (e.Value && !edit.AllowBlockZero)
+        {
+            bool sure = await DisplayAlertAsync("Edit block 0 (the UID)?",
+                "Block 0 holds the card's serial number (UID) and is never written on a normal card — the write simply " +
+                "fails. Only a magic/clone card lets it be rewritten. A wrong check byte (BCC) can make the card unreadable " +
+                "to some readers. Unlock it only if you know this is a magic card.", "Unlock block 0", "Cancel");
+            if (!sure)
+            {
+                _renderingSegments = true;
+                BlockZeroSwitch.IsToggled = false;
+                _renderingSegments = false;
+                return;
+            }
+        }
+        edit.SetBlockZeroEditable(e.Value);
+        SegmentEdited();
     }
 
     /// <summary>A rule picked for the cursor's sector. The rules are set as a whole from the four pickers; when they
