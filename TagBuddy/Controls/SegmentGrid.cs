@@ -15,6 +15,11 @@ public class SegmentGrid : GraphicsView, IDrawable
     private const float FontSize = 13f, CharWidth = 8.2f, LineHeight = 22f, Pad = 6f, Baseline = 15.5f;
     private static readonly Microsoft.Maui.Graphics.Font MonoFont = new("monospace");
 
+    // MIFARE Classic structure colours, matching the read view (ClassicDumpView): block 0's UID / check byte / maker
+    // bytes, and a trailer's key A / rules / key B. A field byte that was typed stays in the accent colour instead.
+    private static readonly Color CUid = Color.FromArgb("#22C55E"), CBcc = Color.FromArgb("#EF4444"), CMaker = Color.FromArgb("#F59E0B");
+    private static readonly Color CKeyA = Color.FromArgb("#3B82F6"), CRules = Color.FromArgb("#A855F7"), CKeyB = Color.FromArgb("#F59E0B");
+
     /// <summary>"005" and two spaces before the hex.</summary>
     private const int NumberColumns = 5;
 
@@ -88,9 +93,15 @@ public class SegmentGrid : GraphicsView, IDrawable
     {
         var rows = new List<Row>();
         if (_edit is not { } edit) return rows;
-        for (int s = edit.From; s <= edit.To; s++)
+
+        // MIFARE Classic: show block 0 (the manufacturer/serial block) as a read-only row too, as the read view
+        // does, even though it is never part of the writable range, so the whole card is visible while editing.
+        int from = edit.From;
+        if (edit.Layout.Family == TagFamily.Classic && from > 0 && Known(edit, 0)) from = 0;
+
+        for (int s = from; s <= edit.To; s++)
         {
-            if (edit.Layout.Family == TagFamily.Classic && (s == edit.From || MifareClassicKeys.SectorOf(s) != MifareClassicKeys.SectorOf(s - 1)))
+            if (edit.Layout.Family == TagFamily.Classic && (s == from || MifareClassicKeys.SectorOf(s) != MifareClassicKeys.SectorOf(s - 1)))
             {
                 int sector = MifareClassicKeys.SectorOf(s);
                 bool closed = edit.RoleOf(s) == "sector not opened";
@@ -100,6 +111,10 @@ public class SegmentGrid : GraphicsView, IDrawable
         }
         return rows;
     }
+
+    /// <summary>Whether any byte of a segment is known (read from the tag), so it is worth showing.</summary>
+    private static bool Known(TagEdit edit, int segment) =>
+        Enumerable.Range(0, edit.Layout.SegmentSize).Any(i => edit.ValueAt(segment, i) is not null);
 
     // ------------------------------------------------------------------------------------------------ columns
 
@@ -117,7 +132,9 @@ public class SegmentGrid : GraphicsView, IDrawable
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
         var text = dark ? Color.FromArgb("#F3F4F6") : Color.FromArgb("#111827");
         var dim = Color.FromArgb(dark ? "#6B7280" : "#9CA3AF");
-        var typed = Color.FromArgb(dark ? "#F5A623" : "#C2410C");
+        // A typed byte stands out in pink — distinct from every structure colour (amber key B / maker bytes read as
+        // the old accent did, so edits there were invisible).
+        var typed = Color.FromArgb(dark ? "#F472B6" : "#DB2777");
         var cursor = Color.FromArgb("#F5A623").WithAlpha(0.5f);
         var echo = Color.FromArgb("#F5A623").WithAlpha(0.2f);
 
@@ -145,6 +162,11 @@ public class SegmentGrid : GraphicsView, IDrawable
             {
                 byte? value = edit.ValueAt(s, k);
                 var color = !writable || value is null ? dim : edit.IsEdited(s, k) ? typed : text;
+                // Colour block 0 and trailer bytes by their field, so each sector's structure is visible. A byte the
+                // person typed keeps the accent colour; an unknown byte stays dim. Block 0's check byte (BCC) is
+                // derived, not typed, so it keeps its field colour even after a UID change.
+                bool derivedBcc = edit.Layout.Family == TagFamily.Classic && s == 0 && k == 4;
+                if (value is not null && (!edit.IsEdited(s, k) || derivedBcc) && FieldColor(edit, s, k) is { } field) color = field;
 
                 if (s == cursorSegment && k == cursorIndex)
                 {
@@ -162,6 +184,16 @@ public class SegmentGrid : GraphicsView, IDrawable
             if (!writable && edit.RoleOf(s) is { Length: > 0 } role)
                 Cell(canvas, role, RoleStart(size), y, role.Length, dim);
         }
+    }
+
+    /// <summary>The structure colour of a MIFARE Classic byte: block 0's UID/check/maker, or a trailer's key A/rules/
+    /// key B (byte 9 is spare, left to its normal colour). Null for an ordinary data byte or another tag family.</summary>
+    private static Color? FieldColor(TagEdit edit, int segment, int k)
+    {
+        if (edit.Layout.Family != TagFamily.Classic) return null;
+        if (segment == 0) return k < 4 ? CUid : k == 4 ? CBcc : CMaker;
+        if (MifareClassicKeys.IsTrailer(segment)) return k < 6 ? CKeyA : k < 9 ? CRules : k == 9 ? null : CKeyB;
+        return null;
     }
 
     private static float ColumnX(int column) => Pad + column * CharWidth;

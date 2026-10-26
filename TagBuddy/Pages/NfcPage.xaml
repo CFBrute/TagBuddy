@@ -7,11 +7,18 @@
     <ScrollView>
         <VerticalStackLayout Padding="20" Spacing="12">
 
-            <!-- Read / Write mode switch -->
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
-                <Button x:Name="ReadModeButton" Grid.Column="0" Text="Read a tag" Clicked="OnReadMode" />
-                <Button x:Name="WriteModeButton" Grid.Column="1" Text="Write a tag" Clicked="OnWriteMode"
-                        BackgroundColor="#6B7280" TextColor="White" />
+            <!-- Read / Write mode switch, in the QR/Barcode top-tab style but each filling half the width -->
+            <Grid ColumnDefinitions="*,*">
+                <VerticalStackLayout Grid.Column="0" Spacing="0">
+                    <Button x:Name="ReadModeButton" Text="Read a tag" Clicked="OnReadMode"
+                            BackgroundColor="Transparent" BorderWidth="0" FontSize="15" Padding="0,8" />
+                    <BoxView x:Name="ReadUnderline" HeightRequest="3" Color="Transparent" />
+                </VerticalStackLayout>
+                <VerticalStackLayout Grid.Column="1" Spacing="0">
+                    <Button x:Name="WriteModeButton" Text="Write a tag" Clicked="OnWriteMode"
+                            BackgroundColor="Transparent" BorderWidth="0" FontSize="15" Padding="0,8" />
+                    <BoxView x:Name="WriteUnderline" HeightRequest="3" Color="Transparent" />
+                </VerticalStackLayout>
             </Grid>
 
             <!-- Shown only once a protected tag is noticed (reading or writing); never a thing to set up in advance. -->
@@ -251,6 +258,22 @@
                         </VerticalStackLayout>
                     </Border>
 
+                    <!-- Two tabs (MIFARE Classic): edit the bytes, or change the cursor sector's keys and rules, so
+                         sector settings are not a long scroll past every block. -->
+                    <HorizontalStackLayout x:Name="SegmentTabBar" Spacing="20" IsVisible="False">
+                        <VerticalStackLayout Spacing="0">
+                            <Button x:Name="EditTabButton" Text="Edit" Clicked="OnEditTabSelected"
+                                    BackgroundColor="Transparent" BorderWidth="0" Padding="2,6" FontSize="14" />
+                            <BoxView x:Name="EditUnderline" HeightRequest="3" Color="Transparent" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="0">
+                            <Button x:Name="SectorsTabButton" Text="Sector keys &amp; rules" Clicked="OnSectorsTabSelected"
+                                    BackgroundColor="Transparent" BorderWidth="0" Padding="2,6" FontSize="14" />
+                            <BoxView x:Name="SectorsUnderline" HeightRequest="3" Color="Transparent" />
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+
+                    <VerticalStackLayout x:Name="EditTab" Spacing="10">
                     <!-- Which column typing goes to, and the edit history -->
                     <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="6">
                         <Button x:Name="SegmentHexButton" Grid.Column="0" Text="Hex" Clicked="OnSegmentHex"
@@ -275,6 +298,15 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 
+                    <!-- Block 0 (the UID) is never written on a normal card; a magic/clone card lets it be rewritten.
+                         Off by default, shown only for a MIFARE Classic card that was read. Sits above the grid so it
+                         is to hand without scrolling the long list of blocks. -->
+                    <HorizontalStackLayout x:Name="BlockZeroPanel" Spacing="8" IsVisible="False">
+                        <Switch x:Name="BlockZeroSwitch" Toggled="OnBlockZeroToggled" VerticalOptions="Center" />
+                        <Label VerticalOptions="Center" FontSize="12" TextColor="Gray" MaximumWidthRequest="330"
+                               Text="Edit block 0 (the UID) — only a magic/clone card can take it; a normal card refuses the write. A wrong check byte (BCC) can make the card unreadable." />
+                    </HorizontalStackLayout>
+
                     <!-- The pages or blocks, laid out like the read view; tap a byte to put the cursor there -->
                     <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="4"
                             BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
@@ -294,6 +326,18 @@
                         </ScrollView>
                     </Border>
                     <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
+                    </VerticalStackLayout>
+
+                    <!-- Sector keys & rules tab: settings for one sector, chosen here or by tapping a block in Edit. -->
+                    <VerticalStackLayout x:Name="SectorsTab" Spacing="10" IsVisible="False">
+                    <Label x:Name="SectorsEmptyLabel" FontSize="13" TextColor="Gray" IsVisible="False"
+                           Text="No sector opened, so none can be changed. Read the card with the right keys first." />
+
+                    <!-- Pick which sector to view and change (the sectors a key opened); also follows the Edit cursor. -->
+                    <VerticalStackLayout x:Name="SectorChoosePanel" Spacing="2" IsVisible="False">
+                        <Label Text="Sector" FontSize="12" TextColor="Gray" />
+                        <Picker x:Name="SectorPicker" FontSize="14" SelectedIndexChanged="OnSectorPicked" />
+                    </VerticalStackLayout>
 
                     <!-- A key of the person's own for the cursor's sector, offered only for a sector that opened with a default key -->
                     <VerticalStackLayout x:Name="SectorKeyPanel" Spacing="6" IsVisible="False"
@@ -304,6 +348,16 @@
                         <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
                                Text="The read opened this sector, so its key is known and can be changed. A new key is written with the tag, as key A and key B. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
 
+                        <!-- Key A used as data: set six bytes in key A, keep key B as the working key. For a trailer whose
+                             rules authenticate with key B. Key bytes read back blank, so it is write-only. -->
+                        <VerticalStackLayout x:Name="SectorKeyAPanel" Spacing="4" Margin="0,6,0,0">
+                            <Label Text="Key A as data" FontSize="13" FontAttributes="Bold" />
+                            <Entry x:Name="SectorKeyAEntry" Placeholder="Key A bytes: 12 hex digits" MaxLength="17"
+                                   IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyADataChanged" />
+                            <Label FontSize="12" TextColor="Gray"
+                                   Text="Stores six bytes in key A and keeps key B as the sector's working key — for a sector whose rules use key B. The key bytes read back blank, so this is write-only unless a reader authenticates with it. Key B must be known: open the sector with key B (enter it as the card's key)." />
+                        </VerticalStackLayout>
+
                         <!-- The sector's rules, as read; pick another to change them. Built from the choice, never typed as bytes. -->
                         <VerticalStackLayout x:Name="SectorRulesPanel" Spacing="4">
                             <Label Text="Rules" FontSize="13" FontAttributes="Bold" Margin="0,6,0,0" />
@@ -311,6 +365,10 @@
                                    Text="What key A and key B may do. The tag enforces these: a write the rules do not allow is refused. They are shown as the tag has them; pick another to change them with the next write." />
                             <Label x:Name="RulesUnknownLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
                                    Text="This sector's rules could not be read or are corrupt, so they cannot be changed here." />
+                            <!-- One choice that sets all three data blocks of this sector at once -->
+                            <Label Text="All data blocks in this sector" FontSize="12" TextColor="Gray" Margin="0,2,0,0" />
+                            <Picker x:Name="AllBlocksPicker" FontSize="13" SelectedIndexChanged="OnAllBlocksRuleChanged" />
+                            <Label Text="…or set each block on its own" FontSize="12" TextColor="Gray" Margin="0,4,0,0" />
                             <Label x:Name="DataRule0Label" FontSize="12" TextColor="Gray" />
                             <Picker x:Name="DataRule0Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
                             <Label x:Name="DataRule1Label" FontSize="12" TextColor="Gray" />
@@ -323,6 +381,16 @@
                                    Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
                         </VerticalStackLayout>
                         <Label x:Name="SectorKeyList" FontSize="12" />
+                    </VerticalStackLayout>
+
+                    <!-- One choice that sets the same data-block rule on every sector that opened -->
+                    <VerticalStackLayout x:Name="AllSectorsPanel" Spacing="4" Padding="12" IsVisible="False"
+                                         BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                        <Label Text="All sectors at once" FontSize="13" FontAttributes="Bold" />
+                        <Label FontSize="12" TextColor="Gray"
+                               Text="Sets the same rule on every data block of every sector that opened. Each sector's trailer rule and keys are left as they are." />
+                        <Picker x:Name="AllSectorsPicker" FontSize="13" SelectedIndexChanged="OnAllSectorsRuleChanged" />
+                    </VerticalStackLayout>
                     </VerticalStackLayout>
 
                     <!-- Writes already on a tag: put the old bytes back, or write the change again -->
