@@ -187,8 +187,24 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
 public sealed record SegmentWriteRecord(string TagId, SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Before,
     IReadOnlyDictionary<int, byte[]> After)
 {
-    /// <summary>Puts the segments back as they were, on the tag they were written to.</summary>
-    public SegmentWrite UndoWrite => new(Layout, TagId, Whole(Before));
+    /// <summary>The tag's serial once the write is on it: <see cref="TagId"/>, unless the write gave a MIFARE Classic
+    /// magic card a new UID in block 0 (its first 4 or 7 bytes, as long as the serial it had).</summary>
+    public string IdAfter
+    {
+        get
+        {
+            if (Layout.Family != TagFamily.Classic || !After.TryGetValue(0, out var block0)) return TagId;
+            var hex = new string(TagId.Where(Uri.IsHexDigit).ToArray());
+            int length = hex.Length / 2;
+            if (length is not (4 or 7) || block0.Length < length) return TagId;
+            var id = string.Join(":", block0.Take(length).Select(b => b.ToString("X2")));
+            return TagEdit.SameId(id, TagId) ? TagId : id;
+        }
+    }
+
+    /// <summary>Puts the segments back as they were, on the tag they were written to (which, after a new UID, now
+    /// answers to <see cref="IdAfter"/>).</summary>
+    public SegmentWrite UndoWrite => new(Layout, IdAfter, Whole(Before));
 
     /// <summary>Writes the same change again, after it was undone.</summary>
     public SegmentWrite RedoWrite => new(Layout, TagId, Whole(After));

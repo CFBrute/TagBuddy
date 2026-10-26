@@ -476,6 +476,23 @@ public class TagEditTests
     }
 
     [Fact]
+    public void A_new_UID_in_block_0_is_the_serial_the_undo_expects()
+    {
+        byte[] oldBlock0 = [0x04, 0x11, 0x22, 0x33, 0x04 ^ 0x11 ^ 0x22 ^ 0x33, .. new byte[11]];
+        byte[] newBlock0 = [0xDE, 0xAD, 0xBE, 0xEF, 0xDE ^ 0xAD ^ 0xBE ^ 0xEF, .. new byte[11]];
+        var record = new SegmentWriteRecord("04:11:22:33", Classic1K,
+            new Dictionary<int, byte[]> { [0] = oldBlock0 }, new Dictionary<int, byte[]> { [0] = newBlock0 });
+
+        Assert.Equal("DE:AD:BE:EF", record.IdAfter);
+        Assert.Equal("DE:AD:BE:EF", record.UndoWrite.ExpectedId);   // the card answers to its new serial now
+        Assert.Equal("04:11:22:33", record.RedoWrite.ExpectedId);   // and to the old one again once undone
+
+        var dataOnly = new SegmentWriteRecord("04:11:22:33", Classic1K,
+            new Dictionary<int, byte[]> { [1] = new byte[16] }, new Dictionary<int, byte[]> { [1] = Enumerable.Repeat((byte)1, 16).ToArray() });
+        Assert.Equal("04:11:22:33", dataOnly.IdAfter);
+    }
+
+    [Fact]
     public void The_summary_names_the_pages_and_bytes()
     {
         var write = new SegmentWrite(Ntag213, null, new Dictionary<int, byte?[]>

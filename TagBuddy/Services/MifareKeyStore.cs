@@ -90,6 +90,16 @@ public sealed class MifareKeyStore
         if (changed) SaveRemembered(all);
     }
 
+    /// <summary>A card that took a new serial (a magic card's block 0 rewritten) keeps its keys: the keys remembered
+    /// for <paramref name="fromUid"/> are remembered for <paramref name="toUid"/> too. The old entry stays, so the
+    /// card still opens quickly if its serial is put back.</summary>
+    public void CarryOver(string fromUid, string toUid)
+    {
+        if (Serial(fromUid) == Serial(toUid)) return;
+        var all = LoadRemembered();
+        if (all.TryGetValue(Serial(fromUid), out var keys) && keys.Count > 0) Remember(toUid, keys);
+    }
+
     /// <summary>The keys remembered for one card, as bytes.</summary>
     public IReadOnlyList<byte[]> RememberedFor(string uid) =>
         LoadRemembered().TryGetValue(Serial(uid), out var list) ? list.Select(ToBytes).ToList() : [];

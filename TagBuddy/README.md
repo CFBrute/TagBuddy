@@ -76,7 +76,9 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   (access bits) are picked per block and for the keys from the valid combinations in words (`SectorRules`), never
   typed as bytes, so the plain and inverted halves always agree; a trailer rule that freezes the sector for good is
   marked and confirmed first. What is not changed is kept from the trailer as read. The write is reported only once
-  the sector opens again; the key is then remembered for the tag (`MifareKeyStore`), so later reads open it. A
+  the sector opens again; both keys are then remembered for the tag (`MifareKeyStore`), so later reads open it. When a
+  write gives a magic card a new UID in block 0, the keys remembered for the old serial are remembered for the new one
+  too, and the edit and "Undo on the tag" expect the new serial. A
   sector no key opened cannot be changed. On read, each opened sector's rules are spelled out under its blocks. The serial is only ever compared, never written.
   Protected cards are identified from their public directory only: payment cards by brand (Visa, Mastercard, ...),
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
