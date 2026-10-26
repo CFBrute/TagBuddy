@@ -69,7 +69,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   Classic block 0 and sector trailers are never written, so an edit can neither lock a tag for good nor change
   how it opens. Classic sectors are opened for writing with the same keys a read tries (entered, defaults,
   remembered), as key A and then key B. A sector the read opened, so its key is known (a default, one entered, imported or
-  remembered), can be given a new key and new rules from the editor. The key is written as key A and key B. The rules
+  remembered), can be given new keys and new rules from the editor. Key A and key B are typed over in the trailer row,
+  or in the "Sector keys & rules" tab's two key rows, which are one-row views of the same bytes; "All sectors at once"
+  types the same key A and/or key B into every opened sector whose rules let its keys change. The edit runs to the
+  card's last block, so the last sector's trailer is there too. The rules
   (access bits) are picked per block and for the keys from the valid combinations in words (`SectorRules`), never
   typed as bytes, so the plain and inverted halves always agree; a trailer rule that freezes the sector for good is
   marked and confirmed first. What is not changed is kept from the trailer as read. The write is reported only once

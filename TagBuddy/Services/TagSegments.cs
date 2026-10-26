@@ -35,11 +35,12 @@ public sealed record SegmentLayout(TagFamily Family, string ChipName, int Segmen
     public int FirstWritable => Family switch { TagFamily.Type2 => 4, TagFamily.Classic => 1, _ => 0 };
 
     /// <summary>The highest segment the editor may write (an ISO 15693 label of unknown size: the last block a
-    /// one-byte address reaches).</summary>
+    /// one-byte address reaches). For MIFARE Classic this is the last sector's trailer: its keys can be typed over
+    /// once the sector opened, so the range runs to the card's last block, as the read shows it.</summary>
     public int LastWritable => Family switch
     {
         TagFamily.Type2 => UserEnd - 1,
-        TagFamily.Classic => Count - 2,                  // the last block is the last sector's trailer
+        TagFamily.Classic => Count - 1,
         _ => Count > 0 ? Count - 1 : 255,
     };
 
@@ -459,6 +460,35 @@ public sealed class TagEdit
 
     /// <summary>Sets the same data-block rule on every changeable sector at once. Returns how many sectors took it.</summary>
     public int SetAllSectorsDataRules(int bits) => ChangeableSectors.Count(s => SetAllDataRules(s, bits));
+
+    /// <summary>Whether a sector's keys may be typed over: it opened, and its rules (as pending, else as read) still
+    /// let the keys change. Unknown rules do not block it; the tag has the last word at write time.</summary>
+    public bool KeysChangeable(int sector)
+    {
+        if (!CanChangeKey(sector)) return false;
+        var rules = (_sectorRules.TryGetValue(sector, out var r) ? r : null) ?? CurrentRules(sector);
+        return rules is null || MifareClassicKeys.KeysChangeable(rules.Trailer);
+    }
+
+    /// <summary>Sets key A and/or key B (null leaves that key as it is) on every sector whose keys can change, as if
+    /// typed in each trailer row. One undo step. Returns how many sectors took them.</summary>
+    public int SetAllSectorsKeys(byte[]? keyA, byte[]? keyB)
+    {
+        if (keyA is not { Length: 6 } && keyB is not { Length: 6 }) return 0;
+        var sectors = ChangeableSectors.Where(KeysChangeable).ToList();
+        if (sectors.Count == 0) return 0;
+        Begin();
+        foreach (var sector in sectors)
+        {
+            int trailer = TrailerOf(sector);
+            for (int i = 0; i < 6; i++)
+            {
+                if (keyA is { Length: 6 }) Set(trailer, i, keyA[i]);
+                if (keyB is { Length: 6 }) Set(trailer, 10 + i, keyB[i]);
+            }
+        }
+        return sectors.Count;
+    }
 
     /// <summary>The change waiting for a sector — new key A and/or key B (from the trailer row) and new rules — or null
     /// when nothing is pending for it.</summary>
