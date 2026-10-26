@@ -8,13 +8,31 @@
              Title="Saved">
     <ContentPage.Resources>
         <!-- A collapsible group heading: chevron, name, and how many it holds. Spans the full width; its items
-             sit below it, indented, on the same colour so the group reads as one connected block. -->
+             sit below it, indented, on the same colour so the group reads as one connected block. Neighbouring
+             groups alternate shade. Open, only the top corners are rounded so it joins the rows below; closed,
+             every corner is rounded so the heading reads as its own soft bar. -->
         <DataTemplate x:Key="GroupTemplate" x:DataType="pages:GroupRow">
-            <Border Margin="0" Padding="10,12" StrokeThickness="0"
+            <Border Margin="0,0,0,0" Padding="10,12" StrokeThickness="0"
                     BackgroundColor="{AppThemeBinding Light=#EDEFF2, Dark=#202A38}">
+                <!-- Open: top corners rounded, plus the bottom-left, so the heading's background curves down into
+                     the indented rows below it. The bottom-right stays square to meet the full-width rows.
+                     CornerRadius order is top-left, top-right, bottom-left, bottom-right. -->
                 <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8,8,0,0" />
+                    <RoundRectangle CornerRadius="10,10,10,0" />
                 </Border.StrokeShape>
+                <Border.Triggers>
+                    <DataTrigger TargetType="Border" Binding="{Binding Alt}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#DFE3E8, Dark=#2B3747}" />
+                    </DataTrigger>
+                    <DataTrigger TargetType="Border" Binding="{Binding Expanded}" Value="False">
+                        <Setter Property="Margin" Value="0,0,0,8" />
+                        <Setter Property="StrokeShape">
+                            <Setter.Value>
+                                <RoundRectangle CornerRadius="10" />
+                            </Setter.Value>
+                        </Setter>
+                    </DataTrigger>
+                </Border.Triggers>
                 <Border.GestureRecognizers>
                     <TapGestureRecognizer Tapped="OnGroupHeaderTapped" />
                 </Border.GestureRecognizers>
@@ -32,11 +50,13 @@
             <Border x:Name="GroupBand" StrokeThickness="0" Padding="0" Margin="0" BackgroundColor="Transparent">
                 <Border.Triggers>
                     <!-- Under a group the row's background is indented from the left (the heading stays full width)
-                         and carries the group colour, so the group reads as one connected block. Rows alternate
-                         between two near shades so items are told apart without divider lines. -->
+                         and carries that group's colour, so the group reads as one connected block. Neighbouring
+                         groups alternate shade (matching their heading); within a group, rows alternate between two
+                         near shades so items are told apart without divider lines. Four combinations: group × row. -->
                     <MultiTrigger TargetType="Border">
                         <MultiTrigger.Conditions>
                             <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding GroupAlt}" Value="False" />
                             <BindingCondition Binding="{Binding RowAlt}" Value="False" />
                         </MultiTrigger.Conditions>
                         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#EDEFF2, Dark=#202A38}" />
@@ -45,10 +65,44 @@
                     <MultiTrigger TargetType="Border">
                         <MultiTrigger.Conditions>
                             <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding GroupAlt}" Value="False" />
                             <BindingCondition Binding="{Binding RowAlt}" Value="True" />
                         </MultiTrigger.Conditions>
                         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#E2E6EC, Dark=#28323F}" />
                         <Setter Property="Margin" Value="14,0,0,0" />
+                    </MultiTrigger>
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding GroupAlt}" Value="True" />
+                            <BindingCondition Binding="{Binding RowAlt}" Value="False" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#DFE3E8, Dark=#2B3747}" />
+                        <Setter Property="Margin" Value="14,0,0,0" />
+                    </MultiTrigger>
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding GroupAlt}" Value="True" />
+                            <BindingCondition Binding="{Binding RowAlt}" Value="True" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#D4DAE1, Dark=#33404F}" />
+                        <Setter Property="Margin" Value="14,0,0,0" />
+                    </MultiTrigger>
+                    <!-- The last row of an open group gets rounded bottom corners (so the block ends like a card)
+                         and a bottom gap (so the group is set apart from the next). Rows stay square on top so they
+                         tuck straight under the heading's curved bottom-left. -->
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding LastInGroup}" Value="True" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="Margin" Value="14,0,0,10" />
+                        <Setter Property="StrokeShape">
+                            <Setter.Value>
+                                <RoundRectangle CornerRadius="0,0,10,10" />
+                            </Setter.Value>
+                        </Setter>
                     </MultiTrigger>
                 </Border.Triggers>
             <Border Margin="0,0,0,10"
@@ -164,12 +218,12 @@
                            LineBreakMode="TailTruncation"
                            MaxLines="2" />
 
-                    <!-- The link preview, borderless, lined up under the row's thumbnail -->
+                    <!-- The link preview, borderless, modestly indented under the row -->
                     <controls:LinkPreviewView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
                                               Compact="True"
                                               ShowText="False"
                                               Value="{Binding Value}"
-                                              Margin="0,8,8,0" />
+                                              Margin="24,8,8,0" />
                 </Grid>
             </Border>
             </Border>

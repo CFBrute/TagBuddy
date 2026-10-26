@@ -94,14 +94,24 @@ public partial class SavedPage : ContentPage
             _autoOpenedTop = true;
         }
 
+        int index = 0;
         foreach (var group in groups)
         {
+            bool groupAlt = index++ % 2 == 1;
             bool expanded = _expandedGroups.Contains(group.Key);
-            _shown.Add(new GroupRow(group.Key, group.Key.Length == 0 ? "No group" : group.Key, group.Count(), expanded, alt: false));
+            _shown.Add(new GroupRow(group.Key, group.Key.Length == 0 ? "No group" : group.Key, group.Count(), expanded, groupAlt));
             if (expanded)
             {
-                int row = 0;
-                foreach (var item in group) { item.UnderGroup = true; item.RowAlt = row++ % 2 == 1; _shown.Add(item); }
+                int row = 0, last = group.Count() - 1;
+                foreach (var item in group)
+                {
+                    item.UnderGroup = true;
+                    item.GroupAlt = groupAlt;
+                    item.FirstInGroup = row == 0;
+                    item.LastInGroup = row == last;
+                    item.RowAlt = row++ % 2 == 1;
+                    _shown.Add(item);
+                }
             }
         }
     }
@@ -112,6 +122,11 @@ public partial class SavedPage : ContentPage
         if ((sender as BindableObject)?.BindingContext is not GroupRow row) return;
         if (!_expandedGroups.Remove(row.Key)) _expandedGroups.Add(row.Key);
         Refill();
+
+        // Rebuilding the list resets its scroll to the top, which shoots the view away from the group that was
+        // just tapped. Put that heading back at the top so opening a group happens where the person is looking.
+        var heading = _shown.OfType<GroupRow>().FirstOrDefault(g => g.Key == row.Key);
+        if (heading is not null) List.ScrollTo(heading, position: ScrollToPosition.Start, animate: false);
     }
 
     // ---------------------------------------------------------------- select mode (long press)
