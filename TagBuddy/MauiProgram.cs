@@ -57,6 +57,7 @@ public static class MauiProgram
         builder.Services.AddTransient<ShowBarcodePage>();
         builder.Services.AddTransient<WebPage>();
         builder.Services.AddTransient<DumpPage>();
+        builder.Services.AddTransient<DiffPage>();
         builder.Services.AddTransient<SettingsPage>();
         builder.Services.AddTransient<AboutPage>();
 

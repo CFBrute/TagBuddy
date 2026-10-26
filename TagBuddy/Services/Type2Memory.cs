@@ -263,7 +263,7 @@ internal static class Type2Memory
     internal static bool LooksAmiibo(byte[] bytes) =>
         bytes.Length >= 16 && bytes[12] == 0xF1 && bytes[13] == 0x10 && bytes[14] == 0xFF && bytes[15] == 0xEE;
 
-    internal static string Ascii(byte[] bytes) =>
+    public static string Ascii(byte[] bytes) =>
         new(bytes.Select(b => b >= 0x20 && b < 0x7F ? (char)b : '.').ToArray());
 
     /// <summary>Formats page memory as "page: hex  ascii" lines, one per 4-byte page.</summary>

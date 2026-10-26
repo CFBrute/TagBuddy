@@ -135,6 +135,10 @@
                         <!-- Keeps the tag in Saved as it was read, to view again or edit and write back -->
                         <Button x:Name="SaveTagButton" Text="Save tag as read" Clicked="OnSaveDump" IsVisible="False"
                                 BackgroundColor="#6B7280" TextColor="White" />
+                        <!-- Against a saved read of the same kind of tag, or the next tag held to the phone -->
+                        <Button x:Name="CompareButton" Text="Compare with…" Clicked="OnCompare" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <Label x:Name="CompareHint" FontSize="12" TextColor="#F5A623" IsVisible="False" HorizontalTextAlignment="Center" />
                         <Grid x:Name="DumpButtons" ColumnDefinitions="*" ColumnSpacing="10">
                             <Button Grid.Column="0" Text="Share .bin file" Clicked="OnShareDump"
                                     BackgroundColor="#6B7280" TextColor="White" />

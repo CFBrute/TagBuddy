@@ -83,7 +83,10 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   the records, the memory, and what the segment editor needs, for NTAG, MIFARE Classic (the sectors that opened)
   and ISO 15693 alike. Such an item opens on the NFC tab as it was read ("View as read", marked with when it was
   saved), and "Edit and write to the tag" opens the editor on it, expecting that tag's serial; "Write to a tag"
-  (the whole page image) stays for NTAG/Ultralight dumps only; the menu on each row (`Models/SavedMenu.cs`) offers the rest
+  (the whole page image) stays for NTAG/Ultralight dumps only. "Compare with…" on a read (`Services/TagDiff.cs`,
+  `Pages/DiffPage`) sets it against a saved read of the same kind of tag, or the next tag held to the phone, and
+  shows only the pages or blocks that differ, left above right, the differing bytes in colour; tags of different
+  layouts do not compare; the menu on each row (`Models/SavedMenu.cs`) offers the rest
   for that kind. Everyday actions are on the first level (open the link, view the page, copy, rename, delete);
   "QR code image…" (share, save to gallery) and "Use the text…" (QR or barcode generator, write to an NFC tag,
   make a dump) open a second menu with Back. Items can be filed in groups ("Work", "Home"): saving asks which

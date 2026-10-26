@@ -214,6 +214,8 @@ public partial class NfcPage : ContentPage
         _nfc.TagWritten -= OnTagWritten;
         _nfc.TagDispatched -= OnTagDispatched;
         _nfc.Disarm();
+        _compareWith = null;
+        CompareHint.IsVisible = false;
         _nfc.SetManualPassword(null, null);   // not kept once the tab is left
         _nfc.SetManualClassicKey(null);
         _tryAllKeys = false;
@@ -383,6 +385,16 @@ public partial class NfcPage : ContentPage
             PasswordEntry.Text = string.Empty;   // clears _passwordSerial and the reader's password via ApplyPassword
         }
 
+        // Waiting to compare: this read is the other side, and both go to the diff page.
+        if (!fromSaved && _compareWith is { } left)
+        {
+            _compareWith = null;
+            CompareHint.IsVisible = false;
+            Feedback.Tag(ok: true);
+            _ = ShowDiffAsync(left.Tag, left.Name, tag, "read just now");
+            return;
+        }
+
         _last = tag;
         if (!fromSaved) Feedback.Tag(ok: true);
 
@@ -470,6 +482,8 @@ public partial class NfcPage : ContentPage
         MemoryPanel.IsVisible = tag.HasMemoryDump;
         EditTagButton.IsVisible = tag.CanEdit;
         SaveTagButton.IsVisible = tag.HasMemoryDump && !fromSaved;   // already in Saved when shown from there
+        CompareButton.IsVisible = tag.Segments is not null;
+        _lastName = fromSaved ? TagTitle.Text.Split('\n')[0].Split("  ·  ")[0] is { Length: > 0 } n ? "saved: " + n : "saved" : "read just now";
         if (tag.RawMemory is { Length: > 0 } memory)
         {
             // Type 2 tag: the full page memory, shown with its map, saveable as a backup.
@@ -582,6 +596,63 @@ public partial class NfcPage : ContentPage
             await Clipboard.Default.SetTextAsync(string.Join("\n", dump));
             Notice.Show($"{dump.Count} pages copied");
         }
+    }
+
+    // ---------------------------------------------------------------- compare
+
+    /// <summary>Where the shown read came from, for the diff page's labels.</summary>
+    private string _lastName = "read just now";
+
+    /// <summary>A read waiting for the next tag held to the phone, to compare the two; null when not comparing.</summary>
+    private (NfcTagInfo Tag, string Name)? _compareWith;
+
+    /// <summary>Compares the shown read with a saved read of the same kind of tag, or with the next tag held to the
+    /// phone. Only the pages or blocks that differ are shown.</summary>
+    private async void OnCompare(object? sender, EventArgs e)
+    {
+        if (_last is not { Segments: { } segments } tag) return;
+        try
+        {
+            await _saved.LoadAsync();
+            var candidates = _saved.Dumps.Where(d => d.HasRead).OrderByDescending(d => d.SortTime).ToList();
+            const string next = "The next tag held to the phone";
+            var labels = candidates.Select(c => $"{c.DisplayName}  ·  {c.Subtitle}").Prepend(next).ToArray();
+            var choice = await DisplayActionSheetAsync($"Compare this {segments.Layout.ChipName} with", "Cancel", null, labels);
+            if (choice is null || choice == "Cancel") return;
+
+            if (choice == next)
+            {
+                _compareWith = (tag, _lastName);
+                CompareHint.IsVisible = true;
+                CompareHint.Text = $"Hold the other {segments.Layout.ChipName} to the back of the phone to compare. Reading another kind of tag cancels.";
+                return;
+            }
+
+            int index = Array.IndexOf(labels, choice) - 1;
+            if (index < 0) return;
+            var other = await _saved.LoadReadAsync(candidates[index]);
+            if (other is null)
+            {
+                await DisplayAlertAsync("Not available", "That saved read could not be loaded.", "OK");
+                return;
+            }
+            await ShowDiffAsync(tag, _lastName, other, "saved: " + candidates[index].DisplayName);
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("Could not compare", ex.Message, "OK");
+        }
+    }
+
+    private async Task ShowDiffAsync(NfcTagInfo left, string leftName, NfcTagInfo right, string rightName)
+    {
+        var diff = TagDiff.Compare(left, right, out var whyNot);
+        if (diff is null)
+        {
+            await DisplayAlertAsync("Cannot compare", whyNot, "OK");
+            return;
+        }
+        await DiffPage.ShowAsync(diff, leftName, rightName);
     }
 
     // ---------------------------------------------------------------- dumps (read side)
