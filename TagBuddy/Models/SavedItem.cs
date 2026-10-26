@@ -134,6 +134,19 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
 
     public int DumpSize { get; set; }
 
+    /// <summary>Dumps only: the file (in the reads folder) holding the tag exactly as it was read, when it was saved
+    /// from a read rather than imported: every detail, the memory and what the segment editor needs. Empty for an
+    /// imported or pasted dump.</summary>
+    public string ReadFile { get; set; } = string.Empty;
+
+    /// <summary>Whether the tag can be shown again as it was read, and edited for writing back.</summary>
+    [JsonIgnore] public bool HasRead => IsDump && ReadFile.Length > 0;
+
+    /// <summary>Whether the .bin is a Type 2 page image that "Write to a tag" can put on an NTAG/Ultralight. A MIFARE
+    /// Classic or ISO 15693 read is saved as a read, not a page image, and is written through the editor instead.</summary>
+    [JsonIgnore] public bool IsType2Dump => IsDump && !DumpChip.Contains("Classic", StringComparison.OrdinalIgnoreCase)
+        && !DumpChip.Contains("15693", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Dumps only: readable content found in the memory (an NDEF link or text, or plain ASCII runs),
     /// worked out when the dump is saved so the list can show it without opening the file.</summary>
     public string DumpText { get; set; } = string.Empty;

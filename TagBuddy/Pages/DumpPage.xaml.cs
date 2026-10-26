@@ -25,6 +25,7 @@ public partial class DumpPage : ContentPage, IQueryAttributable
     {
         if (!query.TryGetValue("item", out var obj) || obj is not SavedItem item) return;
         _item = item;
+        WriteButton.IsVisible = item.IsType2Dump;   // a Classic or ISO 15693 read is written through the editor
         NameLabel.Text = item.DisplayName;
         SummaryLabel.Text = $"{item.FormatLabel}  ·  {item.Subtitle}  ·  saved {item.CreatedAt:yyyy-MM-dd HH:mm}";
         TextLabel.Text = item.HasDumpText ? item.DumpText

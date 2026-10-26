@@ -60,7 +60,7 @@ public partial class SavedPage : ContentPage
         {
             SavedKind.Code => "Generate or scan a code and tap Save.",
             SavedKind.Text => "Save the content of a scanned code or an NFC tag as text.",
-            SavedKind.Dump => "Read a tag on the NFC tab and tap Save dump, or import a .bin file there.",
+            SavedKind.Dump => "Read a tag on the NFC tab and tap \"Save tag as read\", or import a .bin file there.",
             _ => "Codes you generate or scan, text, and tag dumps you save end up here.",
         };
         Refill();
@@ -210,6 +210,7 @@ public partial class SavedPage : ContentPage
         {
             if (item.IsCode || item.IsDump) await _saved.MarkUsedAsync(item);
             if (item.IsCode) await ShowBarcodePage.ShowAsync(item);
+            else if (item.HasRead) await AppNavigation.ToNfcViewReadAsync(item);   // the whole read, not just the bytes
             else if (item.IsDump) await DumpPage.ShowAsync(item);
             else await ShowMenuAsync(item);
         }
@@ -315,6 +316,14 @@ public partial class SavedPage : ContentPage
 
             case SavedAction.WriteDump:
                 await AppNavigation.ToNfcWriteDumpAsync(item);
+                break;
+
+            case SavedAction.ViewRead:
+                await AppNavigation.ToNfcViewReadAsync(item);
+                break;
+
+            case SavedAction.EditRead:
+                await AppNavigation.ToNfcEditReadAsync(item);
                 break;
 
             case SavedAction.ShareDump:

@@ -12,7 +12,7 @@
             <Label x:Name="TextLabel" FontSize="14" LineBreakMode="WordWrap" />
 
             <HorizontalStackLayout Spacing="10">
-                <Button Text="Write to a tag" Clicked="OnWrite" />
+                <Button x:Name="WriteButton" Text="Write to a tag" Clicked="OnWrite" />
                 <Button Text="Share .bin" Clicked="OnShare" BackgroundColor="#6B7280" TextColor="White" />
                 <Button Text="Copy hex" Clicked="OnCopyHex" BackgroundColor="#6B7280" TextColor="White" />
             </HorizontalStackLayout>

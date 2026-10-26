@@ -132,9 +132,11 @@
                         <!-- Opens the write tab with these pages or blocks to edit, expecting this same tag -->
                         <Button x:Name="EditTagButton" Text="Edit and write to this tag" Clicked="OnEditTag"
                                 IsVisible="False" />
-                        <Grid x:Name="DumpButtons" ColumnDefinitions="*,*" ColumnSpacing="10">
-                            <Button Grid.Column="0" Text="Save dump" Clicked="OnSaveDump" />
-                            <Button Grid.Column="1" Text="Share .bin file" Clicked="OnShareDump"
+                        <!-- Keeps the tag in Saved as it was read, to view again or edit and write back -->
+                        <Button x:Name="SaveTagButton" Text="Save tag as read" Clicked="OnSaveDump" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <Grid x:Name="DumpButtons" ColumnDefinitions="*" ColumnSpacing="10">
+                            <Button Grid.Column="0" Text="Share .bin file" Clicked="OnShareDump"
                                     BackgroundColor="#6B7280" TextColor="White" />
                         </Grid>
 
