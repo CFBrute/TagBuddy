@@ -11,6 +11,7 @@ namespace TagBuddy.Pages;
 [QueryProperty(nameof(IncomingText), AppNavigation.Text)]
 [QueryProperty(nameof(IncomingViewReadId), AppNavigation.ViewRead)]
 [QueryProperty(nameof(IncomingEditReadId), AppNavigation.EditRead)]
+[QueryProperty(nameof(IncomingApply), AppNavigation.Apply)]
 public partial class NfcPage : ContentPage
 {
     /// <summary>The write types, in the order of the picker in NfcPage.xaml.</summary>
@@ -43,6 +44,9 @@ public partial class NfcPage : ContentPage
     /// <summary>Handed over from Saved: a saved read (by id) to show as it was read, or to edit for writing back.</summary>
     public string? IncomingViewReadId { get; set; }
     public string? IncomingEditReadId { get; set; }
+
+    /// <summary>Handed over from the diff page: a read to edit, with the other tag's bytes as pending changes.</summary>
+    public DiffApply? IncomingApply { get; set; }
 
     private readonly SavedService _saved;
     private readonly NfcReader _nfc = NfcReader.Instance;
@@ -125,6 +129,22 @@ public partial class NfcPage : ContentPage
                 {
                     ShowSavedRead(read.Tag, read.Item);
                     OnEditTag(this, EventArgs.Empty);
+                }
+            }
+            else if (IncomingApply is { } apply)
+            {
+                IncomingApply = null;
+                OnTagRead(apply.Target, fromSaved: true);
+                _lastName = apply.TargetName;
+                TagTitle.Text = $"{apply.TargetName}\nTag {apply.Target.Id}  ·  {string.Join(", ", apply.Target.Technologies)}";
+                OnEditTag(this, EventArgs.Empty);
+                if (_edit is { } edit)
+                {
+                    var (applied, skipped) = edit.Apply(apply.Bytes);
+                    SegmentEdited();
+                    string noun = edit.Layout.Noun;
+                    Notice.Show($"{applied} {noun}{(applied == 1 ? "" : "s")} from {apply.SourceName} ready to write" +
+                                (skipped > 0 ? $"; {skipped} cannot be written here and {(skipped == 1 ? "was" : "were")} left out" : ""));
                 }
             }
             else if (IncomingDumpId is { Length: > 0 } id)
