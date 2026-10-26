@@ -301,14 +301,12 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 
-                    <!-- Clipboard: select a run of bytes, copy the selection (or the cursor's block) as hex, or paste
-                         hex over the bytes from the cursor on -->
+                    <!-- Clipboard: select a run of bytes and copy it (or the cursor's block) as hex. Pasting uses the
+                         keyboard's own paste (type over the bytes), so there is no separate paste button. -->
                     <HorizontalStackLayout Spacing="6">
                         <Button x:Name="SegmentSelectButton" Text="Select" Clicked="OnSegmentSelect"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="SegmentCopyButton" Text="Copy row" Clicked="OnSegmentCopy"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Button x:Name="SegmentPasteButton" Text="Paste hex" Clicked="OnSegmentPaste"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 

@@ -546,20 +546,12 @@ public class TagEditTests
     }
 
     [Fact]
-    public void Pasting_bytes_writes_them_from_the_cursor_and_a_segment_copies_with_edits()
+    public void A_segments_bytes_for_copying_reflect_the_edits()
     {
         var edit = TagEdit.FromTag(ReadNtag213(), "04");
-        At(edit, 5, 2);
-        Assert.Equal(3, edit.TypeBytes([0xAA, 0xBB, 0xCC]));
-        Assert.Equal((byte)0xAA, edit.ValueAt(5, 2));
-        Assert.Equal((byte)0xCC, edit.ValueAt(6, 0));          // runs on into the next page
-        Assert.Equal([5, 6], edit.Changes.Keys);
-        Assert.True(edit.Undo());                              // one undo step
-        Assert.Empty(edit.Changes);
-
         At(edit, 7, 0);
         Hex(edit, "AB");
-        Assert.Equal(new byte[] { 0xAB, 7, 7, 7 }, edit.SegmentBytes(7));   // copy reflects the edit
+        Assert.Equal(new byte[] { 0xAB, 7, 7, 7 }, edit.SegmentBytes(7));   // page 7 held 7,7,7,7; byte 0 now AB
     }
 
     [Fact]
