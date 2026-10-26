@@ -147,6 +147,54 @@ public class MifareClassicTests
         Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, MifareClassicKeys.TrailerFor(a, b, [], null)[6..10]);
     }
 
+    // Block 0 of the user's blank card: UID 76 36 DA 47, BCC DD, then the manufacturer bytes.
+    private static byte[] Block0(byte u0 = 0x76) =>
+        [u0, 0x36, 0xDA, 0x47, (byte)(u0 ^ 0x36 ^ 0xDA ^ 0x47), 0x88, 0x04, 0x00, 0xC8, 0x04, 0x00, 0x20, 0x00, 0x00, 0x00, 0x19];
+
+    [Fact]
+    public void The_manufacturer_block_shows_the_check_byte_and_maker_bytes_but_not_the_UID()
+    {
+        var rows = MifareClassicKeys.ManufacturerBlock(Block0()).ToDictionary(r => r.Label, r => r.Value);
+        Assert.StartsWith("DD — valid", rows["Check byte (BCC)"]);
+        Assert.Equal("88 04 00 C8 04 00 20 00 00 00 19", rows["Manufacturer bytes"]);
+        Assert.DoesNotContain("UID", rows.Keys);   // the UID is already the serial number; not repeated here
+    }
+
+    [Fact]
+    public void A_short_block_has_no_parts() =>
+        Assert.Empty(MifareClassicKeys.ManufacturerBlock(new byte[4]));
+
+    [Fact]
+    public void A_non_NXP_uid_with_no_signature_reads_as_a_likely_clone()
+    {
+        var verdict = MifareClassicKeys.GenuineVerdict(Block0(0x76), signature: null);
+        Assert.StartsWith("Likely a clone", verdict);
+        Assert.Contains("no originality signature", verdict);
+        Assert.Contains("usually writable", verdict);
+    }
+
+    [Fact]
+    public void An_NXP_uid_with_a_signature_reads_as_likely_genuine()
+    {
+        var verdict = MifareClassicKeys.GenuineVerdict(Block0(0x04), signature: new byte[32]);
+        Assert.StartsWith("Likely genuine", verdict);
+        Assert.Contains("NXP's manufacturer code", verdict);
+        Assert.Contains("not cryptographically verified", verdict);
+    }
+
+    [Fact]
+    public void A_wrong_check_byte_is_flagged()
+    {
+        var block = Block0(0x04);
+        block[4] ^= 0xFF;   // break the BCC
+        Assert.Contains("check byte does not match", MifareClassicKeys.GenuineVerdict(block, null));
+    }
+
+    [Fact]
+    public void Without_block_zero_the_verdict_is_just_the_signature() =>
+        Assert.Equal("It returned no originality signature; genuine NXP EV1 chips do, while older genuine Classic chips and most clones do not.",
+            MifareClassicKeys.GenuineVerdict(null, null));
+
     [Fact]
     public void A_trailer_line_puts_each_byte_where_the_colouring_expects_it()
     {
