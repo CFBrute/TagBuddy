@@ -45,13 +45,11 @@
                                  BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
 
                 <Label Text="Error correction" FontAttributes="Bold" />
-                <Label Text="More correction lets a damaged or partly covered code still scan, at the cost of a denser code. Pick H if you plan to print a logo over the middle."
-                       FontSize="12" TextColor="Gray" />
+                <controls:InfoExpander Text="More correction lets a damaged or partly covered code still scan, at the cost of a denser code. Pick H if you plan to print a logo over the middle." />
                 <Picker x:Name="EccPicker" SelectedIndexChanged="OnOptionsChanged" />
 
                 <Label Text="Quiet zone" FontAttributes="Bold" />
-                <Label Text="White margin around the code, in modules. The QR standard asks for 4; 2 is enough on a bright screen."
-                       FontSize="12" TextColor="Gray" />
+                <controls:InfoExpander Text="White margin around the code, in modules. The QR standard asks for 4; 2 is enough on a bright screen." />
                 <HorizontalStackLayout Spacing="12">
                     <Stepper x:Name="MarginStepper" Minimum="0" Maximum="4" Increment="1" Value="2"
                              ValueChanged="OnMarginChanged" />
@@ -59,8 +57,7 @@
                 </HorizontalStackLayout>
 
                 <Label Text="Encoding" FontAttributes="Bold" />
-                <Label Text="Text is stored as UTF-8. Digits-only or uppercase-only content is packed more tightly automatically."
-                       FontSize="12" TextColor="Gray" />
+                <controls:InfoExpander Text="Text is stored as UTF-8. Digits-only or uppercase-only content is packed more tightly automatically." />
             </VerticalStackLayout>
 
             <Border x:Name="Card"
