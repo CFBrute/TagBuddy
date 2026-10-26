@@ -53,6 +53,12 @@ public class SegmentGrid : GraphicsView, IDrawable
     /// <summary>The selection changed (started, extended or cleared).</summary>
     public event Action? SelectionChanged;
 
+    /// <summary>A byte was long-pressed (its segment and index), for a copy menu.</summary>
+    public event Action<(int Segment, int Index)>? LongPressed;
+
+    private Point? _pressAt;
+    private int _pressGeneration;
+
     private bool _selecting;
     private int _selAnchor = -1, _selEnd = -1;
 
@@ -81,6 +87,40 @@ public class SegmentGrid : GraphicsView, IDrawable
         var tap = new TapGestureRecognizer();
         tap.Tapped += OnTapped;
         GestureRecognizers.Add(tap);
+
+        // Long press (MAUI has no gesture for it): a press that stays still for half a second raises LongPressed, for a
+        // copy menu. A move or a quick release cancels it, so taps still just place the cursor.
+        var pointer = new PointerGestureRecognizer();
+        pointer.PointerPressed += OnPointerPressed;
+        pointer.PointerMoved += OnPointerMovedOrUp;
+        pointer.PointerReleased += OnPointerMovedOrUp;
+        pointer.PointerExited += OnPointerMovedOrUp;
+        GestureRecognizers.Add(pointer);
+    }
+
+    private void OnPointerPressed(object? sender, PointerEventArgs e)
+    {
+        if (e.GetPosition(this) is not { } point) return;
+        _pressAt = point;
+        int generation = ++_pressGeneration;
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(500), () =>
+        {
+            if (generation == _pressGeneration && _pressAt is { } p) FireLongPress(p);
+        });
+    }
+
+    private void OnPointerMovedOrUp(object? sender, PointerEventArgs e)
+    {
+        if (_pressAt is not { } start) return;
+        if (e.GetPosition(this) is { } now && Math.Abs(now.X - start.X) < 12 && Math.Abs(now.Y - start.Y) < 12) return;
+        _pressAt = null;   // a drag or a lift: not a long press
+        _pressGeneration++;
+    }
+
+    private void FireLongPress(Point point)
+    {
+        _pressAt = null;
+        if (ByteAt(point) is { } cell) LongPressed?.Invoke((cell.Segment, cell.Index));
     }
 
     public TagEdit? Edit
@@ -267,13 +307,13 @@ public class SegmentGrid : GraphicsView, IDrawable
 
     // ------------------------------------------------------------------------------------------------ tapping
 
-    private void OnTapped(object? sender, TappedEventArgs e)
+    /// <summary>The byte at a point: its segment, byte index, which column (hex/text) and which nibble, or null when the
+    /// point is on a header or outside a row.</summary>
+    private (int Segment, int Index, bool InText, int Nibble)? ByteAt(Point point)
     {
-        if (_edit is not { } edit || e.GetPosition(this) is not { } point) return;
+        if (_edit is null) return null;
         int r = (int)((point.Y - Pad) / LineHeight);
-        if (r < 0 || r >= _rows.Count || _rows[r].Header is not null) return;
-
-        if (!IsEnabled) return;
+        if (r < 0 || r >= _rows.Count || _rows[r].Header is not null) return null;
         int size = Shown;
         int column = (int)Math.Floor((point.X - Pad) / CharWidth);
         bool inText = column >= AsciiStart(size) - 1;
@@ -284,10 +324,16 @@ public class SegmentGrid : GraphicsView, IDrawable
             for (int j = 0; j < size; j++) if (column >= HexStart(j)) k = j;
             nibble = column - HexStart(k) == 1 ? 1 : 0;
         }
+        return (_rows[r].Segment, First + k, inText, nibble);
+    }
 
-        int position = edit.PositionOf(_rows[r].Segment, First + k);
+    private void OnTapped(object? sender, TappedEventArgs e)
+    {
+        if (_edit is not { } edit || !IsEnabled || e.GetPosition(this) is not { } point || ByteAt(point) is not { } cell) return;
+
+        int position = edit.PositionOf(cell.Segment, cell.Index);
         if (position < 0) return;                       // a row that is never written
-        edit.Place(position, inText, nibble);
+        edit.Place(position, cell.InText, cell.Nibble);
         if (_selecting)                                 // extend the selection to here; no keyboard in select mode
         {
             _selEnd = position;
