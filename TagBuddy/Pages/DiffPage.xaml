@@ -20,6 +20,13 @@
                     <Label x:Name="DiffLabel" FontFamily="monospace" FontSize="12" LineBreakMode="CharacterWrap" />
                 </ScrollView>
             </Border>
+            <!-- Take the differing segments of one side into the editor for the other tag, as pending changes -->
+            <Label x:Name="ApplyHint" FontSize="12" TextColor="Gray" LineBreakMode="WordWrap"
+                   Text="Make one tag like the other: open the editor on it with the other side's bytes typed over the pages that differ, ready to write to that tag. Only the bytes shown; no keys, no rules." />
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                <Button x:Name="ApplyLeftButton" Grid.Column="0" Text="Make left like right" Clicked="OnApplyLeft" />
+                <Button x:Name="ApplyRightButton" Grid.Column="1" Text="Make right like left" Clicked="OnApplyRight" />
+            </Grid>
             <Button Text="Copy as text" Clicked="OnCopy" BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
         </VerticalStackLayout>
     </ScrollView>

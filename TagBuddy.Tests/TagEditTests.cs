@@ -481,4 +481,23 @@ public class TagEditTests
         });
         Assert.Equal("pages 5-6, 9 (6 bytes)", write.Summary);
     }
+
+    [Fact]
+    public void Applied_bytes_become_ordinary_changes_and_skip_what_cannot_be_written()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(new() { [6] = "is locked for good" }), "04");
+        var (applied, skipped) = edit.Apply(new Dictionary<int, byte[]>
+        {
+            [5] = [5, 5, 5, 5],          // the same as the tag has: no change
+            [7] = [1, 2, 3, 4],
+            [6] = [9, 9, 9, 9],          // locked: skipped
+            [3] = [0, 0, 0, 0],          // never written: skipped
+            [8] = [1, 2],                // not a whole page: skipped
+        });
+        Assert.Equal((2, 3), (applied, skipped));
+        Assert.Equal([7], edit.Changes.Keys);
+        Assert.Equal(new byte?[] { 1, 2, 3, 4 }, edit.Changes[7]);
+        Assert.True(edit.Undo());
+        Assert.Empty(edit.Changes);
+    }
 }

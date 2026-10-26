@@ -465,6 +465,20 @@ public sealed class TagEdit
             for (int i = 0; i < Layout.SegmentSize; i++) Set(s, i, value);
     }
 
+    /// <summary>Types the given bytes over whole segments, as if entered by hand (so they show as changes and are written
+    /// like any other): the other side of a comparison, say. Segments that are not writable here, or whose bytes are not
+    /// a whole segment, are skipped. One undo step. Returns how many segments were taken and how many skipped.</summary>
+    public (int Applied, int Skipped) Apply(IReadOnlyDictionary<int, byte[]> bytes)
+    {
+        var usable = bytes.Where(p => _segmentIndex.ContainsKey(p.Key) && p.Value.Length == Layout.SegmentSize).ToList();
+        int skipped = bytes.Count - usable.Count;
+        if (usable.Count == 0) return (0, skipped);
+        Begin();
+        foreach (var (segment, data) in usable)
+            for (int i = 0; i < data.Length; i++) Set(segment, i, data[i]);
+        return (usable.Count, skipped);
+    }
+
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 

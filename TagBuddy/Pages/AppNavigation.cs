@@ -1,4 +1,5 @@
 using TagBuddy.Models;
+using TagBuddy.Services;
 
 namespace TagBuddy.Pages;
 
@@ -14,6 +15,7 @@ public static class AppNavigation
     public const string Dump = "dump";
     public const string ViewRead = "view-read";
     public const string EditRead = "edit-read";
+    public const string Apply = "apply";
 
     /// <summary>Opens the Barcode tab with a value and a linear format key.</summary>
     public static Task ToBarcodeGeneratorAsync(string value, string format) =>
@@ -43,7 +45,16 @@ public static class AppNavigation
     public static Task ToNfcEditReadAsync(SavedItem dump) =>
         Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { [EditRead] = dump.Id.ToString() });
 
+    /// <summary>Opens the NFC tab's segment editor on <paramref name="target"/> (a read, expecting that tag), with
+    /// <paramref name="bytes"/> typed over its segments as pending changes: the other side of a comparison.</summary>
+    public static Task ToNfcApplyAsync(NfcTagInfo target, string targetName, IReadOnlyDictionary<int, byte[]> bytes, string sourceName) =>
+        Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { [Apply] = new DiffApply(target, targetName, bytes, sourceName) });
+
     /// <summary>Opens the NFC tab ready to write a saved dump.</summary>
     public static Task ToNfcWriteDumpAsync(SavedItem dump) =>
         Shell.Current.GoToAsync("//nfc", new Dictionary<string, object> { [Dump] = dump.Id.ToString() });
 }
+
+/// <summary>What "Apply to left/right" on the diff page hands the NFC tab: the read to edit (and where it came from), and
+/// the bytes to type over its differing segments (and where those came from).</summary>
+public sealed record DiffApply(NfcTagInfo Target, string TargetName, IReadOnlyDictionary<int, byte[]> Bytes, string SourceName);

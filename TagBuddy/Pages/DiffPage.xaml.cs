@@ -11,6 +11,7 @@ public partial class DiffPage : ContentPage, IQueryAttributable
     private static readonly Color LeftColor = Color.FromArgb("#3B82F6");    // blue
     private static readonly Color RightColor = Color.FromArgb("#F59E0B");   // amber
     private TagDiff? _diff;
+    private string _leftName = "", _rightName = "";
 
     public DiffPage()
     {
@@ -29,8 +30,11 @@ public partial class DiffPage : ContentPage, IQueryAttributable
     {
         if (!query.TryGetValue("diff", out var obj) || obj is not TagDiff diff) return;
         _diff = diff;
-        string left = query.TryGetValue("left", out var l) ? l.ToString() ?? "" : "";
-        string right = query.TryGetValue("right", out var r) ? r.ToString() ?? "" : "";
+        string left = _leftName = query.TryGetValue("left", out var l) ? l.ToString() ?? "" : "";
+        string right = _rightName = query.TryGetValue("right", out var r) ? r.ToString() ?? "" : "";
+        bool any = diff.Differences.Count > 0;
+        ApplyHint.IsVisible = ApplyLeftButton.IsVisible = ApplyRightButton.IsVisible = any;
+        ApplyHint.Text = ApplyHint.Text.Replace("pages", diff.Layout.Noun + "s");
 
         LeftLabel.FormattedText = Side("Left:  ", LeftColor, $"{left}, tag {diff.Left.Id}");
         RightLabel.FormattedText = Side("Right: ", RightColor, $"{right}, tag {diff.Right.Id}");
@@ -84,6 +88,21 @@ public partial class DiffPage : ContentPage, IQueryAttributable
             TextColor = color,
             FontAttributes = color is not null && color != Colors.Gray ? FontAttributes.Bold : FontAttributes.None,
         });
+
+    private void OnApplyLeft(object? sender, EventArgs e) => Apply(toLeft: true);
+    private void OnApplyRight(object? sender, EventArgs e) => Apply(toLeft: false);
+
+    /// <summary>Opens the editor on one side's tag with the other side's bytes, for the segments that differ and the other
+    /// side read, typed in as changes. Segments the other side could not read are left as they are.</summary>
+    private async void Apply(bool toLeft)
+    {
+        if (_diff is null) return;
+        var bytes = _diff.Differences
+            .Where(d => (toLeft ? d.Right : d.Left) is not null)
+            .ToDictionary(d => d.Segment, d => (toLeft ? d.Right : d.Left)!);
+        var (target, targetName, sourceName) = toLeft ? (_diff.Left, _leftName, _rightName) : (_diff.Right, _rightName, _leftName);
+        await AppNavigation.ToNfcApplyAsync(target, targetName, bytes, sourceName);
+    }
 
     private async void OnCopy(object? sender, EventArgs e)
     {
