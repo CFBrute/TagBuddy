@@ -500,4 +500,37 @@ public class TagEditTests
         Assert.True(edit.Undo());
         Assert.Empty(edit.Changes);
     }
+
+    [Fact]
+    public void Reset_puts_the_byte_under_the_cursor_back_and_walks_left()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");
+        At(edit, 5, 0, text: true);
+        edit.TypeText("abcd");                                   // page 5 fully changed, cursor now at page 6 byte 0
+        At(edit, 5, 2, text: true);                              // put the cursor in the middle of the change
+
+        edit.ResetAtCursor();
+        Assert.Equal((byte)5, edit.ValueAt(5, 2));               // back as read
+        Assert.Equal((byte)'d', edit.ValueAt(5, 3));             // untouched, after the cursor
+        Assert.Equal(edit.PositionOf(5, 1), edit.Cursor);
+
+        edit.ResetAtCursor();
+        edit.ResetAtCursor();
+        Assert.Equal(new byte?[] { null, null, null, (byte)'d' }, edit.Changes[5]);
+        Assert.Equal(edit.PositionOf(4, 3), edit.Cursor);       // walked into the page before
+
+        edit.ResetAtCursor();                                    // page 4 byte 3 was never changed: just steps left
+        Assert.Equal(edit.PositionOf(4, 2), edit.Cursor);
+        Assert.True(edit.Undo());                                // the last reset that changed something
+        Assert.Equal((byte)'a', edit.ValueAt(5, 0));
+    }
+
+    [Fact]
+    public void Reset_at_the_start_stays_put()
+    {
+        var edit = TagEdit.Blank(Ntag213);
+        edit.ResetAtCursor();
+        Assert.Equal(0, edit.Cursor);
+        Assert.False(edit.CanUndo);
+    }
 }

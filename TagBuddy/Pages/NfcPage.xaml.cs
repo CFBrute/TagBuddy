@@ -1167,7 +1167,8 @@ public partial class NfcPage : ContentPage
                 ? "The bytes are as the tag held them when it was read; only the ones you change are written."
                 : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
             $" \"{(noun == "page" ? "Page" : "Block")} to 00\" clears the cursor's {noun}, \"All to 00\" every {noun} shown. " +
-            "Undo and Redo go back or forward one keystroke at a time.";
+            "Undo and Redo go back or forward one keystroke at a time; \"Reset byte\" puts the byte under the cursor back as the tag had it and steps left, " +
+            "so it walks back over a change wherever the cursor is put.";
     }
 
     /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
@@ -1244,6 +1245,13 @@ public partial class NfcPage : ContentPage
     private void OnSegmentZeroAll(object? sender, EventArgs e)
     {
         _edit?.Fill(0x00);
+        SegmentEdited();
+    }
+
+    /// <summary>The byte under the cursor back as the tag had it, then one byte left; pressed again, it walks back.</summary>
+    private void OnSegmentResetByte(object? sender, EventArgs e)
+    {
+        _edit?.ResetAtCursor();
         SegmentEdited();
     }
 

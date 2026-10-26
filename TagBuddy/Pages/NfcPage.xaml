@@ -270,6 +270,9 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="SegmentZeroAllButton" Text="All to 00" Clicked="OnSegmentZeroAll"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <!-- The byte under the cursor back as the tag had it, then one byte left: resets by place, where Undo goes by time -->
+                        <Button x:Name="SegmentResetButton" Text="◀ Reset byte" Clicked="OnSegmentResetByte"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 
                     <!-- The pages or blocks, laid out like the read view; tap a byte to put the cursor there -->
