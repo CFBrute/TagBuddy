@@ -35,6 +35,13 @@
             </Grid>
             <controls:InfoExpander Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. To avoid locking a tag, the default is tried only when the tag confirms it has no wrong-attempt lock-out, and at most once per tag each session." />
 
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Offer to update a saved tag" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="UpdateSavedSwitch" Toggled="OnUpdateSavedToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <controls:InfoExpander Text="After you read a tag that you have already saved, if it has changed since, the app offers to update the saved copy. A saved copy that still matches is never asked about. Off, it never asks." />
+
             <!-- NTAG/Ultralight passwords the app has seen open a tag, remembered by serial like the Classic keys -->
             <Label x:Name="PasswordStoreInfo" FontSize="12" TextColor="Gray" />
             <Button x:Name="ForgetPasswordsButton" Text="Forget remembered tag passwords" Clicked="OnForgetRememberedPasswords"

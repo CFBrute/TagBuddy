@@ -585,6 +585,29 @@ public partial class NfcPage : ContentPage
         {
             MemoryLabel.Text = string.Empty;
         }
+
+        // Offer to bring a saved copy of this tag up to date when it has changed since it was saved.
+        if (!fromSaved && tag.HasMemoryDump && AppSettings.AskUpdateSavedTag)
+            _ = OfferToUpdateSavedTagAsync(tag);
+    }
+
+    /// <summary>After reading a tag that is already saved (same serial) but has changed since, offers to update the
+    /// saved copy so it stays current. A saved copy that already matches is never asked about (see OutdatedReadAsync);
+    /// the Settings toggle turns the offer off.</summary>
+    private async Task OfferToUpdateSavedTagAsync(NfcTagInfo tag)
+    {
+        try
+        {
+            if (await _saved.OutdatedReadAsync(tag) is not { } item) return;
+            if (_last?.Id != tag.Id) return;   // another tag was read while the files were checked
+            if (!await DisplayAlertAsync("Update the saved tag?",
+                    $"You have this tag saved as \"{item.DisplayName}\", and it has changed since. Update the saved copy " +
+                    "to what you just read?", "Update", "Keep"))
+                return;
+            await _saved.UpdateReadAsync(item, tag);
+            Notice.Show($"Updated \"{item.DisplayName}\"");
+        }
+        catch { /* a read or save hiccup: just skip the offer */ }
     }
 
     /// <summary>The tag's content, or what it is when there is none to show: the private text once unlocked.</summary>

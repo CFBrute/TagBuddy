@@ -9,6 +9,15 @@ public static class AppSettings
     private const string MaxBrightnessKey = "max-brightness";
     private const string NfcSoundKey = "nfc-sound";
     private const string AutoTryDefaultKey = "nfc-auto-default";
+    private const string UpdateSavedTagKey = "nfc-update-saved";
+
+    /// <summary>Whether, after reading a tag that is already saved (same serial) but has changed since, the app offers
+    /// to update the saved copy. On by default; off never asks. A saved copy that already matches is never asked about.</summary>
+    public static bool AskUpdateSavedTag
+    {
+        get => Preferences.Default.Get(UpdateSavedTagKey, true);
+        set => Preferences.Default.Set(UpdateSavedTagKey, value);
+    }
 
     /// <summary>Whether Android plays its own sound when the NFC tab finds a tag. Off silences it while the app reads
     /// or writes; a private tag that opens the app from outside still gets Android's sound, before the app is involved.</summary>
