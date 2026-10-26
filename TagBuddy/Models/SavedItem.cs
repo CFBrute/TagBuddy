@@ -63,6 +63,55 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
         }
     }
 
+    private bool _groupAlt;
+
+    /// <summary>Whether this item's group is an alternate-shaded one, matching its heading, so neighbouring
+    /// groups are told apart. Only meaningful with <see cref="UnderGroup"/>. On screen only.</summary>
+    [JsonIgnore]
+    public bool GroupAlt
+    {
+        get => _groupAlt;
+        set
+        {
+            if (_groupAlt == value) return;
+            _groupAlt = value;
+            PropertyChanged?.Invoke(this, new(nameof(GroupAlt)));
+        }
+    }
+
+    private bool _firstInGroup;
+
+    /// <summary>The first row under a group heading, whose top-left corner is rounded so the indented block flows
+    /// out from under the full-width heading. Only meaningful with <see cref="UnderGroup"/>. On screen only.</summary>
+    [JsonIgnore]
+    public bool FirstInGroup
+    {
+        get => _firstInGroup;
+        set
+        {
+            if (_firstInGroup == value) return;
+            _firstInGroup = value;
+            PropertyChanged?.Invoke(this, new(nameof(FirstInGroup)));
+        }
+    }
+
+    private bool _lastInGroup;
+
+    /// <summary>The last row under a group heading, given a bottom gap and rounded bottom corners so an open group
+    /// ends like a card and is set apart from the next. Only meaningful with <see cref="UnderGroup"/>. On
+    /// screen only.</summary>
+    [JsonIgnore]
+    public bool LastInGroup
+    {
+        get => _lastInGroup;
+        set
+        {
+            if (_lastInGroup == value) return;
+            _lastInGroup = value;
+            PropertyChanged?.Invoke(this, new(nameof(LastInGroup)));
+        }
+    }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
 
