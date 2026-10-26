@@ -1251,19 +1251,14 @@ public partial class NfcPage : ContentPage
     private void UpdateSegmentTools()
     {
         if (_edit is not { } edit) return;
-        SegmentUndoButton.IsEnabled = edit.CanUndo;
-        SegmentRedoButton.IsEnabled = edit.CanRedo;
+        // Whole-tag buttons kept at the top.
         SegmentRevertButton.IsEnabled = edit.HasChanges;
-        SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
 
-        // Byte selection: the Select button lights up while on (long-press the grid to copy the selection).
-        Palette.Select(SegmentSelectButton, SegmentGrid.Selecting);
-        SegmentSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
-
-        // The floating toolbar mirrors the most-used buttons so they stay reachable while the grid scrolls.
+        // The floating toolbar holds the per-byte tools so they stay reachable while the grid scrolls.
+        string row = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
         FloatUndoButton.IsEnabled = edit.CanUndo;
         FloatRedoButton.IsEnabled = edit.CanRedo;
-        FloatRevertButton.IsEnabled = edit.HasChanges;
+        FloatZeroRowButton.Text = row;
         Palette.Select(FloatSelectButton, SegmentGrid.Selecting);
         FloatSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
         UpdateFloatingToolsVisibility();

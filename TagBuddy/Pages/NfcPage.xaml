@@ -290,35 +290,16 @@
                     </HorizontalStackLayout>
 
                     <VerticalStackLayout x:Name="EditTab" Spacing="10">
-                    <!-- The edit history: back and forward in time, and the byte under the cursor back as the tag had
-                         it, then one byte left (resets by place, where Undo goes by time). Tapping a byte's hex or its
-                         text picks which column typing goes to. -->
+                    <!-- Whole-tag changes stay here; the per-byte tools (undo, redo, reset, block to 00, select) are on
+                         the floating toolbar so they follow the grid down. Tap a byte's hex or its text to pick the
+                         column typing goes to; long-press the grid to copy. -->
                     <HorizontalStackLayout Spacing="6">
-                        <Button x:Name="SegmentUndoButton" Text="↶ Undo" Clicked="OnSegmentUndo"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Button x:Name="SegmentRedoButton" Text="↷ Redo" Clicked="OnSegmentRedo"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Button x:Name="SegmentResetButton" Text="◀ Reset byte" Clicked="OnSegmentResetByte"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                    </HorizontalStackLayout>
-                    <!-- Wholesale changes: the cursor's segment or every writable segment in the range to 00, or every
-                         change dropped -->
-                    <HorizontalStackLayout Spacing="6">
-                        <Button x:Name="SegmentZeroRowButton" Text="Row to 00" Clicked="OnSegmentZeroRow"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="SegmentZeroAllButton" Text="All to 00" Clicked="OnSegmentZeroAll"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                         <Button x:Name="SegmentRevertButton" Text="Revert" Clicked="OnSegmentRevert"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
-
-                    <!-- Select a run of bytes to work with; long-press the grid to copy (the selection, or the block
-                         pressed) as hex or as text. Pasting uses the keyboard's own paste (type over the bytes). -->
-                    <HorizontalStackLayout Spacing="6">
-                        <Button x:Name="SegmentSelectButton" Text="Select" Clicked="OnSegmentSelect"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Label Text="Long-press the grid to copy" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
-                    </HorizontalStackLayout>
+                    <Label Text="Long-press the grid to copy" FontSize="12" TextColor="Gray" />
 
                     <!-- Block 0 (the UID) is never written on a normal card; a magic/clone card lets it be rewritten.
                          Off by default, shown only for a MIFARE Classic card that was read. Sits above the grid so it
@@ -566,7 +547,7 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
                         <Button x:Name="FloatResetButton" Text="◀ Reset" Clicked="OnSegmentResetByte"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
-                        <Button x:Name="FloatRevertButton" Text="Revert" Clicked="OnSegmentRevert"
+                        <Button x:Name="FloatZeroRowButton" Text="Block to 00" Clicked="OnSegmentZeroRow"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
                         <Button x:Name="FloatSelectButton" Text="Select" Clicked="OnSegmentSelect"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
