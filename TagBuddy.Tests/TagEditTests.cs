@@ -56,7 +56,7 @@ public class TagEditTests
         Assert.NotNull(Classic1K.WhyNotWritable(3));
         Assert.NotNull(Classic1K.WhyNotWritable(64));
         Assert.Null(Classic1K.WhyNotWritable(1));
-        Assert.Equal(62, Classic1K.LastWritable);
+        Assert.Equal(63, Classic1K.LastWritable);   // the last trailer: its keys can be typed once the sector opened
     }
 
     [Theory]
@@ -81,7 +81,7 @@ public class TagEditTests
     {
         var edit = TagEdit.Blank(Classic1K);
         Assert.Equal([1, 2, 4, 5, 6, 8], edit.Segments.Take(6));
-        Assert.Equal(62 - 1 + 1 - 15, edit.Segments.Count);   // blocks 1-62 without the 15 trailers among them
+        Assert.Equal(63 - 1 + 1 - 16, edit.Segments.Count);   // blocks 1-63 without the 16 trailers among them
     }
 
     // ------------------------------------------------------------------------------------------------ from a read
@@ -636,5 +636,37 @@ public class TagEditTests
         edit.SetSectorKey(1, keyB: false, null);
         edit.SetSectorKey(1, keyB: true, null);
         Assert.Empty(edit.Sectors);
+    }
+
+    [Fact]
+    public void The_last_sectors_trailer_is_in_the_edit_of_a_read()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(15), "04");
+        Assert.Equal(63, edit.To);
+        Assert.Contains(63, edit.Segments);                      // its keys can be typed, like any other opened sector
+        Assert.True(edit.SetSectorKey(15, keyB: true, [1, 2, 3, 4, 5, 6]));
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6 }, edit.ToWrite().Sectors[15].KeyB);
+    }
+
+    [Fact]
+    public void Both_keys_can_be_set_on_every_opened_sector_at_once()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(1, 2, 15), "04");
+        byte[] keyA = [0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6], keyB = [0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6];
+
+        Assert.Equal(3, edit.SetAllSectorsKeys(keyA, keyB));
+        foreach (var sector in new[] { 1, 2, 15 })
+        {
+            Assert.Equal(keyA, edit.PendingKey(sector, keyB: false));   // shows in each trailer row and sector's key rows
+            Assert.Equal(keyB, edit.PendingKey(sector, keyB: true));
+        }
+        Assert.Null(edit.SectorChangeFor(3));                    // did not open: left alone
+
+        Assert.True(edit.Undo());                                // one undo step for every sector
+        Assert.Empty(edit.Sectors);
+
+        Assert.Equal(3, edit.SetAllSectorsKeys(null, keyB));     // one key only: key A kept
+        Assert.Null(edit.PendingKey(1, keyB: false));
+        Assert.Equal(keyB, edit.PendingKey(1, keyB: true));
     }
 }

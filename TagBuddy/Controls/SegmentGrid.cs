@@ -23,6 +23,24 @@ public class SegmentGrid : GraphicsView, IDrawable
     /// <summary>"005" and two spaces before the hex.</summary>
     private const int NumberColumns = 5;
 
+    /// <summary>One row showing part of one segment, under a label of its own: a key's six bytes of a sector trailer
+    /// ("Key A  FF FF FF FF  FF FF  ······"), edited like any row of the full grid.</summary>
+    public sealed record RowWindow(int Segment, int Start, int Count, string Label);
+
+    private RowWindow? _window;
+
+    /// <summary>Shows only <see cref="RowWindow"/>'s bytes of its segment instead of every row; null for the full grid.</summary>
+    public RowWindow? Window
+    {
+        get => _window;
+        set { if (_window == value) return; _window = value; Refresh(); }
+    }
+
+    /// <summary>The columns before the hex, the first byte of a segment shown and how many are shown on a row.</summary>
+    private int Lead => _window is { } w ? w.Label.Length + 2 : NumberColumns;
+    private int First => _window?.Start ?? 0;
+    private int Shown => _window?.Count ?? _edit?.Layout.SegmentSize ?? 4;
+
     /// <summary>A row: a segment, or (MIFARE Classic) the header of the sector below.</summary>
     private sealed record Row(int Segment, string? Header);
 
@@ -50,9 +68,9 @@ public class SegmentGrid : GraphicsView, IDrawable
     public void Refresh()
     {
         _rows = BuildRows();
-        int size = _edit?.Layout.SegmentSize ?? 4;
+        int size = Shown;
         // As wide as the rows need: a role is only written on the rows that are never written.
-        int roles = _edit is { } edit
+        int roles = _edit is { } edit && _window is null
             ? _rows.Where(r => r.Header is null && edit.WhyNotWritable(r.Segment) is not null)
                    .Select(r => edit.RoleOf(r.Segment).Length).DefaultIfEmpty(0).Max()
             : 0;
@@ -82,8 +100,9 @@ public class SegmentGrid : GraphicsView, IDrawable
         get
         {
             if (_edit is not { Length: > 0 } edit) return 0;
-            int size = edit.Layout.SegmentSize;
-            var (_, index) = edit.At(edit.Cursor);
+            int size = Shown;
+            var (_, at) = edit.At(edit.Cursor);
+            int index = Math.Clamp(at - First, 0, size - 1);
             int column = edit.InText ? AsciiStart(size) + index : HexStart(index);
             return ColumnX(column);
         }
@@ -93,6 +112,7 @@ public class SegmentGrid : GraphicsView, IDrawable
     {
         var rows = new List<Row>();
         if (_edit is not { } edit) return rows;
+        if (_window is { } window) return [new Row(window.Segment, null)];
 
         // MIFARE Classic: show block 0 (the manufacturer/serial block) as a read-only row too, as the read view
         // does, even though it is never part of the writable range, so the whole card is visible while editing.
@@ -120,9 +140,9 @@ public class SegmentGrid : GraphicsView, IDrawable
 
     /// <summary>The column of byte <paramref name="k"/> in the hex: two digits and a space each, one more space every
     /// four bytes, as the read view groups them.</summary>
-    private static int HexStart(int k) => NumberColumns + k * 3 + k / 4;
-    private static int AsciiStart(int size) => HexStart(size - 1) + 2 + 2;
-    private static int RoleStart(int size) => AsciiStart(size) + size + 2;
+    private int HexStart(int k) => Lead + k * 3 + k / 4;
+    private int AsciiStart(int size) => HexStart(size - 1) + 2 + 2;
+    private int RoleStart(int size) => AsciiStart(size) + size + 2;
 
     // ------------------------------------------------------------------------------------------------ drawing
 
@@ -140,7 +160,7 @@ public class SegmentGrid : GraphicsView, IDrawable
 
         canvas.Font = MonoFont;
         canvas.FontSize = FontSize;
-        int size = edit.Layout.SegmentSize;
+        int size = Shown;
         var (cursorSegment, cursorIndex) = edit.Cursor < edit.Length ? edit.At(edit.Cursor) : (-1, -1);
 
         for (int r = 0; r < _rows.Count; r++)
@@ -155,10 +175,12 @@ public class SegmentGrid : GraphicsView, IDrawable
             }
 
             int s = row.Segment;
-            Cell(canvas, s.ToString("D3"), 0, y, 3, dim);
+            if (_window is { } window) Cell(canvas, window.Label, 0, y, window.Label.Length, text);
+            else Cell(canvas, s.ToString("D3"), 0, y, 3, dim);
 
-            for (int k = 0; k < size; k++)
+            for (int c = 0; c < size; c++)
             {
+                int k = First + c;   // the byte of the segment; c is its place on the row
                 byte? value = edit.ValueAt(s, k);
                 bool writable = edit.WritableByte(s, k);   // per byte: a trailer's key bytes are editable, its access bits are not
                 var color = !writable || value is null ? dim : edit.IsEdited(s, k) ? typed : text;
@@ -171,18 +193,18 @@ public class SegmentGrid : GraphicsView, IDrawable
                 if (s == cursorSegment && k == cursorIndex)
                 {
                     canvas.FillColor = edit.InText ? echo : cursor;
-                    canvas.FillRectangle(ColumnX(HexStart(k) + (edit.InText ? 0 : edit.Nibble)), y + 2, CharWidth * (edit.InText ? 2 : 1), LineHeight - 4);
+                    canvas.FillRectangle(ColumnX(HexStart(c) + (edit.InText ? 0 : edit.Nibble)), y + 2, CharWidth * (edit.InText ? 2 : 1), LineHeight - 4);
                     canvas.FillColor = edit.InText ? cursor : echo;
-                    canvas.FillRectangle(ColumnX(AsciiStart(size) + k), y + 2, CharWidth, LineHeight - 4);
+                    canvas.FillRectangle(ColumnX(AsciiStart(size) + c), y + 2, CharWidth, LineHeight - 4);
                 }
 
-                Cell(canvas, value?.ToString("X2") ?? "··", HexStart(k), y, 2, color);
+                Cell(canvas, value?.ToString("X2") ?? "··", HexStart(c), y, 2, color);
                 var ch = value switch { null => "·", >= 0x20 and < 0x7F => ((char)value).ToString(), _ => "." };
-                Cell(canvas, ch, AsciiStart(size) + k, y, 1, color);
+                Cell(canvas, ch, AsciiStart(size) + c, y, 1, color);
             }
 
             // A role (e.g. "serial", "trailer") labels a row the editor leaves alone as a whole.
-            if (edit.WhyNotWritable(s) is not null && edit.RoleOf(s) is { Length: > 0 } role)
+            if (_window is null && edit.WhyNotWritable(s) is not null && edit.RoleOf(s) is { Length: > 0 } role)
                 Cell(canvas, role, RoleStart(size), y, role.Length, dim);
         }
     }
@@ -217,7 +239,8 @@ public class SegmentGrid : GraphicsView, IDrawable
         int r = (int)((point.Y - Pad) / LineHeight);
         if (r < 0 || r >= _rows.Count || _rows[r].Header is not null) return;
 
-        int size = edit.Layout.SegmentSize;
+        if (!IsEnabled) return;
+        int size = Shown;
         int column = (int)Math.Floor((point.X - Pad) / CharWidth);
         bool inText = column >= AsciiStart(size) - 1;
         int k = 0, nibble = 0;
@@ -228,7 +251,7 @@ public class SegmentGrid : GraphicsView, IDrawable
             nibble = column - HexStart(k) == 1 ? 1 : 0;
         }
 
-        int position = edit.PositionOf(_rows[r].Segment, k);
+        int position = edit.PositionOf(_rows[r].Segment, First + k);
         if (position < 0) return;                       // a row that is never written
         edit.Place(position, inText, nibble);
         Invalidate();

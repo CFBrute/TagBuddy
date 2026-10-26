@@ -70,6 +70,14 @@ public partial class NfcPage : ContentPage
     private const string InputSentinel = "  ";
     private bool _resettingInput;
 
+    /// <summary>Where the keyboard's typing goes: the byte grid, the Sectors tab's key rows for the cursor's sector
+    /// (both the edit's own bytes), or the "all sectors" key rows (a scratch edit of their own).</summary>
+    private enum TypingTarget { Grid, SectorKeys, AllKeys }
+    private TypingTarget _typing = TypingTarget.Grid;
+
+    /// <summary>Key A (row 0) and key B (row 1) to set on every opened sector, typed like the grid's rows.</summary>
+    private readonly TagEdit _allKeys = TagEdit.Blank(new SegmentLayout(TagFamily.Iso15693, "keys", 6, 2));
+
     /// <summary>The segment write last armed, so a successful write to the expected tag can be marked as done.</summary>
     private SegmentWrite? _segmentWrite;
 
@@ -94,6 +102,14 @@ public partial class NfcPage : ContentPage
         }
 
         SegmentGrid.CursorPlaced += OnSegmentCursorPlaced;
+        SectorKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
+        SectorKeyBGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
+        AllKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.AllKeys);
+        AllKeyBGrid.CursorPlaced += () => StartTyping(TypingTarget.AllKeys);
+        AllKeyAGrid.Window = new SegmentGrid.RowWindow(0, 0, 6, "Key A");
+        AllKeyBGrid.Window = new SegmentGrid.RowWindow(1, 0, 6, "Key B");
+        AllKeyAGrid.Edit = AllKeyBGrid.Edit = _allKeys;
+        UpdateAllKeys();
         WriteTypePicker.SelectedIndex = 0;
         SetMode(write: false);
         SetPasswordMode(asText: false);   // hex by default, the way RFID tools show a password
@@ -1151,8 +1167,6 @@ public partial class NfcPage : ContentPage
     private void UpdateSegmentTools()
     {
         if (_edit is not { } edit) return;
-        Palette.Select(SegmentHexButton, !edit.InText);
-        Palette.Select(SegmentTextButton, edit.InText);
         SegmentUndoButton.IsEnabled = edit.CanUndo;
         SegmentRedoButton.IsEnabled = edit.CanRedo;
         SegmentRevertButton.IsEnabled = edit.HasChanges;
@@ -1189,7 +1203,7 @@ public partial class NfcPage : ContentPage
                 : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
             $" \"{(noun == "page" ? "Page" : "Block")} to 00\" clears the cursor's {noun}, \"All to 00\" every {noun} shown. " +
             "Undo and Redo go back or forward one keystroke at a time; \"Reset byte\" puts the byte under the cursor back as the tag had it and steps left, " +
-            "so it walks back over a change wherever the cursor is put.";
+            "so it walks back over a change wherever the cursor is put. \"Revert\" drops every change.";
     }
 
     private void OnEditTabSelected(object? sender, EventArgs e) => SelectSegmentTab(sectors: false);
@@ -1213,50 +1227,85 @@ public partial class NfcPage : ContentPage
     }
 
     /// <summary>A byte was tapped: the keyboard's typing goes there.</summary>
-    private void OnSegmentCursorPlaced()
+    private void OnSegmentCursorPlaced() => StartTyping(TypingTarget.Grid);
+
+    /// <summary>A byte of the grid or of a key row was tapped: the keyboard's typing goes to that edit, through the
+    /// hidden input next to it.</summary>
+    private void StartTyping(TypingTarget target)
     {
-        UpdateSegmentTools();     // moves the hidden input to the cursor first, so focusing it scrolls there
+        _typing = target;
+        if (target == TypingTarget.AllKeys) UpdateAllKeys();
+        else UpdateSegmentTools();   // moves the hidden input to the cursor first, so focusing it scrolls there
         ResetInput();
-        SegmentInput.Focus();
+        TypingInput.Focus();
     }
+
+    private Entry TypingInput => _typing switch
+    {
+        TypingTarget.SectorKeys => SectorKeyInput,
+        TypingTarget.AllKeys => AllKeysInput,
+        _ => SegmentInput,
+    };
+
+    private TagEdit? TypingEdit => _typing == TypingTarget.AllKeys ? _allKeys : _edit;
 
     private void ResetInput()
     {
         _resettingInput = true;
         try
         {
-            SegmentInput.Text = InputSentinel;
-            SegmentInput.CursorPosition = InputSentinel.Length;
+            TypingInput.Text = InputSentinel;
+            TypingInput.CursorPosition = InputSentinel.Length;
         }
         finally { _resettingInput = false; }
     }
 
-    /// <summary>Keystrokes from the hidden input: characters typed (or pasted) after the sentinel, or backspaces that
-    /// shortened it. In the hex column only hex digits count; in the text column every character does.</summary>
+    /// <summary>Keystrokes from a hidden input: characters typed (or pasted) after the sentinel, or backspaces that
+    /// shortened it. In the hex column only hex digits count; in the text column every character does. Typing in a
+    /// sector's key rows stays in that sector's trailer, so it never runs on into the next sector's blocks.</summary>
     private void OnSegmentInput(object? sender, TextChangedEventArgs e)
     {
-        if (_resettingInput || _edit is not { } edit) return;
+        if (_resettingInput || sender != TypingInput || TypingEdit is not { } edit) return;
+        int? within = _typing == TypingTarget.SectorKeys && edit.Length > 0 ? edit.At(edit.Cursor).Segment : null;
+        if (within is { } segment && !MifareClassicKeys.IsTrailer(segment)) { ResetInput(); return; }   // the cursor left the keys
+        bool Inside(int position) => position >= 0 && position < edit.Length && (within is null || edit.At(position).Segment == within);
+
         var text = e.NewTextValue ?? string.Empty;
         if (text.Length < InputSentinel.Length)
         {
-            for (int i = text.Length; i < InputSentinel.Length; i++) edit.Backspace();
+            for (int i = text.Length; i < InputSentinel.Length; i++)
+            {
+                if (within is not null && (edit.InText || edit.Nibble == 0) && !Inside(edit.Cursor - 1)) break;
+                edit.Backspace();
+            }
         }
         else if (text.Length > InputSentinel.Length)
         {
             var typed = text.StartsWith(InputSentinel, StringComparison.Ordinal) ? text[InputSentinel.Length..] : text[..^InputSentinel.Length];
-            bool ended = edit.InText
-                ? edit.TypeText(typed) < Encoding.UTF8.GetByteCount(typed)
-                : typed.Where(Uri.IsHexDigit).Any(c => !edit.TypeHex(c));
-            if (ended) Notice.Show($"That is the end of {edit.Layout.Noun}s {edit.From}-{edit.To}");
+            bool ended = within is null
+                ? edit.InText
+                    ? edit.TypeText(typed) < Encoding.UTF8.GetByteCount(typed)
+                    : typed.Where(Uri.IsHexDigit).Any(c => !edit.TypeHex(c))
+                : edit.InText
+                    ? typed.Any(c => !Inside(edit.Cursor) || edit.TypeText(c.ToString()) == 0)
+                    : typed.Where(Uri.IsHexDigit).Any(c => !Inside(edit.Cursor) || !edit.TypeHex(c));
+            if (ended)
+                Notice.Show(_typing switch
+                {
+                    TypingTarget.Grid => $"That is the end of {edit.Layout.Noun}s {edit.From}-{edit.To}",
+                    _ => "That is the end of key B",
+                });
         }
         ResetInput();
-        SegmentEdited();
+        if (_typing == TypingTarget.AllKeys) UpdateAllKeys();
+        else SegmentEdited();
     }
 
-    /// <summary>Enter: to the start of the next row (Android closes the keyboard on Enter, so it is opened again).</summary>
+    /// <summary>Enter: to the start of the next row (Android closes the keyboard on Enter, so it is opened again). In
+    /// the key rows Enter just closes the keyboard.</summary>
     private void OnSegmentInputCompleted(object? sender, EventArgs e)
     {
-        if (_edit is not { } edit) return;
+        if (_typing != TypingTarget.Grid || _edit is not { } edit) return;
         int size = edit.Layout.SegmentSize;
         edit.Place(Math.Min((edit.Cursor / size + 1) * size, Math.Max(0, edit.Length - 1)), edit.InText);
         SegmentEdited();
@@ -1328,15 +1377,16 @@ public partial class NfcPage : ContentPage
                 var change = edit.SectorChangeFor(sector);
                 var rules = change?.Rules ?? edit.CurrentRules(sector);
 
-                // Keys can be edited only when the sector opened and the rules still let them change.
-                bool keysOpen = can && (rules is null || MifareClassicKeys.KeysChangeable(rules.Trailer));
+                // Keys can be edited only when the sector opened and the rules still let them change. The two rows
+                // are the trailer row's key bytes, so they always show what the grid (or "all sectors") set.
+                bool keysOpen = can && edit.KeysChangeable(sector);
                 SectorKeysPanel.IsVisible = can;
-                KeyARow.IsEnabled = SectorKeyAEntry.IsEnabled = SectorKeyBEntry.IsEnabled = keysOpen;
+                int trailer = TagEdit.TrailerOf(sector);
+                ShowKeyRow(SectorKeyAGrid, new SegmentGrid.RowWindow(trailer, 0, 6, "Key A"), edit, keysOpen);
+                ShowKeyRow(SectorKeyBGrid, new SegmentGrid.RowWindow(trailer, 10, 6, "Key B"), edit, keysOpen);
                 SectorKeyHint.IsVisible = keysOpen;
                 KeysLockedLabel.IsVisible = can && !keysOpen;
                 KeyASpareLabel.IsVisible = keysOpen && rules is not null && MifareClassicKeys.KeyAUnused(rules);
-                SyncKeyField(SectorKeyAEntry, edit.PendingKey(sector, keyB: false));
-                SyncKeyField(SectorKeyBEntry, edit.PendingKey(sector, keyB: true));
 
                 if (can)
                 {
@@ -1362,6 +1412,7 @@ public partial class NfcPage : ContentPage
         finally { _renderingSegments = false; }
 
         UpdateSectorChangeList(edit);
+        UpdateAllKeys();
     }
 
     /// <summary>Picked another sector in the Sectors tab: move the cursor to its first editable block, so the panel
@@ -1374,6 +1425,7 @@ public partial class NfcPage : ContentPage
         int sector = changeable[SectorPicker.SelectedIndex];
         int block = edit.Segments.Where(b => MifareClassicKeys.SectorOf(b) == sector).DefaultIfEmpty(-1).First();
         if (block < 0) return;
+        if (_typing == TypingTarget.SectorKeys) SectorKeyInput.Unfocus();   // the key rows now show another sector
         edit.Place(edit.PositionOf(block, 0), edit.InText);
         SegmentEdited();
     }
@@ -1421,28 +1473,68 @@ public partial class NfcPage : ContentPage
                 }.Where(x => x is not null))));
     }
 
-    /// <summary>Fills a key field from the sector's pending key without its TextChanged handler treating it as input.
-    /// Leaves the field alone when it already shows that key (as hex or as text), so typing is not clobbered.</summary>
-    private void SyncKeyField(Entry entry, byte[]? pending)
+    /// <summary>Points a Sectors-tab key row at a key of the cursor sector's trailer and redraws it; a sector whose
+    /// rules lock the keys shows them dimmed and takes no taps.</summary>
+    private static void ShowKeyRow(SegmentGrid grid, SegmentGrid.RowWindow window, TagEdit edit, bool open)
     {
-        var shown = MifareClassicKeys.TryParseKeyOrText(entry.Text, out var typed) ? typed : null;
-        bool matches = pending is null ? shown is null && string.IsNullOrEmpty(entry.Text) : shown is not null && shown.AsSpan().SequenceEqual(pending);
-        if (!matches) entry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+        if (grid.Edit != edit) grid.Edit = edit;
+        grid.Window = window;
+        grid.IsEnabled = open;
+        grid.Opacity = open ? 1 : 0.5;
+        grid.Invalidate();
     }
 
-    private void OnKeyAChanged(object? sender, TextChangedEventArgs e) => OnKeyFieldChanged(SectorKeyAEntry, keyB: false);
-    private void OnKeyBChanged(object? sender, TextChangedEventArgs e) => OnKeyFieldChanged(SectorKeyBEntry, keyB: true);
+    /// <summary>A key typed in full in an "all sectors" row (all six bytes), or null when it was left blank or half done.</summary>
+    private byte[]? AllKey(int row) =>
+        Enumerable.Range(0, 6).All(i => _allKeys.IsEdited(row, i))
+            ? Enumerable.Range(0, 6).Select(i => _allKeys.ValueAt(row, i)!.Value).ToArray() : null;
 
-    /// <summary>A key typed in a Sectors-tab field: set the cursor sector's key A (or B) as those six bytes, blank keeps
-    /// it. The same bytes are in the trailer row, so the grid redraws; the field is not re-synced, so typing is kept.</summary>
-    private void OnKeyFieldChanged(Entry entry, bool keyB)
+    private bool AllKeyPartial(int row) =>
+        AllKey(row) is null && Enumerable.Range(0, 6).Any(i => _allKeys.IsEdited(row, i));
+
+    /// <summary>Redraws the "all sectors" key rows and says what "Set on every sector" would do.</summary>
+    private void UpdateAllKeys()
     {
-        if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
-        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
-        edit.SetSectorKey(sector, keyB, MifareClassicKeys.TryParseKeyOrText(entry.Text, out var key) ? key : null);
-        SegmentGrid.Invalidate();
-        UpdateSectorChangeList(edit);
-        ArmWrite();
+        AllKeyAGrid.Invalidate();
+        AllKeyBGrid.Invalidate();
+        int sectors = _edit is { } edit ? edit.ChangeableSectors.Count(edit.KeysChangeable) : 0;
+        bool any = AllKey(0) is not null || AllKey(1) is not null;
+        AllKeysApplyButton.IsEnabled = any && sectors > 0 && !AllKeyPartial(0) && !AllKeyPartial(1);
+        AllKeysClearButton.IsEnabled = _allKeys.HasChanges;
+        AllKeysHint.Text = AllKeyPartial(0) || AllKeyPartial(1)
+            ? "A key is six bytes: finish it, or clear it to leave that key as it is."
+            : $"Tap a byte and type key A and/or key B (hex, or tap the text side for characters); a key left as ·· stays as each sector has it. " +
+              $"Sets them on every sector that opened and whose rules let its keys change ({sectors}); each sector's key rows and trailer show them, " +
+              "and Undo in the Edit tab takes them back in one step.";
+    }
+
+    /// <summary>Puts the typed key A and/or key B on every sector whose keys can change, as if typed in each trailer.</summary>
+    private async void OnAllKeysApply(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit) return;
+        byte[]? keyA = AllKey(0), keyB = AllKey(1);
+        if (keyA is null && keyB is null) return;
+        int sectors = edit.ChangeableSectors.Count(edit.KeysChangeable);
+        var keys = string.Join(" and ", new[]
+        {
+            keyA is null ? null : "key A " + MifareClassicKeys.KeyHex(keyA),
+            keyB is null ? null : "key B " + MifareClassicKeys.KeyHex(keyB),
+        }.Where(k => k is not null));
+        bool sure = await DisplayAlertAsync("Set keys on every sector?",
+            $"Set {keys} on every opened sector whose keys can change ({sectors})? The phone remembers new keys for this tag " +
+            "— keep a copy, or the sectors cannot be opened on another phone. Nothing is written until you hold the tag.",
+            "Set keys", "Cancel");
+        if (!sure) return;
+        edit.SetAllSectorsKeys(keyA, keyB);
+        SegmentEdited();
+        UpdateAllKeys();
+    }
+
+    private void OnAllKeysClear(object? sender, EventArgs e)
+    {
+        _allKeys.RevertAll();
+        _allKeys.Place(0, _allKeys.InText);
+        UpdateAllKeys();
     }
 
     /// <summary>Unlocks or locks editing of block 0 (the UID). Only a magic/clone card can take the write; a warning
@@ -1580,18 +1672,6 @@ public partial class NfcPage : ContentPage
         RenderSegments();
         UpdateExpectSummary();
         ArmWrite();
-    }
-
-    private void OnSegmentHex(object? sender, EventArgs e) => SetSegmentColumn(inText: false);
-    private void OnSegmentText(object? sender, EventArgs e) => SetSegmentColumn(inText: true);
-
-    /// <summary>Moves the cursor to the hex or the text column of the same byte.</summary>
-    private void SetSegmentColumn(bool inText)
-    {
-        if (_edit is not { } edit) return;
-        edit.Place(edit.Cursor, inText);
-        SegmentEdited();
-        OnSegmentCursorPlaced();
     }
 
     // ---------------------------------------------------------------- dumps (write side)
