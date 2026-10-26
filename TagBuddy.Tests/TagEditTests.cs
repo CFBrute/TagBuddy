@@ -533,4 +533,99 @@ public class TagEditTests
         Assert.Equal(0, edit.Cursor);
         Assert.False(edit.CanUndo);
     }
+
+    // ------------------------------------------------------------------------------------------------ block 0 and key A
+
+    private static SegmentRead ReadClassic(params int[] openedSectors)
+    {
+        // As a real read: only the blocks of sectors a key opened are in the data (1K: four blocks per sector).
+        var data = new Dictionary<int, byte[]>();
+        foreach (var s in openedSectors)
+            for (int b = 0; b < 4; b++) { int block = s * 4 + b; data[block] = Enumerable.Repeat((byte)block, 16).ToArray(); }
+        return new SegmentRead(Classic1K, data, new Dictionary<int, string>()) { OpenedSectors = new HashSet<int>(openedSectors) };
+    }
+
+    [Fact]
+    public void Block_0_is_locked_by_default_but_can_be_unlocked_and_edited_for_a_magic_card()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(0), "04");
+        Assert.True(edit.CanEditBlockZero);
+        Assert.NotNull(edit.WhyNotWritable(0));            // locked unless unlocked by hand
+        Assert.DoesNotContain(0, edit.Segments);
+
+        edit.SetBlockZeroEditable(true);
+        Assert.True(edit.AllowBlockZero);
+        Assert.Null(edit.WhyNotWritable(0));
+        Assert.Equal(0, edit.Segments[0]);                 // leads the writable run
+        At(edit, 0, 0);
+        Hex(edit, "AA");
+        Assert.Equal((byte)0xAA, edit.ValueAt(0, 0));
+        Assert.Contains(0, edit.Changes.Keys);
+
+        edit.SetBlockZeroEditable(false);                  // locking it again drops the edit
+        Assert.NotNull(edit.WhyNotWritable(0));
+        Assert.DoesNotContain(0, edit.Segments);
+        Assert.DoesNotContain(0, edit.Changes.Keys);
+    }
+
+    [Fact]
+    public void Block_0_check_byte_is_locked_and_follows_the_UID()
+    {
+        // Block 0 starts 04 11 22 33 with BCC = 04^11^22^33, then the maker bytes.
+        byte bcc = 0x04 ^ 0x11 ^ 0x22 ^ 0x33;
+        var data = new Dictionary<int, byte[]> { [0] = [0x04, 0x11, 0x22, 0x33, bcc, 0x08, .. new byte[10]] };
+        for (int b = 1; b < 4; b++) data[b] = new byte[16];
+        var edit = TagEdit.FromTag(new SegmentRead(Classic1K, data, new Dictionary<int, string>()) { OpenedSectors = new HashSet<int> { 0 } }, "04");
+        edit.SetBlockZeroEditable(true);
+
+        Assert.Equal(-1, edit.PositionOf(0, 4));              // the check byte is never a place the cursor can edit
+        Assert.True(edit.PositionOf(0, 3) >= 0 && edit.PositionOf(0, 5) >= 0);   // but the bytes either side are
+
+        At(edit, 0, 0);
+        Hex(edit, "AA");                                       // change the first UID byte to AA
+        Assert.Equal((byte)0xAA, edit.ValueAt(0, 0));
+        Assert.Equal((byte)(0xAA ^ 0x11 ^ 0x22 ^ 0x33), edit.ValueAt(0, 4));   // check byte recomputed
+        Assert.Contains(0, edit.Changes.Keys);
+        Assert.Equal((byte)(0xAA ^ 0x11 ^ 0x22 ^ 0x33), edit.Changes[0][4]);   // and written
+
+        // Put the UID byte back; the check byte returns to the card's own and is no longer a change.
+        At(edit, 0, 0);
+        Hex(edit, "04");
+        Assert.Equal(bcc, edit.ValueAt(0, 4));
+        Assert.DoesNotContain(0, edit.Changes.Keys);
+    }
+
+    [Fact]
+    public void Block_0_cannot_be_unlocked_when_it_was_not_read_or_set_up_by_hand()
+    {
+        Assert.False(TagEdit.FromTag(ReadClassic(1), "04").CanEditBlockZero);   // sector 0 not opened: no block 0
+        var blank = TagEdit.Blank(Classic1K);
+        Assert.False(blank.CanEditBlockZero);
+        blank.SetBlockZeroEditable(true);
+        Assert.False(blank.AllowBlockZero);
+    }
+
+    [Fact]
+    public void Key_A_can_be_set_as_data_keeping_key_B_and_is_exclusive_with_a_new_key()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(1), "04");
+        byte[] dataA = [0xDA, 0x7A, 0x00, 0x00, 0x00, 0x01];
+
+        Assert.True(edit.SetSectorKeyAData(1, dataA));
+        Assert.False(edit.SetSectorKeyAData(2, dataA));    // sector 2 did not open
+        Assert.Equal(dataA, edit.SectorChangeFor(1)!.KeyAData);
+        Assert.Null(edit.SectorChangeFor(1)!.Key);
+        Assert.Equal("key A as data for sector 1", edit.ToWrite().Summary);
+
+        edit.SetSectorKey(1, [1, 2, 3, 4, 5, 6]);           // a whole new key clears the key-A-as-data change
+        Assert.Null(edit.SectorChangeFor(1)!.KeyAData);
+        Assert.NotNull(edit.SectorChangeFor(1)!.Key);
+
+        edit.SetSectorKeyAData(1, dataA);                   // and the other way round
+        Assert.Null(edit.SectorChangeFor(1)!.Key);
+        Assert.NotNull(edit.SectorChangeFor(1)!.KeyAData);
+
+        edit.SetSectorKeyAData(1, null);
+        Assert.Empty(edit.Sectors);
+    }
 }

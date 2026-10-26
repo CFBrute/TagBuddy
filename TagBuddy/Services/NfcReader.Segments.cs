@@ -239,10 +239,25 @@ public sealed partial class NfcReader
 
         // The keys read back as zeros (except key B under the factory rules, where it is plain data), so a slot not
         // given a new key gets the key that opened the sector, or the readable key B. Nothing is ever left unknown.
-        byte[] keyA = change.Key ?? (asKeyB ? openedWith : openedWith);
         byte[] readableB = current[10..16];
-        byte[] keyB = change.Key ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : openedWith);
-        var keyNow = change.Key ?? openedWith;
+        byte[] keyA, keyB, keyNow;
+        if (change.KeyAData is { Length: 6 } dataA)
+        {
+            // Key A becomes chosen data; key B stays the working key. Preserve it only when it is known: the sector was
+            // opened with key B, or key B is readable (factory rules). Otherwise refuse rather than risk losing key B.
+            if (asKeyB) keyB = openedWith;
+            else if (readableB.Any(b => b != 0)) keyB = readableB;
+            else return (false, $"Sector {sector} did not take its key-A change: key B could not be preserved. " +
+                                "Open the sector with key B (enter it as the card's key) and try again.", openedWith);
+            keyA = dataA;
+            keyNow = keyB;   // the sector opens with key B from now on; key A is data
+        }
+        else
+        {
+            keyA = change.Key ?? openedWith;
+            keyB = change.Key ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : openedWith);
+            keyNow = change.Key ?? openedWith;
+        }
 
         try
         {
