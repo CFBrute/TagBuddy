@@ -208,4 +208,54 @@ public class MifareClassicTests
             Assert.Equal(trailer[k].ToString("X2"), line.Substring(pos, 2));
         }
     }
+
+    [Theory]
+    [InlineData("A0A1A2A3A4A5", new byte[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 })]
+    [InlineData("A0:A1:A2:A3:A4:A5", new byte[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 })]
+    [InlineData("Open12", new byte[] { (byte)'O', (byte)'p', (byte)'e', (byte)'n', (byte)'1', (byte)'2' })]
+    public void A_key_is_read_as_twelve_hex_digits_or_six_characters(string text, byte[] expected)
+    {
+        Assert.True(MifareClassicKeys.TryParseKeyOrText(text, out var key));
+        Assert.Equal(expected, key);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("short")]          // 5 characters, not 6, and not 12 hex digits
+    [InlineData("seventeen chars!!")]
+    public void A_key_that_is_neither_twelve_hex_nor_six_characters_is_rejected(string? text) =>
+        Assert.False(MifareClassicKeys.TryParseKeyOrText(text, out _));
+
+    [Theory]
+    [InlineData(0b000, true)]
+    [InlineData(0b001, true)]
+    [InlineData(0b011, true)]
+    [InlineData(0b100, true)]
+    [InlineData(0b010, false)]
+    [InlineData(0b101, false)]
+    [InlineData(0b110, false)]
+    [InlineData(0b111, false)]
+    public void Only_some_trailer_rules_still_let_the_keys_change(int trailerBits, bool changeable) =>
+        Assert.Equal(changeable, MifareClassicKeys.KeysChangeable(trailerBits));
+
+    [Theory]
+    [InlineData(0b000, true)]      // B is plain data → not a usable key
+    [InlineData(0b001, true)]      // factory
+    [InlineData(0b010, true)]
+    [InlineData(0b011, false)]     // B is a secret key, usable for auth
+    [InlineData(0b100, false)]
+    [InlineData(0b101, false)]
+    [InlineData(0b110, false)]
+    [InlineData(0b111, false)]
+    public void Key_B_is_readable_exactly_when_it_is_plain_data(int trailerBits, bool readable) =>
+        Assert.Equal(readable, MifareClassicKeys.KeyBReadable(trailerBits));
+
+    [Fact]
+    public void Key_A_is_spare_only_when_no_block_or_the_trailer_uses_it()
+    {
+        Assert.True(MifareClassicKeys.KeyAUnused(new SectorRules(0b011, 0b101, 0b111, 0b011)));   // all data B-only, trailer B
+        Assert.False(MifareClassicKeys.KeyAUnused(new SectorRules(0b000, 0b011, 0b011, 0b011)));  // block 0 uses A
+        Assert.False(MifareClassicKeys.KeyAUnused(new SectorRules(0b011, 0b011, 0b011, 0b001)));  // trailer: A changes the keys
+    }
 }

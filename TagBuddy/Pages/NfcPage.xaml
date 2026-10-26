@@ -254,6 +254,11 @@
                                     </VerticalStackLayout>
                                 </Grid>
                                 <Label x:Name="ExpectHint" FontSize="12" TextColor="Gray" />
+                                <!-- Empties the editor to start fresh (the loaded tag and every edit), so switching
+                                     write type and back does not leave old data behind. -->
+                                <Button x:Name="StartOverButton" Text="Start over (clear the editor)" Clicked="OnStartOver"
+                                        BackgroundColor="#6B7280" TextColor="White" FontSize="12" Padding="10,4"
+                                        MinimumHeightRequest="32" HorizontalOptions="Start" Margin="0,4,0,0" />
                             </VerticalStackLayout>
                         </VerticalStackLayout>
                     </Border>
@@ -340,7 +345,13 @@
                     <!-- A key of the person's own for the cursor's sector, offered only for a sector that opened with a default key -->
                     <VerticalStackLayout x:Name="SectorKeyPanel" Spacing="6" IsVisible="False"
                                          Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
-                        <Label x:Name="SectorKeyTitle" FontSize="13" FontAttributes="Bold" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Label Grid.Column="0" x:Name="SectorKeyTitle" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
+                            <!-- Puts just this sector back as the tag had it: its keys, rules and block bytes. -->
+                            <Button Grid.Column="1" x:Name="RevertSectorButton" Text="Revert sector" Clicked="OnRevertSector"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="32" FontSize="12"
+                                    IsVisible="False" />
+                        </Grid>
 
                         <!-- Key A and key B as one row each, edited like a row of the Edit tab: tap a byte's hex or its
                              text and type over it. They are the trailer row's own bytes, so the two stay in step.
@@ -382,7 +393,19 @@
                                 <Label x:Name="RulesUnknownLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
                                        Text="This sector's rules could not be read or are corrupt, so they cannot be changed here." />
                             </VerticalStackLayout>
-                            <!-- One choice that sets all three data blocks of this sector at once -->
+                            <!-- The keys-and-trailer rule comes first: it decides whether key B is a usable key at all. -->
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="The keys and these rules" FontSize="13" FontAttributes="Bold" />
+                                <Picker x:Name="TrailerRulePicker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                                <!-- The picker truncates long rules; this shows the chosen one in full (e.g. "…B is plain data"). -->
+                                <Label x:Name="TrailerRuleFull" FontSize="12" TextColor="Gray" />
+                                <Label x:Name="PermanentWarning" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                       Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
+                            </VerticalStackLayout>
+                            <!-- When this rule makes key B readable, key B cannot authenticate, so the data rules' "or B" does not apply. -->
+                            <Label x:Name="KeyBNote" FontSize="12" TextColor="#C7780B" IsVisible="False"
+                                   Text="Key B is readable under this rule (plain data), so it cannot authenticate — the blocks below are opened with key A only, even where a rule says &quot;A or B&quot;." />
+                            <!-- Then the data-block rules -->
                             <VerticalStackLayout Spacing="2">
                                 <Label Text="All data blocks in this sector" FontSize="13" FontAttributes="Bold" />
                                 <Picker x:Name="AllBlocksPicker" FontSize="13" SelectedIndexChanged="OnAllBlocksRuleChanged" />
@@ -399,12 +422,6 @@
                             <VerticalStackLayout Spacing="2">
                                 <Label x:Name="DataRule2Label" FontSize="12" TextColor="Gray" />
                                 <Picker x:Name="DataRule2Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                            </VerticalStackLayout>
-                            <VerticalStackLayout Spacing="2">
-                                <Label Text="The keys and these rules" FontSize="13" FontAttributes="Bold" />
-                                <Picker x:Name="TrailerRulePicker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                                <Label x:Name="PermanentWarning" FontSize="12" TextColor="#DC2626" IsVisible="False"
-                                       Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
                             </VerticalStackLayout>
                         </VerticalStackLayout>
                         <Label x:Name="SectorKeyList" FontSize="12" />

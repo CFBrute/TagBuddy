@@ -1412,6 +1412,7 @@ public partial class NfcPage : ContentPage
             if (SectorKeyPanel.IsVisible)
             {
                 SectorKeyTitle.Text = can ? $"Sector {sector}: keys and rules" : $"Sector {sector} did not open, so it cannot be changed";
+                RevertSectorButton.IsVisible = can && edit.SectorHasChanges(sector);
                 SectorRulesPanel.IsVisible = can;
                 var change = edit.SectorChangeFor(sector);
                 var rules = change?.Rules ?? edit.CurrentRules(sector);
@@ -1443,6 +1444,8 @@ public partial class NfcPage : ContentPage
                         ? DataRuleIndex(rules.Data0) : -1;
                     if (TrailerRulePicker.ItemsSource is null) TrailerRulePicker.ItemsSource = TrailerRuleItems;
                     TrailerRulePicker.SelectedIndex = rules is null ? -1 : MifareClassicKeys.TrailerRules.ToList().FindIndex(r => r.Bits == rules.Trailer);
+                    TrailerRuleFull.Text = TrailerRulePicker.SelectedIndex >= 0 ? TrailerRuleItems[TrailerRulePicker.SelectedIndex] : "";
+                    KeyBNote.IsVisible = rules is not null && MifareClassicKeys.KeyBReadable(rules.Trailer);
                     RulesUnknownLabel.IsVisible = rules is null;
                     PermanentWarning.IsVisible = change?.Rules?.IsPermanent == true;
                 }
@@ -1632,6 +1635,8 @@ public partial class NfcPage : ContentPage
 
         edit.SetSectorRules(sector, current is not null && chosen == current ? null : chosen);
         PermanentWarning.IsVisible = edit.SectorChangeFor(sector)?.Rules?.IsPermanent == true;
+        TrailerRuleFull.Text = TrailerRuleItems[TrailerRulePicker.SelectedIndex];   // keep the full text in step
+        KeyBNote.IsVisible = MifareClassicKeys.KeyBReadable(trailerRule.Bits);
         UpdateSectorChangeList(edit);
         ArmWrite();
     }
@@ -1639,6 +1644,14 @@ public partial class NfcPage : ContentPage
     private void OnSegmentRevert(object? sender, EventArgs e)
     {
         _edit?.RevertAll();
+        SegmentEdited();
+    }
+
+    /// <summary>Puts just the cursor's sector back as the tag had it: its keys, rules and block bytes.</summary>
+    private void OnRevertSector(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit) return;
+        edit.RevertSector(MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment));
         SegmentEdited();
     }
 
@@ -1656,6 +1669,21 @@ public partial class NfcPage : ContentPage
     {
         ExpectDetails.IsVisible = open;
         ExpectToggle.Text = open ? "Done" : "Change";
+    }
+
+    /// <summary>Empties the editor back to a blank one of the same tag type: the loaded tag and every edit, key and rule
+    /// change are dropped, so switching write type and back does not leave old data behind. Confirmed when there are
+    /// unsaved changes; a pristine loaded read can be cleared freely (it can be read again).</summary>
+    private async void OnStartOver(object? sender, EventArgs e)
+    {
+        if (_edit is not { } edit) return;
+        if (edit.HasChanges && !await DisplayAlertAsync("Start over?",
+            "Clear the editor and start with an empty one of the same tag type? Your edits, key and rule changes are not saved.",
+            "Clear", "Cancel"))
+            return;
+        _edit = TagEdit.Blank(edit.Layout);
+        ShowEdit(expand: false);
+        ArmWrite();
     }
 
     /// <summary>Another tag type: a new, empty edit for it (the bytes of a read do not carry over to another layout).</summary>
