@@ -18,6 +18,7 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 
     private bool _isSelected;
+    private bool _underGroup;
 
     /// <summary>Picked in Saved's select mode (long press). Only on screen, never stored.</summary>
     [JsonIgnore]
@@ -29,6 +30,36 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
             if (_isSelected == value) return;
             _isSelected = value;
             PropertyChanged?.Invoke(this, new(nameof(IsSelected)));
+        }
+    }
+
+    /// <summary>Shown under an open group heading in Saved, so the row is indented and sits on the group's
+    /// background. Only on screen, never stored.</summary>
+    [JsonIgnore]
+    public bool UnderGroup
+    {
+        get => _underGroup;
+        set
+        {
+            if (_underGroup == value) return;
+            _underGroup = value;
+            PropertyChanged?.Invoke(this, new(nameof(UnderGroup)));
+        }
+    }
+
+    private bool _rowAlt;
+
+    /// <summary>Every other row within a group, for an alternating background that separates items without
+    /// divider lines. Only meaningful with <see cref="UnderGroup"/>. On screen only.</summary>
+    [JsonIgnore]
+    public bool RowAlt
+    {
+        get => _rowAlt;
+        set
+        {
+            if (_rowAlt == value) return;
+            _rowAlt = value;
+            PropertyChanged?.Invoke(this, new(nameof(RowAlt)));
         }
     }
 

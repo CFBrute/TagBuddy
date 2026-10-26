@@ -6,6 +6,180 @@
              xmlns:pages="clr-namespace:TagBuddy.Pages"
              x:Class="TagBuddy.Pages.SavedPage"
              Title="Saved">
+    <ContentPage.Resources>
+        <!-- A collapsible group heading: chevron, name, and how many it holds. Spans the full width; its items
+             sit below it, indented, on the same colour so the group reads as one connected block. -->
+        <DataTemplate x:Key="GroupTemplate" x:DataType="pages:GroupRow">
+            <Border Margin="0" Padding="10,12" StrokeThickness="0"
+                    BackgroundColor="{AppThemeBinding Light=#EDEFF2, Dark=#202A38}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8,8,0,0" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnGroupHeaderTapped" />
+                </Border.GestureRecognizers>
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                    <Label Grid.Column="0" Text="{Binding Chevron}" FontSize="18" TextColor="{StaticResource Primary}" VerticalOptions="Center" />
+                    <Label Grid.Column="1" Text="{Binding Name}" FontFamily="OpenSansSemibold" FontSize="17"
+                           LineBreakMode="TailTruncation" VerticalOptions="Center" />
+                    <Label Grid.Column="2" Text="{Binding CountLabel}" FontSize="14" TextColor="Gray" VerticalOptions="Center" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- One saved item. Under a group it sits on the group's background and is indented, so it reads as nested. -->
+        <DataTemplate x:Key="ItemTemplate" x:DataType="models:SavedItem">
+            <Border x:Name="GroupBand" StrokeThickness="0" Padding="0" Margin="0" BackgroundColor="Transparent">
+                <Border.Triggers>
+                    <!-- Under a group the row's background is indented from the left (the heading stays full width)
+                         and carries the group colour, so the group reads as one connected block. Rows alternate
+                         between two near shades so items are told apart without divider lines. -->
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding RowAlt}" Value="False" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#EDEFF2, Dark=#202A38}" />
+                        <Setter Property="Margin" Value="14,0,0,0" />
+                    </MultiTrigger>
+                    <MultiTrigger TargetType="Border">
+                        <MultiTrigger.Conditions>
+                            <BindingCondition Binding="{Binding UnderGroup}" Value="True" />
+                            <BindingCondition Binding="{Binding RowAlt}" Value="True" />
+                        </MultiTrigger.Conditions>
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#E2E6EC, Dark=#28323F}" />
+                        <Setter Property="Margin" Value="14,0,0,0" />
+                    </MultiTrigger>
+                </Border.Triggers>
+            <Border Margin="0,0,0,10"
+                    Padding="14,10,6,10"
+                    StrokeThickness="0"
+                    BackgroundColor="{AppThemeBinding Light=White, Dark=#1F2937}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="10" />
+                </Border.StrokeShape>
+                <!-- Tap opens (or picks, in select mode); a long press starts select mode -->
+                <Border.Behaviors>
+                    <pages:RowPressBehavior Pressed="OnRowPressed" LongPressed="OnRowLongPressed" />
+                </Border.Behaviors>
+                <Border.Triggers>
+                    <!-- Under a group, drop the card's own background and bottom gap so the group colour shows and
+                         the rows connect into one block; a faint divider (below) keeps items apart. -->
+                    <DataTrigger TargetType="Border" Binding="{Binding UnderGroup}" Value="True">
+                        <Setter Property="BackgroundColor" Value="Transparent" />
+                        <Setter Property="Margin" Value="0" />
+                    </DataTrigger>
+                    <!-- Selected in select mode -->
+                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                        <Setter Property="Stroke" Value="{StaticResource Primary}" />
+                        <Setter Property="StrokeThickness" Value="3" />
+                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#FFF4E0, Dark=#3A2C12}" />
+                    </DataTrigger>
+                </Border.Triggers>
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10">
+                    <!-- Picture of the code, or a mark for text and tag dumps -->
+                    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                            WidthRequest="56" HeightRequest="56"
+                            Padding="3"
+                            BackgroundColor="White"
+                            Stroke="#D1D5DB" StrokeThickness="1"
+                            VerticalOptions="Center"
+                            IsVisible="{Binding IsCode}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="6" />
+                        </Border.StrokeShape>
+                        <controls:BarcodeView Item="{Binding .}" InputTransparent="True" />
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                            WidthRequest="56" HeightRequest="56"
+                            BackgroundColor="#6B7280"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            IsVisible="{Binding IsPlainText}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="6" />
+                        </Border.StrokeShape>
+                        <Label Text="Aa" FontSize="22" FontFamily="OpenSansSemibold" TextColor="White"
+                               HorizontalOptions="Center" VerticalOptions="Center" />
+                    </Border>
+                    <!-- A text note that is a link: the site's icon, or the link glyph until it is known -->
+                    <controls:SiteIconView Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                                           Value="{Binding Value}"
+                                           IsVisible="{Binding IsLinkText}" />
+                    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+                            WidthRequest="56" HeightRequest="56"
+                            BackgroundColor="#374151"
+                            StrokeThickness="0"
+                            VerticalOptions="Center"
+                            IsVisible="{Binding IsDump}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="6" />
+                        </Border.StrokeShape>
+                        <Label Text="((•))" FontSize="16" FontFamily="OpenSansSemibold" TextColor="White"
+                               HorizontalOptions="Center" VerticalOptions="Center" />
+                    </Border>
+
+                    <Label Grid.Row="0" Grid.Column="1"
+                           Text="{Binding DisplayName}"
+                           FontFamily="OpenSansSemibold"
+                           FontSize="16"
+                           LineBreakMode="TailTruncation"
+                           VerticalOptions="End" />
+                    <!-- One line for codes, links and dumps; a plain text note shows up to three lines of itself -->
+                    <Label Grid.Row="1" Grid.Column="1"
+                           Text="{Binding Subtitle}"
+                           TextColor="Gray"
+                           FontSize="13"
+                           LineBreakMode="TailTruncation"
+                           VerticalOptions="Start">
+                        <Label.Triggers>
+                            <DataTrigger TargetType="Label" Binding="{Binding IsPlainText}" Value="True">
+                                <Setter Property="LineBreakMode" Value="WordWrap" />
+                                <Setter Property="MaxLines" Value="3" />
+                            </DataTrigger>
+                        </Label.Triggers>
+                    </Label>
+                    <VerticalStackLayout Grid.Row="0" Grid.Column="2" Grid.RowSpan="2" Spacing="2" VerticalOptions="Center">
+                        <Label Text="{Binding FormatLabel}" FontSize="11" TextColor="#C7780B" HorizontalTextAlignment="End" />
+                        <!-- The group it is filed under -->
+                        <Label Text="{Binding Group}" IsVisible="{Binding HasGroup}" FontSize="11" TextColor="Gray"
+                               HorizontalTextAlignment="End" LineBreakMode="TailTruncation" MaximumWidthRequest="90" />
+                    </VerticalStackLayout>
+                    <Button Grid.Row="0" Grid.Column="3" Grid.RowSpan="2"
+                            Text="⋮"
+                            FontSize="22"
+                            Padding="8,0"
+                            BackgroundColor="Transparent"
+                            TextColor="{AppThemeBinding Light=#374151, Dark=#D1D5DB}"
+                            VerticalOptions="Center"
+                            Clicked="OnMenuClicked"
+                            CommandParameter="{Binding .}" />
+
+                    <!-- Obvious text found inside a tag dump -->
+                    <Label Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
+                           Text="{Binding DumpText}"
+                           IsVisible="{Binding HasDumpText}"
+                           FontSize="13"
+                           Margin="0,8,8,0"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="2" />
+
+                    <!-- The link preview, borderless, lined up under the row's thumbnail -->
+                    <controls:LinkPreviewView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
+                                              Compact="True"
+                                              ShowText="False"
+                                              Value="{Binding Value}"
+                                              Margin="0,8,8,0" />
+                </Grid>
+            </Border>
+            </Border>
+        </DataTemplate>
+
+        <pages:SavedRowTemplateSelector x:Key="RowSelector"
+                                        Item="{StaticResource ItemTemplate}"
+                                        Group="{StaticResource GroupTemplate}" />
+    </ContentPage.Resources>
+
     <Grid RowDefinitions="Auto,*">
 
         <!-- Filter by kind -->
@@ -14,9 +188,6 @@
             <Button x:Name="FilterCodes" Text="Codes" Clicked="OnFilterCodes" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
             <Button x:Name="FilterTexts" Text="Text" Clicked="OnFilterTexts" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
             <Button x:Name="FilterDumps" Text="Tags" Clicked="OnFilterDumps" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
-            <!-- Narrows the list to one group; shown once any item is in a group -->
-            <Button x:Name="FilterGroup" Text="Group ▾" Clicked="OnFilterGroup" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
-                    IsVisible="False" />
         </HorizontalStackLayout>
 
         <!-- Select mode, started by a long press on a row: how many are picked, and what to do with them -->
@@ -34,6 +205,7 @@
 
         <CollectionView Grid.Row="1" x:Name="List"
                         SelectionMode="None"
+                        ItemTemplate="{StaticResource RowSelector}"
                         Margin="12,4,12,12">
             <CollectionView.EmptyView>
                 <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="8" Padding="30">
@@ -42,124 +214,6 @@
                            TextColor="Gray" HorizontalTextAlignment="Center" />
                 </VerticalStackLayout>
             </CollectionView.EmptyView>
-            <CollectionView.ItemTemplate>
-                <DataTemplate x:DataType="models:SavedItem">
-                        <Border Margin="0,0,0,10"
-                                Padding="14,10,6,10"
-                                Stroke="#D1D5DB"
-                                StrokeThickness="1"
-                                BackgroundColor="{AppThemeBinding Light=White, Dark=#1F2937}">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="10" />
-                            </Border.StrokeShape>
-                            <!-- Tap opens (or picks, in select mode); a long press starts select mode -->
-                            <Border.Behaviors>
-                                <pages:RowPressBehavior Pressed="OnRowPressed" LongPressed="OnRowLongPressed" />
-                            </Border.Behaviors>
-                            <Border.Triggers>
-                                <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                    <Setter Property="Stroke" Value="{StaticResource Primary}" />
-                                    <Setter Property="StrokeThickness" Value="3" />
-                                    <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#FFF4E0, Dark=#3A2C12}" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="10">
-                                <!-- Picture of the code, or a mark for text and tag dumps -->
-                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
-                                        WidthRequest="56" HeightRequest="56"
-                                        Padding="3"
-                                        BackgroundColor="White"
-                                        Stroke="#D1D5DB" StrokeThickness="1"
-                                        VerticalOptions="Center"
-                                        IsVisible="{Binding IsCode}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="6" />
-                                    </Border.StrokeShape>
-                                    <controls:BarcodeView Item="{Binding .}" InputTransparent="True" />
-                                </Border>
-                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
-                                        WidthRequest="56" HeightRequest="56"
-                                        BackgroundColor="#6B7280"
-                                        StrokeThickness="0"
-                                        VerticalOptions="Center"
-                                        IsVisible="{Binding IsPlainText}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="6" />
-                                    </Border.StrokeShape>
-                                    <Label Text="Aa" FontSize="22" FontFamily="OpenSansSemibold" TextColor="White"
-                                           HorizontalOptions="Center" VerticalOptions="Center" />
-                                </Border>
-                                <!-- A text note that is a link: the site's icon, or the link glyph until it is known -->
-                                <controls:SiteIconView Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
-                                                       Value="{Binding Value}"
-                                                       IsVisible="{Binding IsLinkText}" />
-                                <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
-                                        WidthRequest="56" HeightRequest="56"
-                                        BackgroundColor="#374151"
-                                        StrokeThickness="0"
-                                        VerticalOptions="Center"
-                                        IsVisible="{Binding IsDump}">
-                                    <Border.StrokeShape>
-                                        <RoundRectangle CornerRadius="6" />
-                                    </Border.StrokeShape>
-                                    <Label Text="((•))" FontSize="16" FontFamily="OpenSansSemibold" TextColor="White"
-                                           HorizontalOptions="Center" VerticalOptions="Center" />
-                                </Border>
-
-                                <Label Grid.Row="0" Grid.Column="1"
-                                       Text="{Binding DisplayName}"
-                                       FontFamily="OpenSansSemibold"
-                                       FontSize="16"
-                                       LineBreakMode="TailTruncation"
-                                       VerticalOptions="End" />
-                                <!-- One line for codes, links and dumps; a plain text note shows up to three lines of itself -->
-                                <Label Grid.Row="1" Grid.Column="1"
-                                       Text="{Binding Subtitle}"
-                                       TextColor="Gray"
-                                       FontSize="13"
-                                       LineBreakMode="TailTruncation"
-                                       VerticalOptions="Start">
-                                    <Label.Triggers>
-                                        <DataTrigger TargetType="Label" Binding="{Binding IsPlainText}" Value="True">
-                                            <Setter Property="LineBreakMode" Value="WordWrap" />
-                                            <Setter Property="MaxLines" Value="3" />
-                                        </DataTrigger>
-                                    </Label.Triggers>
-                                </Label>
-                                <VerticalStackLayout Grid.Row="0" Grid.Column="2" Grid.RowSpan="2" Spacing="2" VerticalOptions="Center">
-                                    <Label Text="{Binding FormatLabel}" FontSize="11" TextColor="#C7780B" HorizontalTextAlignment="End" />
-                                    <!-- The group it is filed under -->
-                                    <Label Text="{Binding Group}" IsVisible="{Binding HasGroup}" FontSize="11" TextColor="Gray"
-                                           HorizontalTextAlignment="End" LineBreakMode="TailTruncation" MaximumWidthRequest="90" />
-                                </VerticalStackLayout>
-                                <Button Grid.Row="0" Grid.Column="3" Grid.RowSpan="2"
-                                        Text="⋮"
-                                        FontSize="22"
-                                        Padding="8,0"
-                                        BackgroundColor="Transparent"
-                                        TextColor="{AppThemeBinding Light=#374151, Dark=#D1D5DB}"
-                                        VerticalOptions="Center"
-                                        Clicked="OnMenuClicked"
-                                        CommandParameter="{Binding .}" />
-
-                                <!-- Obvious text found inside a tag dump -->
-                                <Label Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
-                                       Text="{Binding DumpText}"
-                                       IsVisible="{Binding HasDumpText}"
-                                       FontSize="13"
-                                       Margin="0,8,8,0"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="2" />
-
-                                <controls:LinkPreviewView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
-                                                          Compact="True"
-                                                          ShowText="False"
-                                                          Value="{Binding Value}"
-                                                          Margin="0,8,8,0" />
-                            </Grid>
-                        </Border>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
         </CollectionView>
     </Grid>
 </ContentPage>

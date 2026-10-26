@@ -10,11 +10,15 @@ namespace TagBuddy.Pages;
 public partial class SavedPage : ContentPage
 {
     private readonly SavedService _saved;
-    private readonly ObservableCollection<SavedItem> _shown = [];
+    /// <summary>What the list shows: saved items, and (when groups are used) a <see cref="GroupRow"/> heading before
+    /// each group's items. A collapsed group contributes only its heading, which keeps the list short.</summary>
+    private readonly ObservableCollection<object> _shown = [];
     private SavedKind? _filter;
 
-    /// <summary>The group the list is narrowed to, or null for every item.</summary>
-    private string? _groupFilter;
+    /// <summary>Groups currently expanded; collapsed by default so a filed-away group stays out of the way, except the
+    /// most recent one, which is opened once when the list is first built (<see cref="_autoOpenedTop"/>).</summary>
+    private readonly HashSet<string> _expandedGroups = new(StringComparer.CurrentCultureIgnoreCase);
+    private bool _autoOpenedTop;
 
     public SavedPage(SavedService saved)
     {
@@ -66,31 +70,47 @@ public partial class SavedPage : ContentPage
         Refill();
     }
 
+    /// <summary>Rebuilds the list. With no groups in use it is a plain list. Once anything is filed, every item is
+    /// under a heading — the ungrouped ones under "No group" — and the groups are ordered so the one holding the most
+    /// recently added or used item comes first. Items are already sorted by recent use, so a group's first item is its
+    /// most recent, and taking the groups in first-seen order puts the most recent group on top. A group shows its
+    /// items only when open.</summary>
     private void Refill()
     {
-        // A group that lost its last item is no filter any more.
-        if (_groupFilter is { } g && !_saved.Groups.Contains(g, StringComparer.CurrentCultureIgnoreCase)) _groupFilter = null;
-        FilterGroup.IsVisible = _saved.Groups.Count > 0;
-        FilterGroup.Text = _groupFilter is null ? "Group ▾" : $"{_groupFilter} ▾";
-        Palette.Select(FilterGroup, _groupFilter is not null);
+        var items = _saved.Items.Where(i => _filter is null || i.Kind == _filter).ToList();
+        var groups = items.GroupBy(i => i.Group.Trim(), StringComparer.CurrentCultureIgnoreCase).ToList();
 
         _shown.Clear();
-        foreach (var item in _saved.Items)
-            if ((_filter is null || item.Kind == _filter)
-                && (_groupFilter is null || string.Equals(item.Group.Trim(), _groupFilter, StringComparison.CurrentCultureIgnoreCase)))
-                _shown.Add(item);
+        if (!groups.Any(g => g.Key.Length > 0))   // nothing filed: a plain list, no headings or indent
+        {
+            foreach (var item in items) { item.UnderGroup = false; _shown.Add(item); }
+            return;
+        }
+
+        // Open the most recent group (the first one) once, the first time the list is built with groups.
+        if (!_autoOpenedTop)
+        {
+            _expandedGroups.Add(groups[0].Key);
+            _autoOpenedTop = true;
+        }
+
+        foreach (var group in groups)
+        {
+            bool expanded = _expandedGroups.Contains(group.Key);
+            _shown.Add(new GroupRow(group.Key, group.Key.Length == 0 ? "No group" : group.Key, group.Count(), expanded, alt: false));
+            if (expanded)
+            {
+                int row = 0;
+                foreach (var item in group) { item.UnderGroup = true; item.RowAlt = row++ % 2 == 1; _shown.Add(item); }
+            }
+        }
     }
 
-    /// <summary>Narrows the list to one group, or widens it to all again.</summary>
-    private async void OnFilterGroup(object? sender, EventArgs e)
+    /// <summary>Opens or closes a group.</summary>
+    private void OnGroupHeaderTapped(object? sender, EventArgs e)
     {
-        const string all = "All groups";
-        var options = _saved.Groups.Select(g => string.Equals(g, _groupFilter, StringComparison.CurrentCultureIgnoreCase) ? $"✓ {g}" : g)
-                            .Prepend(_groupFilter is null ? $"✓ {all}" : all).ToArray();
-        var choice = await DisplayActionSheetAsync("Show which group?", "Cancel", null, options);
-        if (choice is null || choice == "Cancel") return;
-        if (choice.StartsWith("✓ ")) choice = choice[2..];
-        _groupFilter = choice == all ? null : choice;
+        if ((sender as BindableObject)?.BindingContext is not GroupRow row) return;
+        if (!_expandedGroups.Remove(row.Key)) _expandedGroups.Add(row.Key);
         Refill();
     }
 
@@ -122,8 +142,11 @@ public partial class SavedPage : ContentPage
             return;
         }
         SelectCount.Text = $"{count} selected";
-        SelectAllButton.IsVisible = _shown.Any(i => !i.IsSelected);
+        SelectAllButton.IsVisible = Visible().Any(i => !i.IsSelected);
     }
+
+    /// <summary>The saved items on screen now (a collapsed group's items are not among them).</summary>
+    private IEnumerable<SavedItem> Visible() => _shown.OfType<SavedItem>();
 
     private void StopSelecting()
     {
@@ -131,15 +154,17 @@ public partial class SavedPage : ContentPage
         foreach (var item in _saved.Items) item.IsSelected = false;
         SelectBar.IsVisible = false;
         FilterBar.IsVisible = true;
+        Refill();   // a group move while selecting changes which groups exist
     }
 
     private void OnCancelSelect(object? sender, EventArgs e) => StopSelecting();
 
-    /// <summary>Picks every item the filter shows.</summary>
+    /// <summary>Picks every item on screen (items inside collapsed groups are left as they are).</summary>
     private void OnSelectAll(object? sender, EventArgs e)
     {
-        foreach (var item in _shown) item.IsSelected = true;
-        SelectCount.Text = $"{_shown.Count} selected";
+        var visible = Visible().ToList();
+        foreach (var item in visible) item.IsSelected = true;
+        SelectCount.Text = $"{visible.Count} selected";
         SelectAllButton.IsVisible = false;
     }
 
@@ -155,6 +180,7 @@ public partial class SavedPage : ContentPage
         try
         {
             await _saved.SetGroupAsync(picked, group);
+            if (group.Length > 0) _expandedGroups.Add(group);   // open the group they went to
             Notice.Show(group.Length > 0 ? $"Moved to {group}" : "Taken out of the group");
         }
         catch (Exception ex)
@@ -342,6 +368,8 @@ public partial class SavedPage : ContentPage
                 if (await CodeActions.PickGroupAsync(this, _saved, item.Group, $"Move \"{item.DisplayName}\" to which group?") is { } group)
                 {
                     await _saved.SetGroupAsync([item], group);
+                    if (group.Length > 0) _expandedGroups.Add(group);   // open the group it went to, so it is seen
+                    Refill();
                     Notice.Show(group.Length > 0 ? $"Moved to {group}" : "Taken out of the group");
                 }
                 break;

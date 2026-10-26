@@ -133,12 +133,17 @@ public sealed class LinkPreviewView : ContentView
         _grid.RowDefinitions.Clear();
         _grid.ColumnDefinitions.Clear();
 
+        // Compact is the Saved-row preview: no card border or fill of its own, so it blends into the row.
+        _card.StrokeThickness = Compact ? 0 : 1;
+        if (Compact) _card.BackgroundColor = Colors.Transparent;
+        else _card.SetAppThemeColor(BackgroundColorProperty, Colors.White, Color.FromArgb("#1F2937"));
+
         if (Compact)
         {
             _grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
             _grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
             _grid.ColumnSpacing = 10;
-            _grid.Padding = new Thickness(8);
+            _grid.Padding = new Thickness(0);
 
             _imageFrame.WidthRequest = 48;
             _imageFrame.HeightRequest = 48;
