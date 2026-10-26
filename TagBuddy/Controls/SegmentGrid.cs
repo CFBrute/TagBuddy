@@ -50,6 +50,31 @@ public class SegmentGrid : GraphicsView, IDrawable
     /// <summary>A byte was tapped and the cursor placed on it.</summary>
     public event Action? CursorPlaced;
 
+    /// <summary>The selection changed (started, extended or cleared).</summary>
+    public event Action? SelectionChanged;
+
+    private bool _selecting;
+    private int _selAnchor = -1, _selEnd = -1;
+
+    /// <summary>Selection mode: taps extend a highlighted run of bytes (anchored where the cursor was) instead of just
+    /// placing the cursor, so a range can be copied. Turning it off clears the selection.</summary>
+    public bool Selecting
+    {
+        get => _selecting;
+        set
+        {
+            _selecting = value;
+            if (value && _edit is { Length: > 0 } ed) _selAnchor = _selEnd = ed.Cursor;
+            else _selAnchor = _selEnd = -1;
+            Invalidate();
+            SelectionChanged?.Invoke();
+        }
+    }
+
+    /// <summary>The selected run of bytes as inclusive positions (min..max), or null when nothing is selected.</summary>
+    public (int Start, int End)? Selection =>
+        _selecting && _selAnchor >= 0 && _selEnd >= 0 ? (Math.Min(_selAnchor, _selEnd), Math.Max(_selAnchor, _selEnd)) : null;
+
     public SegmentGrid()
     {
         Drawable = this;
@@ -61,7 +86,7 @@ public class SegmentGrid : GraphicsView, IDrawable
     public TagEdit? Edit
     {
         get => _edit;
-        set { _edit = value; Refresh(); }
+        set { _edit = value; _selecting = false; _selAnchor = _selEnd = -1; Refresh(); }
     }
 
     /// <summary>Lays the rows out again (after the range or the edit changed) and redraws.</summary>
@@ -157,6 +182,8 @@ public class SegmentGrid : GraphicsView, IDrawable
         var typed = Color.FromArgb(dark ? "#F472B6" : "#DB2777");
         var cursor = Color.FromArgb("#F5A623").WithAlpha(0.5f);
         var echo = Color.FromArgb("#F5A623").WithAlpha(0.2f);
+        var select = Color.FromArgb("#3B82F6").WithAlpha(0.30f);   // the selected run, behind the bytes
+        var sel = Selection;
 
         canvas.Font = MonoFont;
         canvas.FontSize = FontSize;
@@ -189,6 +216,13 @@ public class SegmentGrid : GraphicsView, IDrawable
                 // derived, not typed, so it keeps its field colour even after a UID change.
                 bool derivedBcc = edit.Layout.Family == TagFamily.Classic && s == 0 && k == 4;
                 if (value is not null && (!edit.IsEdited(s, k) || derivedBcc) && FieldColor(edit, s, k) is { } field) color = field;
+
+                if (sel is { } range && edit.PositionOf(s, k) is var p && p >= range.Start && p <= range.End && p >= 0)
+                {
+                    canvas.FillColor = select;
+                    canvas.FillRectangle(ColumnX(HexStart(c)), y + 2, CharWidth * 2, LineHeight - 4);
+                    canvas.FillRectangle(ColumnX(AsciiStart(size) + c), y + 2, CharWidth, LineHeight - 4);
+                }
 
                 if (s == cursorSegment && k == cursorIndex)
                 {
@@ -254,6 +288,13 @@ public class SegmentGrid : GraphicsView, IDrawable
         int position = edit.PositionOf(_rows[r].Segment, First + k);
         if (position < 0) return;                       // a row that is never written
         edit.Place(position, inText, nibble);
+        if (_selecting)                                 // extend the selection to here; no keyboard in select mode
+        {
+            _selEnd = position;
+            Invalidate();
+            SelectionChanged?.Invoke();
+            return;
+        }
         Invalidate();
         CursorPlaced?.Invoke();
     }
