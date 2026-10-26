@@ -589,6 +589,23 @@ public class TagEditTests
     }
 
     [Fact]
+    public void Filling_everything_with_zeros_leaves_block_0_and_the_trailers_alone()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(0, 1), "04");
+        edit.SetBlockZeroEditable(true);                      // even with block 0 unlocked
+
+        edit.Fill(0x00);
+        Assert.DoesNotContain(0, edit.Changes.Keys);          // block 0 (the UID) untouched
+        Assert.DoesNotContain(3, edit.Changes.Keys);          // sector 0's trailer untouched
+        Assert.DoesNotContain(7, edit.Changes.Keys);          // sector 1's trailer untouched
+        Assert.Empty(edit.Sectors);                           // no key changes from the fill
+
+        // One chosen block is still filled as asked, block 0 included.
+        edit.Fill(0xFF, 1);
+        Assert.Equal(new byte?[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, edit.Changes[1]);
+    }
+
+    [Fact]
     public void Block_0_check_byte_is_locked_and_follows_the_UID()
     {
         // Block 0 starts 04 11 22 33 with BCC = 04^11^22^33, then the maker bytes.

@@ -646,7 +646,11 @@ public sealed class TagEdit
     /// <paramref name="value"/>: a quick way to clear a block or the whole tag to 00. One undo step.</summary>
     public void Fill(byte value, int? segment = null)
     {
-        List<int> targets = segment is { } one ? (_segmentIndex.ContainsKey(one) ? [one] : []) : _segments;
+        // "Everything" means the data blocks only: filling all segments leaves a MIFARE Classic card's block 0 (the UID)
+        // and its sector trailers (the keys) alone, even when block 0 is unlocked. One chosen segment is filled as asked.
+        List<int> targets = segment is { } one
+            ? (_segmentIndex.ContainsKey(one) ? [one] : [])
+            : _segments.Where(s => !(Layout.Family == TagFamily.Classic && s == 0) && !IsTrailerSeg(s)).ToList();
         if (!targets.Any(s => Enumerable.Range(0, Layout.SegmentSize).Any(i => WritableByte(s, i) && ValueAt(s, i) != value))) return;   // already so
         Begin();
         foreach (var s in targets)
