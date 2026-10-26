@@ -180,7 +180,7 @@ public static class HelpContent
                 }
                 : [],
             new HelpMore("Readable memory and backups",
-                new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save dump\" keeps a copy in Saved, which can be written back to a tag later."),
+                new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save tag as read\" keeps it in Saved exactly as it was read, for MIFARE Classic and ISO 15693 too: from there it can be viewed again as read, edited and written back to that same tag, or (NTAG/Ultralight) written whole to a tag."),
                 new HelpSeeAlso("dumps")),
             new HelpSeeAlso("nfc-write", "private", "trouble"),
         ]),
@@ -245,7 +245,7 @@ public static class HelpContent
         [
             new HelpText("A dump is a byte-for-byte copy of a tag's memory. It keeps everything on the tag, including content the app cannot show as text."),
             new HelpList(true,
-                "Read the tag on the NFC tab and tap \"Save dump\". It appears in Saved under Tags.",
+                "Read the tag on the NFC tab and tap \"Save tag as read\". It appears in Saved under Tags.",
                 "To write it back, open NFC, tap \"Write a tag\" and choose \"Binary dump\".",
                 "Pick the dump (\"Choose saved dump\", \"Import .bin file\" or \"Paste hex\") and hold the tag to the phone."),
             new HelpTip("Share a dump as a .bin file to keep a copy outside the phone, for example in your cloud storage."),

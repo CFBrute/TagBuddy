@@ -14,6 +14,7 @@ public class SavedService
     private readonly string _path = Path.Combine(FileSystem.AppDataDirectory, "saved.json");
     private readonly string _legacyFavorites = Path.Combine(FileSystem.AppDataDirectory, "favorites.json");
     private readonly string _dumpDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-dumps");
+    private readonly string _readDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-reads");
     private string LegacyDumpIndex => Path.Combine(_dumpDir, "index.json");
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private bool _loaded;
@@ -211,17 +212,52 @@ public class SavedService
 
     public Task<byte[]> ReadDumpAsync(SavedItem item) => File.ReadAllBytesAsync(DumpPath(item));
 
+    /// <summary>Keeps a tag as it was read: the memory as the dump's .bin (the full page image of a Type 2 tag; for a
+    /// MIFARE Classic or ISO 15693 read the segments that were read, in order) and the whole read as a file next to it,
+    /// so it can be shown again as read and edited for writing back.</summary>
+    public async Task<SavedItem> AddReadAsync(string name, NfcTagInfo tag, string group = "")
+    {
+        var bytes = tag.RawMemory ?? ReadImage(tag);
+        var chip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? "Type2";
+        var item = await AddDumpAsync(name, tag.Id, chip, bytes);
+        Directory.CreateDirectory(_readDir);
+        item.ReadFile = Path.ChangeExtension(item.DumpFile, ".json");
+        await File.WriteAllTextAsync(ReadPath(item), TagReadFile.From(tag).ToJson());
+        if (group.Trim().Length > 0) item.Group = group.Trim();
+        await SaveAsync();
+        return item;
+    }
+
+    /// <summary>The read a dump was saved from, or null when it was imported or the file is gone.</summary>
+    public async Task<NfcTagInfo?> LoadReadAsync(SavedItem item)
+    {
+        if (!item.HasRead) return null;
+        try { return TagReadFile.FromJson(await File.ReadAllTextAsync(ReadPath(item)))?.ToTag(); }
+        catch { return null; }
+    }
+
+    private string ReadPath(SavedItem item) => Path.Combine(_readDir, item.ReadFile);
+
+    /// <summary>The segments of a read that has no page image, laid end to end in segment order (a segment not read
+    /// is left out), as the bytes behind the dump's size and readable-text line.</summary>
+    private static byte[] ReadImage(NfcTagInfo tag) =>
+        tag.Segments is { } s ? s.Data.OrderBy(p => p.Key).SelectMany(p => p.Value).ToArray() : [];
+
     public string DumpPath(SavedItem item) => Path.Combine(_dumpDir, item.DumpFile);
 
     public async Task RemoveAsync(SavedItem item)
     {
         await LoadAsync();
         Items.Remove(item);
-        if (item.IsDump)
-        {
-            try { File.Delete(DumpPath(item)); } catch { /* already gone */ }
-        }
+        DeleteFiles(item);
         await SaveAsync();
+    }
+
+    private void DeleteFiles(SavedItem item)
+    {
+        if (!item.IsDump) return;
+        try { File.Delete(DumpPath(item)); } catch { /* already gone */ }
+        if (item.HasRead) { try { File.Delete(ReadPath(item)); } catch { /* already gone */ } }
     }
 
     /// <summary>Removes several items (and their dump files) with one write of the list.</summary>
@@ -231,10 +267,7 @@ public class SavedService
         foreach (var item in items)
         {
             Items.Remove(item);
-            if (item.IsDump)
-            {
-                try { File.Delete(DumpPath(item)); } catch { /* already gone */ }
-            }
+            DeleteFiles(item);
         }
         await SaveAsync();
     }

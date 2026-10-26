@@ -65,6 +65,11 @@ public class SavedMenuTests
         var withText = new SavedItem { Kind = SavedKind.Dump, DumpChip = "NTAG215", DumpText = "Hello" };
         Assert.Equal(["Write to a tag", "Share .bin file", "Copy readable text", "Rename", "Move to a group"], Labels(SavedMenu.For(withText)));
 
+        var read = new SavedItem { Kind = SavedKind.Dump, DumpChip = "MIFARE Classic 1K", ReadFile = "x.json" };
+        Assert.Equal(["View as read", "Edit and write to the tag", "Share .bin file", "Rename", "Move to a group"], Labels(SavedMenu.For(read)));
+        var type2Read = new SavedItem { Kind = SavedKind.Dump, DumpChip = "NTAG215", ReadFile = "y.json" };
+        Assert.Equal("Write to a tag", Labels(SavedMenu.For(type2Read))[2]);
+
         var withoutText = new SavedItem { Kind = SavedKind.Dump, DumpChip = "NTAG215" };
         Assert.DoesNotContain("Copy readable text", Labels(SavedMenu.For(withoutText)));
     }

@@ -78,7 +78,12 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   passports and ID documents, MIFARE Classic access cards, and other DESFire-style cards. They are flagged as
   secure items; no cardholder data is requested.
 - **Saved** tab: codes with their options, text notes and tag dumps in one list, filtered by kind. Tap a code
-  to show it full screen, a dump to see its memory; the menu on each row (`Models/SavedMenu.cs`) offers the rest
+  to show it full screen, a dump to see its memory. "Save tag as read" on the NFC tab keeps a tag exactly as it
+  was read (`Services/TagReadFile.cs`, a JSON file in `nfc-reads` next to the dump's .bin): every detail line,
+  the records, the memory, and what the segment editor needs, for NTAG, MIFARE Classic (the sectors that opened)
+  and ISO 15693 alike. Such an item opens on the NFC tab as it was read ("View as read", marked with when it was
+  saved), and "Edit and write to the tag" opens the editor on it, expecting that tag's serial; "Write to a tag"
+  (the whole page image) stays for NTAG/Ultralight dumps only; the menu on each row (`Models/SavedMenu.cs`) offers the rest
   for that kind. Everyday actions are on the first level (open the link, view the page, copy, rename, delete);
   "QR code image…" (share, save to gallery) and "Use the text…" (QR or barcode generator, write to an NFC tag,
   make a dump) open a second menu with Back. Items can be filed in groups ("Work", "Home"): saving asks which

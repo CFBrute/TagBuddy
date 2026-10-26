@@ -9,6 +9,8 @@ namespace TagBuddy.Pages;
 /// text, links, contacts, private text, raw bytes, edited pages or blocks, or a dump to one, or erase it.</summary>
 [QueryProperty(nameof(IncomingDumpId), AppNavigation.Dump)]
 [QueryProperty(nameof(IncomingText), AppNavigation.Text)]
+[QueryProperty(nameof(IncomingViewReadId), AppNavigation.ViewRead)]
+[QueryProperty(nameof(IncomingEditReadId), AppNavigation.EditRead)]
 public partial class NfcPage : ContentPage
 {
     /// <summary>The write types, in the order of the picker in NfcPage.xaml.</summary>
@@ -37,6 +39,10 @@ public partial class NfcPage : ContentPage
     /// <summary>Handed over from Saved: a dump to write (by id) or a text to write.</summary>
     public string? IncomingDumpId { get; set; }
     public string? IncomingText { get; set; }
+
+    /// <summary>Handed over from Saved: a saved read (by id) to show as it was read, or to edit for writing back.</summary>
+    public string? IncomingViewReadId { get; set; }
+    public string? IncomingEditReadId { get; set; }
 
     private readonly SavedService _saved;
     private readonly NfcReader _nfc = NfcReader.Instance;
@@ -103,6 +109,24 @@ public partial class NfcPage : ContentPage
                 WriteEditor.Text = text;
                 ArmWrite();
             }
+            else if (IncomingViewReadId is { Length: > 0 } viewId)
+            {
+                IncomingViewReadId = null;
+                if (await LoadSavedReadAsync(viewId) is { } read)
+                {
+                    SetMode(write: false);
+                    ShowSavedRead(read.Tag, read.Item);
+                }
+            }
+            else if (IncomingEditReadId is { Length: > 0 } editId)
+            {
+                IncomingEditReadId = null;
+                if (await LoadSavedReadAsync(editId) is { } read)
+                {
+                    ShowSavedRead(read.Tag, read.Item);
+                    OnEditTag(this, EventArgs.Empty);
+                }
+            }
             else if (IncomingDumpId is { Length: > 0 } id)
             {
                 IncomingDumpId = null;
@@ -119,6 +143,27 @@ public partial class NfcPage : ContentPage
         {
             await DisplayAlertAsync("Could not prepare the write", ex.Message, "OK");
         }
+    }
+
+    private async Task<(NfcTagInfo Tag, SavedItem Item)?> LoadSavedReadAsync(string id)
+    {
+        await _saved.LoadAsync();
+        var item = _saved.Dumps.FirstOrDefault(d => d.Id.ToString() == id);
+        if (item is null) return null;
+        var tag = await _saved.LoadReadAsync(item);
+        if (tag is null)
+        {
+            await DisplayAlertAsync("Not available", "The saved read could not be loaded.", "OK");
+            return null;
+        }
+        return (tag, item);
+    }
+
+    /// <summary>Shows a saved read as if the tag had just been held to the phone, saying when it was read.</summary>
+    private void ShowSavedRead(NfcTagInfo tag, SavedItem item)
+    {
+        OnTagRead(tag, fromSaved: true);
+        TagTitle.Text = $"{item.DisplayName}  ·  saved {item.CreatedAt:yyyy-MM-dd HH:mm}\nTag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
     }
 
     protected override void OnAppearing()
@@ -326,7 +371,10 @@ public partial class NfcPage : ContentPage
         else _nfc.Disarm();
     }
 
-    private void OnTagRead(NfcTagInfo tag)
+    private void OnTagRead(NfcTagInfo tag) => OnTagRead(tag, fromSaved: false);
+
+    /// <param name="fromSaved">A saved read shown again: no vibration, and nothing about keys remembered.</param>
+    private void OnTagRead(NfcTagInfo tag, bool fromSaved)
     {
         // A password belongs to the tag it was entered for: drop it when a different tag is held to the phone, so
         // it is never tried on the new one (which could count against the new tag's wrong-attempt limit).
@@ -336,7 +384,7 @@ public partial class NfcPage : ContentPage
         }
 
         _last = tag;
-        Feedback.Tag(ok: true);
+        if (!fromSaved) Feedback.Tag(ok: true);
 
         WaitingPanel.IsVisible = false;
         ResultPanel.IsVisible = true;
@@ -361,7 +409,7 @@ public partial class NfcPage : ContentPage
             PasswordPanel.IsVisible = false;   // read fully; nothing to unlock
 
         // A MIFARE Classic card: remember the keys that opened its sectors, so this card opens quickly next time.
-        if (Features.MifareKeyTools && NfcReader.ClassicKeysFound.Count > 0)
+        if (!fromSaved && Features.MifareKeyTools && NfcReader.ClassicKeysFound.Count > 0)
             _keyStore.Remember(tag.Id, NfcReader.ClassicKeysFound.Select(k => k.Key));
 
         // Running the whole dictionary is a one-shot per tap; turn it off again now that this read is done.
@@ -421,11 +469,12 @@ public partial class NfcPage : ContentPage
 
         MemoryPanel.IsVisible = tag.HasMemoryDump;
         EditTagButton.IsVisible = tag.CanEdit;
+        SaveTagButton.IsVisible = tag.HasMemoryDump && !fromSaved;   // already in Saved when shown from there
         if (tag.RawMemory is { Length: > 0 } memory)
         {
             // Type 2 tag: the full page memory, shown with its map, saveable as a backup.
             MemoryTitle.Text = "Readable memory";
-            MemoryDescription.Text = "Every page of this tag's memory. Save it as a binary dump to keep a backup that can be written back to the tag later.";
+            MemoryDescription.Text = "Every page of this tag's memory. Save the tag to keep it as read: a backup that can be viewed again, edited, or written back later.";
             DumpButtons.IsVisible = true;
             MemoryOverview.IsVisible = true;
             MemoryMapView.Show(MemoryOverview, MemoryLabel, memory, tag.ChipName);
@@ -539,20 +588,23 @@ public partial class NfcPage : ContentPage
 
     private string DumpChipName => _last?.ChipName ?? "Type2";
 
+    /// <summary>Keeps the tag in Saved as it was read: its memory as a dump, and the whole read (details, records,
+    /// segments) so it can be shown again as read, or edited and written back to this tag.</summary>
     private async void OnSaveDump(object? sender, EventArgs e)
     {
-        if (_last is not { HasRawMemory: true } tag) return;
+        if (_last is not { HasMemoryDump: true } tag) return;
         try
         {
-            var suggested = Features.Amiibo && NfcReader.IsAmiiboDump(tag.RawMemory!) ? $"Amiibo {tag.Id}" : $"{DumpChipName} {tag.Id}";
-            var name = await DisplayPromptAsync("Save dump", $"{tag.RawMemory!.Length} bytes ({tag.RawMemory.Length / 4} pages). Give it a name:",
+            var chip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? DumpChipName;
+            var suggested = Features.Amiibo && tag.HasRawMemory && NfcReader.IsAmiiboDump(tag.RawMemory!) ? $"Amiibo {tag.Id}" : $"{chip} {tag.Id}";
+            var size = tag.HasRawMemory ? $"{tag.RawMemory!.Length} bytes ({tag.RawMemory.Length / 4} pages)" : $"{tag.MemoryDump!.Count} lines";
+            var name = await DisplayPromptAsync("Save tag", $"{size}, as read just now. Give it a name:",
                 accept: "Save", cancel: "Cancel", initialValue: suggested, maxLength: 60);
             if (name is null) return;
 
             if (await CodeActions.PickGroupAsync(this, _saved, title: "Save in which group?") is not { } group) return;
-            var dump = await _saved.AddDumpAsync(name, tag.Id, DumpChipName, tag.RawMemory);
-            if (group.Length > 0) await _saved.SetGroupAsync([dump], group);
-            Notice.Show(group.Length > 0 ? $"Dump saved in {group}: {dump.DisplayName}" : $"Dump saved: {dump.DisplayName}");
+            var item = await _saved.AddReadAsync(name, tag, group);
+            Notice.Show(group.Length > 0 ? $"Tag saved in {group}: {item.DisplayName}" : $"Tag saved: {item.DisplayName}");
         }
         catch (Exception ex)
         {
@@ -1326,7 +1378,7 @@ public partial class NfcPage : ContentPage
         var dumps = _saved.Dumps.OrderByDescending(d => d.SortTime).ToList();
         if (dumps.Count == 0)
         {
-            await DisplayAlertAsync("No saved dumps", "Read a tag and tap \"Save dump\", import a .bin file, or paste hex.", "OK");
+            await DisplayAlertAsync("No saved dumps", "Read a tag and tap \"Save tag as read\", import a .bin file, or paste hex.", "OK");
             return null;
         }
 

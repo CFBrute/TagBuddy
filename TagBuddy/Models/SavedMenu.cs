@@ -6,7 +6,7 @@ namespace TagBuddy.Models;
 public enum SavedAction
 {
     Open, ViewPage, ShareImage, SaveImage, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
-    WriteDump, ShareDump, CopyDumpText,
+    WriteDump, ShareDump, CopyDumpText, ViewRead, EditRead,
 }
 
 /// <summary>One line of the menu: an action, or a group (<paramref name="Children"/>) that opens a second menu.
@@ -31,7 +31,13 @@ public static class SavedMenu
 
         if (item.IsDump)
         {
-            menu.Add(new("Write to a tag", SavedAction.WriteDump));
+            // Saved from a read: show it as it was, or edit its pages or blocks and write them back to that tag.
+            if (item.HasRead)
+            {
+                menu.Add(new("View as read", SavedAction.ViewRead));
+                menu.Add(new("Edit and write to the tag", SavedAction.EditRead));
+            }
+            if (item.IsType2Dump) menu.Add(new("Write to a tag", SavedAction.WriteDump));
             menu.Add(new("Share .bin file", SavedAction.ShareDump));
             if (item.HasDumpText) menu.Add(new("Copy readable text", SavedAction.CopyDumpText));
             menu.Add(new("Rename", SavedAction.Rename));
