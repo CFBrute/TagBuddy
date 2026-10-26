@@ -182,7 +182,46 @@ public static class HelpContent
             new HelpMore("Readable memory and backups",
                 new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save tag as read\" keeps it in Saved exactly as it was read, for MIFARE Classic and ISO 15693 too: from there it can be viewed again as read, edited and written back to that same tag, or (NTAG/Ultralight) written whole to a tag. \"Compare with…\" shows only what differs between this read and a saved one, or the next tag held to the phone, and can make one tag like the other through the editor."),
                 new HelpSeeAlso("dumps")),
-            new HelpSeeAlso("nfc-write", "private", "trouble"),
+            new HelpSeeAlso("examples", "nfc-write", "private", "trouble"),
+        ]),
+
+        new("examples", "What a tag looks like when read", "tab_nfc.png", "What the NFC tab shows for the common kinds of tag and card.",
+        [
+            new HelpText("Every read shows the tag's serial number and the chip it found. What else appears depends on the tag. Here is what to expect from the common ones."),
+            new HelpHeading("A sticker with a link (NTAG213/215/216)"),
+            new HelpText("The serial number, the chip (for example NTAG215), how much it holds, and the link as a preview card with the page's title, picture and icon. Below that, a map of every page of memory, coloured by what each page is for. Buttons open the link, view the page, save it or edit it."),
+            new HelpHeading("A sticker with plain text"),
+            new HelpText("The same, but the content is shown as text. If the text is really a Wi-Fi network, a contact or another known kind, its fields are broken out too."),
+            new HelpHeading("A blank or new sticker"),
+            new HelpText("The serial, chip and size, and \"no content\". If it holds bytes with no NDEF wrapper — written raw by this app — those are shown as text that only this app reads back."),
+            new HelpHeading("MIFARE Ultralight"),
+            new HelpText("Shown like an NTAG: the serial, the chip and the full page memory with its map."),
+            new HelpHeading("A MIFARE Classic that opens with default keys"),
+            new HelpText("The serial, the chip (Classic 1K or 4K), the ATQA and SAK bytes, and \"Card data\": the sectors that opened with common default keys, block by block. Each sector ends with its trailer, split into key A, the access rules in plain words, and key B. Block 0 is split into the UID, its check byte and the maker bytes."),
+            .. Features.MifareKeyTools
+                ? new HelpBlock[]
+                {
+                    new HelpText("A \"Genuine chip?\" line judges, from the maker code in block 0 and the chip's originality signature, whether it looks like a real NXP chip or a clone."),
+                    new HelpHeading("A secured MIFARE Classic"),
+                    new HelpText("A card with custom keys shows only its serial number, and says it is secured. Enter a key to try, or import a dictionary and tap \"Try all default keys\", to open more sectors."),
+                    new HelpHeading("A magic / clone card"),
+                    new HelpText("A Classic whose UID does not start with NXP's 04, or that returns no originality signature, reads as \"likely a clone\". Block 0 on such cards is usually writable, which the editor can change (see Writing NFC tags)."),
+                }
+                : [],
+            new HelpHeading("A bank or payment card"),
+            new HelpText("Recognised by its brand (Visa, Mastercard, …) and shown as a secure item with its type only. The app never asks it for card numbers or the holder's details."),
+            new HelpHeading("A passport or ID card"),
+            new HelpText("Recognised as an e-passport or ID and shown as a secure item with its type only. Its chip is locked to the printed details and is never read here."),
+            new HelpHeading("An ISO 15693 label"),
+            new HelpText("The serial, the chip, and \"Label memory\": every block that answered a read. These are the longer-range labels used in libraries and logistics."),
+            .. amiibo
+                ? new HelpBlock[]
+                {
+                    new HelpHeading("An Amiibo"),
+                    new HelpText("An NTAG215 whose content is Amiibo data. The read names the figure and shows the memory; a saved dump can be written back to the same tag (see Tag backups)."),
+                }
+                : [],
+            new HelpSeeAlso("nfc-read", "nfc-write", "dumps"),
         ]),
 
         new("nfc-write", "Writing NFC tags", "tab_nfc.png", "Put a link, text or contact on a tag that any phone can read.",
@@ -202,9 +241,19 @@ public static class HelpContent
                     "Contact (vCard): a contact card the phone offers to save.",
                     "Private text: encrypted with a passphrase; only Tag Buddy can read it (see Private text).",
                     "Raw bytes: text stored without the NDEF format. Only this app reads it back; it is meant for tags that cannot hold NDEF any more.",
-                    "Pages or blocks: edit a tag's memory directly, in hex or as text. Read the tag first and tap \"Edit and write to this tag\", then tap any byte and type over it; Undo and Redo go one keystroke at a time, \"All to 00\" clears every page, and a MIFARE Classic sector the read opened can be given a new key (which the phone remembers for that tag) and new access rules, picked in words, and \"Undo on the tag\" puts back what a write changed. The write only goes to that same tag, and only the bytes you changed are written. The serial, lock and password settings are never written.",
+                    "Pages or blocks: edit a tag's memory directly, in hex or as text. Read the tag first and tap \"Edit and write to this tag\", then tap any byte and type over it; Undo and Redo go one keystroke at a time, \"All to 00\" clears the data blocks, and \"Undo on the tag\" puts back what a write changed. The write only goes to that same tag, and only the bytes you changed are written. The serial (except a magic card's block 0, below), lock and password settings are never written.",
                     amiibo ? "Binary dump: writes a saved backup back to a tag, including Amiibo dumps (see Tag backups)." : "Binary dump: writes a saved backup back to a tag (see Tag backups).",
                     "Erase: clears the tag so it is empty again.")),
+            .. Features.MifareKeyTools
+                ? new HelpBlock[]
+                {
+                    new HelpMore("Editing a MIFARE Classic card",
+                        new HelpText("The editor has two tabs: Edit for the bytes, and Sector keys & rules for a sector's keys and access rules. Each sector's trailer is coloured in the grid — key A in blue, the access bits in purple, key B in amber."),
+                        new HelpText("For a sector the read opened, you can change key A and key B: type over the blue and amber bytes in the trailer row, or use the Key A and Key B fields on the Sector keys & rules tab (12 hex digits or 6 characters of text). Set both the same for one new key; a new key is remembered for that card. The access rules — what each key may do with each block — are picked in plain words: for one block, for all of a sector's data blocks at once, or across every opened sector."),
+                        new HelpText("Keys and access bits are never written as loose bytes. The check digits that protect them are kept, so an edit can never corrupt a sector, and a trailer's key bytes always read back blank."),
+                        new HelpTip("Block 0 holds the card's serial number (UID) and is read-only on a genuine card. On a magic/clone card you can unlock \"Edit block 0\" to change the UID; the check byte is recomputed for you, and \"All to 00\" never touches it. A wrong UID can make the card unreadable to some readers.", Warning: true)),
+                }
+                : [],
             new HelpMore("Can a tag get locked by accident?",
                 new HelpText("No. Writing content never locks a tag: you can rewrite a tag as often as you like. Tags have one-time lock bits that make pages read-only for good, but only someone who sets them on purpose locks a tag, and Tag Buddy never does."),
                 new HelpText("A tag locked by another tool cannot be changed. The app writes around locked pages where it can, and says which pages it had to leave alone.")),
