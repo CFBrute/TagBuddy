@@ -1,12 +1,13 @@
 # Builds the signed Release APK of Tag Buddy for sideloading and names it after the version stamped
-# into it: publish\TagBuddy_1_0_14.apk next to this script. Signing comes from TagBuddy\Signing.local.props
-# (git-ignored; see TagBuddy\README.md). With -Tag, also creates and pushes the git tag v1.0.14.
+# into it: publish\TagBuddy_1_1_3.apk next to this script. Signing comes from TagBuddy\Signing.local.props
+# (git-ignored; see TagBuddy\README.md). With -Tag, also creates and pushes the git tag v1.1.3.
 #
-# The version is 1.0.<git commit count>, so commit first: publishing with uncommitted changes stamps a
-# "*" after the commit in the app and refuses to tag.
+# The version is major.(commit count / 100).(commit count % 100), e.g. 1.1.3 at 103 commits (see $major and
+# $minorOffset below, kept in step with TagBuddy.csproj). Commit first: publishing with uncommitted changes
+# stamps a "*" after the commit in the app and refuses to tag.
 #
 # With -PlayStore, builds the Play Store edition instead (no Amiibo support; see TagBuddy\Features.cs) as a
-# signed app bundle, publish\TagBuddy_1_0_14_play.aab, to upload in the Play Console.
+# signed app bundle, publish\TagBuddy_1_1_3_play.aab, to upload in the Play Console.
 param(
     [switch]$Tag,
     [switch]$PlayStore
@@ -21,8 +22,12 @@ if (-not (Test-Path (Join-Path $root "TagBuddy\Signing.local.props"))) {
 }
 
 $dirty = (git -C $root status --porcelain) -ne $null
-$count = git -C $root rev-list --count HEAD
-$version = "1.0.$count"
+$count = [int](git -C $root rev-list --count HEAD)
+# Version = major.(count/100).(count%100), e.g. 1.1.3 at 103 commits. Keep $major/$minorOffset in step with
+# MajorVersion/MinorOffset in TagBuddy.csproj, which stamps the version into the app itself.
+$major = 1
+$minorOffset = 0
+$version = "$major.$($minorOffset + [math]::Floor($count / 100)).$($count % 100)"
 if ($dirty) { Write-Warning "Uncommitted changes: the app will show the commit with a '*'." }
 
 $extension = if ($PlayStore) { "aab" } else { "apk" }

@@ -13,10 +13,13 @@
 		<ApplicationTitle>Tag Buddy</ApplicationTitle>
 		<ApplicationId>com.barcodebuddy.app</ApplicationId>
 
-		<!-- Bumped by hand for a new version; the third number is the git commit count, filled in by
-		     StampBuildVersion below, which also sets the Android versionCode to that count. -->
-		<VersionPrefix>1.0</VersionPrefix>
-		<ApplicationDisplayVersion>$(VersionPrefix).0</ApplicationDisplayVersion>
+		<!-- Version is MajorVersion.(commit count / 100).(commit count % 100) — e.g. 1.1.3 at 103 commits — filled in
+		     by StampBuildVersion below, which also sets the Android versionCode to the commit count. Bump MajorVersion
+		     by hand for a big release; bump MinorOffset to push the minor number up for a notable change between the
+		     automatic hundred-commit steps. Keep these in step with publish.ps1, which names the APK file. -->
+		<MajorVersion>1</MajorVersion>
+		<MinorOffset>0</MinorOffset>
+		<ApplicationDisplayVersion>$(MajorVersion).0.0</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 		<!-- The version text is built below, with the short commit instead of the full one. -->
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
@@ -52,10 +55,10 @@
 		<AndroidPackageFormats>aab</AndroidPackageFormats>
 	</PropertyGroup>
 
-	<!-- Stamps the version (1.0.<commit count>) into the APK's versionName, the commit count into its
-	     versionCode, and the commit it was built from (with "*" when the working tree had uncommitted
-	     changes) plus the build time into the assembly, where BuildInfo reads them for the Saved tab.
-	     Without git the version is 1.0.0 and there is no commit. -->
+	<!-- Stamps the version (MajorVersion.<count/100>.<count%100>) into the APK's versionName, the commit count into
+	     its versionCode, and the commit it was built from (with "*" when the working tree had uncommitted changes)
+	     plus the build time into the assembly, where BuildInfo reads them for the About tab.
+	     Without git the version is MajorVersion.0.0 and there is no commit. -->
 	<Target Name="StampBuildVersion" BeforeTargets="GetAssemblyVersion;_GetAndroidPackageName">
 		<Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
 			<Output TaskParameter="ConsoleOutput" PropertyName="TagBuddyCommitCount" />
@@ -70,7 +73,10 @@
 		<PropertyGroup>
 			<TagBuddyCommitCount Condition="'$(TagBuddyGitExitCode)' != '0' Or '$(TagBuddyCommitCount)' == ''">0</TagBuddyCommitCount>
 			<TagBuddyCommit Condition="'$(TagBuddyCommit)' != '' And '$(TagBuddyDirty)' != ''">$(TagBuddyCommit)*</TagBuddyCommit>
-			<Version>$(VersionPrefix).$(TagBuddyCommitCount)</Version>
+			<!-- Patch = count % 100; Minor = MinorOffset + (count - patch) / 100 (an exact integer divide). -->
+			<TagBuddyPatch>$([MSBuild]::Modulo($(TagBuddyCommitCount), 100))</TagBuddyPatch>
+			<TagBuddyMinor>$([MSBuild]::Add($(MinorOffset), $([MSBuild]::Divide($([MSBuild]::Subtract($(TagBuddyCommitCount), $(TagBuddyPatch))), 100))))</TagBuddyMinor>
+			<Version>$(MajorVersion).$(TagBuddyMinor).$(TagBuddyPatch)</Version>
 			<ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
 			<ApplicationVersion Condition="'$(TagBuddyCommitCount)' != '0'">$(TagBuddyCommitCount)</ApplicationVersion>
 			<FileVersion>$(Version).0</FileVersion>
