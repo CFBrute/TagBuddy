@@ -46,7 +46,14 @@ Android-only .NET MAUI app (C#) that generates and scans barcodes and QR codes, 
   tag it is not tried on that tag again, and a tag read as default is then written with it (the write says so).
   The default is auto-tried only when the tag confirms it has no wrong-attempt lock-out (AUTHLIM 0); when that
   byte cannot be read (a read-protected tag hides it), the default is not tried and the password box appears, so
-  an automatic attempt never risks locking a tag. Auto-trying the default can also be turned off on the Settings tab. The password is kept only while the tab is open.
+  an automatic attempt never risks locking a tag. Auto-trying the default can also be turned off on the Settings tab. The password typed in the box is kept only while the tab is open.
+  A password that opens a tag (one typed, the default, or an already-remembered one) is remembered by the tag's
+  serial (`Services/Type2PasswordStore.cs`, a JSON file in the app's private data), the way MIFARE Classic keys
+  are, so the same tag opens on its own on later reads and writes — type a tag's password once and the app keeps
+  it. A remembered password is tried only on its own tag, ahead of the default, and at most once per read (it
+  already opened the tag, so one attempt authenticates; the cap means a tag whose password was changed elsewhere
+  ticks its wrong-attempt counter at most once). The Amiibo key is never stored, since it is re-derived from the
+  serial. Remembered passwords are kept on the phone only and can be forgotten on the Settings tab.
   A wrong one can count against a tag's wrong-attempt limit, so the box warns about that.
   Other write types: raw bytes (no NDEF wrapper), a binary dump (Amiibo or backup), and erase.
   **Edit pages or blocks** (`Services/TagSegments.cs`, `Services/NfcReader.Segments.cs`): after a read, "Edit and

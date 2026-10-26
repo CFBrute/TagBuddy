@@ -70,6 +70,29 @@ public sealed partial class NfcReader
         _manualPassword is not null && string.Equals(serial, _manualPasswordSerial, StringComparison.OrdinalIgnoreCase)
             ? _manualPassword : null;
 
+    /// <summary>Passwords the app has seen open protected Type 2 tags, by tag serial, so a tag opens on its own next
+    /// time (<see cref="Type2PasswordStore"/>). A remembered password is tried only on its own tag, like a typed one;
+    /// because it already opened that tag, trying it again authenticates rather than spending a wrong attempt.</summary>
+    private static IReadOnlyDictionary<string, byte[]> _rememberedPasswords = new Dictionary<string, byte[]>();
+
+    /// <summary>Sets the remembered Type 2 passwords a read and write may try, keyed by tag serial.</summary>
+    public void SetPasswordSearch(IReadOnlyDictionary<string, byte[]> remembered) =>
+        _rememberedPasswords = remembered ?? new Dictionary<string, byte[]>();
+
+    private static byte[]? RememberedPasswordFor(string serial) =>
+        _rememberedPasswords.TryGetValue(serial, out var pwd) && pwd is { Length: 4 } ? pwd : null;
+
+    /// <summary>The password that opened the last Type 2 tag read or written, with that tag's serial, when it is one
+    /// worth remembering (the person's typed password, a remembered one, or the factory default — never the Amiibo
+    /// key, which is re-derived). The page stores it so the tag opens on its own next time. Reset at each read/write.</summary>
+    public static (string Serial, byte[] Password)? Type2PasswordFound { get; private set; }
+
+    private static void RecordType2Password(string serial, byte[] password, bool amiibo)
+    {
+        if (!amiibo && password is { Length: 4 } && serial.Length > 0)
+            Type2PasswordFound = (serial, password);
+    }
+
     /// <summary>What this run has learned about the factory default password per tag serial: that it opened the
     /// tag, or that it did not. A tag whose default already failed is not tried with it again, so the counter is
     /// not ticked a second time; a tag read as default can then be written with it.</summary>

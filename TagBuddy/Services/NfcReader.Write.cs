@@ -93,7 +93,8 @@ public sealed partial class NfcReader
     {
         if (Features.Amiibo && (amiiboDump || LooksAmiibo(tagMemory))) return AmiiboPassword(link.Uid);
         string serial = ToHex(link.Uid);
-        return ManualPasswordFor(serial) ?? (ShouldTryDefault(serial) ? TagPassword.FactoryDefault : null);
+        return ManualPasswordFor(serial) ?? RememberedPasswordFor(serial)
+            ?? (ShouldTryDefault(serial) ? TagPassword.FactoryDefault : null);
     }
 
     /// <summary>Opens the password session when the tag protects pages this operation touches. Returns a
@@ -101,6 +102,7 @@ public sealed partial class NfcReader
     private static string? OpenProtection(Type2Link link, Type2Chip? chip, int lastPageTouched, byte[]? pwd, ref bool authed, out string? note)
     {
         note = null;
+        Type2PasswordFound = null;   // record only a password this write actually used
         int auth0 = ReadAuth0(link, chip);
         if (auth0 < 0 || auth0 >= lastPageTouched) return null;
 
@@ -111,7 +113,9 @@ public sealed partial class NfcReader
                    "Nothing was changed.";
 
         bool amiibo = Features.Amiibo && !manualBound && pwd.SequenceEqual(AmiiboPassword(link.Uid));
-        bool usingDefault = !manualBound && !amiibo;   // the factory default fallback: an automatic guess
+        // A password remembered for this tag (opened it before): tried like a typed one, not treated as the default.
+        bool remembered = !manualBound && !amiibo && RememberedPasswordFor(serial) is { } r && pwd.SequenceEqual(r);
+        bool usingDefault = !manualBound && !amiibo && !remembered;   // the factory default fallback: an automatic guess
         bool knownDefault = usingDefault && DefaultKnownWorks(serial);   // seen on an earlier read this session
         int? limit = ReadAuthLimit(link, chip);
 
@@ -122,15 +126,19 @@ public sealed partial class NfcReader
             return $"This tag is password-protected from page {auth0}, and whether a wrong attempt could lock it " +
                    "cannot be read, so the default was not tried. Enter its password and hold it again. Nothing was changed.";
 
-        // A wrong automatic guess (the default) ticks the tag's limit, so spend at most one attempt on it.
-        authed = TryAuthenticate(link, pwd, singleAttempt: usingDefault);
+        // A wrong automatic guess (the default) ticks the tag's limit, so spend at most one attempt on it; the same
+        // cap guards a remembered password, in case the tag's password was changed elsewhere since it was seen.
+        authed = TryAuthenticate(link, pwd, singleAttempt: usingDefault || remembered);
         if (usingDefault) RecordDefault(serial, authed);
         if (authed)
         {
+            RecordType2Password(serial, pwd, amiibo);   // store a working password for next time (never the Amiibo key)
             if (usingDefault)
                 note = knownDefault
                     ? "This tag was read with the factory default password (FFFFFFFF), so it was written with it."
                     : "Written with the tag's factory default password (FFFFFFFF).";
+            else if (remembered)
+                note = "Written with the password remembered for this tag.";
             return null;
         }
 
