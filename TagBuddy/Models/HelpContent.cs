@@ -180,7 +180,7 @@ public static class HelpContent
                 }
                 : [],
             new HelpMore("Readable memory and backups",
-                new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save tag as read\" keeps it in Saved exactly as it was read, for MIFARE Classic and ISO 15693 too: from there it can be viewed again as read, edited and written back to that same tag, or (NTAG/Ultralight) written whole to a tag."),
+                new HelpText("For NTAG and Ultralight tags, the most common stickers, the app reads every page of the tag's memory and shows it. \"Save tag as read\" keeps it in Saved exactly as it was read, for MIFARE Classic and ISO 15693 too: from there it can be viewed again as read, edited and written back to that same tag, or (NTAG/Ultralight) written whole to a tag. \"Compare with…\" shows only what differs between this read and a saved one, or the next tag held to the phone."),
                 new HelpSeeAlso("dumps")),
             new HelpSeeAlso("nfc-write", "private", "trouble"),
         ]),
