@@ -146,4 +146,18 @@ public class MifareClassicTests
         Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x42 }, changed[6..10]);
         Assert.Equal(new byte[] { 0xFF, 0x07, 0x80, 0x69 }, MifareClassicKeys.TrailerFor(a, b, [], null)[6..10]);
     }
+
+    [Fact]
+    public void A_trailer_line_puts_each_byte_where_the_colouring_expects_it()
+    {
+        // ClassicDumpView colours the trailer by column: hex from column 7, four groups of 8 digits, a space between.
+        byte[] trailer = [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xFF, 0x07, 0x80, 0x69, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5];
+        var line = MifareClassicKeys.FormatBlock(3, trailer);
+        Assert.StartsWith("  003  A0A1A2A3 A4A5FF07 8069B0B1 B2B3B4B5  ", line);
+        for (int k = 0; k < 16; k++)
+        {
+            int pos = 7 + k / 4 * 9 + k % 4 * 2;
+            Assert.Equal(trailer[k].ToString("X2"), line.Substring(pos, 2));
+        }
+    }
 }
