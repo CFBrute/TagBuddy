@@ -688,14 +688,9 @@ public partial class NfcPage : ContentPage
         {
             var chip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? DumpChipName;
             var suggested = Features.Amiibo && tag.HasRawMemory && NfcReader.IsAmiiboDump(tag.RawMemory!) ? $"Amiibo {tag.Id}" : $"{chip} {tag.Id}";
-            var size = tag.HasRawMemory ? $"{tag.RawMemory!.Length} bytes ({tag.RawMemory.Length / 4} pages)" : $"{tag.MemoryDump!.Count} lines";
-            var name = await DisplayPromptAsync("Save tag", $"{size}, as read just now. Give it a name:",
-                accept: "Save", cancel: "Cancel", initialValue: suggested, maxLength: 60);
-            if (name is null) return;
-
-            if (await CodeActions.PickGroupAsync(this, _saved, title: "Save in which group?") is not { } group) return;
-            var item = await _saved.AddReadAsync(name, tag, group);
-            Notice.Show(group.Length > 0 ? $"Tag saved in {group}: {item.DisplayName}" : $"Tag saved: {item.DisplayName}");
+            if (await SavePromptPage.ShowAsync(this, _saved, "Save tag", suggested) is not { } save) return;
+            var item = await _saved.AddReadAsync(save.Name, tag, save.Group);
+            Notice.Show(save.Group.Length > 0 ? $"Tag saved in {save.Group}: {item.DisplayName}" : $"Tag saved: {item.DisplayName}");
         }
         catch (Exception ex)
         {
