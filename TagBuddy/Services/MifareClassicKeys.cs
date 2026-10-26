@@ -25,6 +25,48 @@ public static class MifareClassicKeys
         (Hex("AABBCCDDEEFF"), "common"),
     ];
 
+    /// <summary>The parts of block 0 (the manufacturer block) worth labelling, other than the UID — which is already
+    /// shown as the serial number, so it is not repeated here: the check byte (BCC) and the manufacturer bytes.</summary>
+    public static IReadOnlyList<(string Label, string Value)> ManufacturerBlock(byte[]? block0)
+    {
+        if (block0 is not { Length: 16 }) return [];
+        byte bcc = block0[4];
+        byte expected = (byte)(block0[0] ^ block0[1] ^ block0[2] ^ block0[3]);
+        return
+        [
+            ("Check byte (BCC)", bcc == expected ? $"{bcc:X2} — valid" : $"{bcc:X2} — should be {expected:X2} (does not match the UID)"),
+            ("Manufacturer bytes", string.Join(" ", block0[5..].Select(b => b.ToString("X2")))),
+        ];
+    }
+
+    /// <summary>One verdict on whether the chip looks like a genuine NXP MIFARE Classic, from the originality signature
+    /// (<paramref name="signature"/>, null if the chip did not answer) and block 0's UID. A heuristic, not proof:
+    /// only verifying the signature against NXP's key would be proof.</summary>
+    public static string GenuineVerdict(byte[]? block0, byte[]? signature)
+    {
+        string sig = signature is { Length: > 0 }
+            ? $"It returned a {signature.Length}-byte originality signature, which genuine NXP EV1 chips carry (not yet checked against NXP's key)."
+            : "It returned no originality signature; genuine NXP EV1 chips do, while older genuine Classic chips and most clones do not.";
+
+        if (block0 is not { Length: 16 }) return sig;
+
+        byte m = block0[0];
+        bool nxpByte = m == 0x04;
+        string uid = nxpByte
+            ? "The UID begins 04, NXP's manufacturer code; on a genuine card block 0 is locked at the factory and cannot be rewritten."
+            : $"The UID begins {m:X2}, not NXP's 04, so this is most likely a \"magic\"/compatible clone (or a random-UID card); block 0 on such cards is usually writable, so it cannot be relied on as fixed.";
+        if ((byte)(block0[0] ^ block0[1] ^ block0[2] ^ block0[3]) != block0[4])
+            uid += " Its check byte does not match the UID, which a normal card never has.";
+
+        string verdict = (signature is { Length: > 0 }, nxpByte) switch
+        {
+            (true, true) => "Likely genuine (not cryptographically verified). ",
+            (false, false) => "Likely a clone or compatible chip, not a genuine NXP card. ",
+            _ => "Mixed signals, so not certain. ",
+        };
+        return verdict + sig + " " + uid;
+    }
+
     /// <summary>Reads a key the person typed: 12 hex digits, with spaces, colons and dashes between them ignored.
     /// Anything else is rejected. A Classic sector has no wrong-key lockout, so trying a wrong key does no harm.</summary>
     public static bool TryParseKey(string? text, out byte[] key)

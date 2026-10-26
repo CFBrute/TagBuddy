@@ -295,6 +295,18 @@ public sealed partial class NfcReader
 
             ClassicKeysFound = found;
             details.Add(("Access", MifareClassicKeys.AccessSummary(opened, sectors)));
+
+            // Block 0's parts (not the UID, which is the serial above) and one verdict on whether the chip looks
+            // genuine, from the originality signature (its own command, read only on a genuine EV1) and the UID.
+            if (opened > 0)
+            {
+                var sig = OriginalitySignature(classic);
+                if (blocks.TryGetValue(0, out var block0))
+                    foreach (var (label, value) in MifareClassicKeys.ManufacturerBlock(block0))
+                        details.Add((label, value));
+                details.Add(("Genuine chip?", MifareClassicKeys.GenuineVerdict(blocks.GetValueOrDefault(0), sig)));
+            }
+
             if (opened > 0)
                 segments = new SegmentRead(new SegmentLayout(TagFamily.Classic, MifareClassicKeys.ChipName(classic.Size), 16,
                     classic.BlockCount), blocks, closed) { OpenedSectors = openedSectors };
@@ -308,6 +320,31 @@ public sealed partial class NfcReader
         finally
         {
             try { classic.Close(); } catch { }
+        }
+    }
+
+    /// <summary>The MIFARE Classic EV1 originality signature, read with READ_SIG (3C 00) after an authentication, or
+    /// null when the chip does not answer (older Classic, a clone, or a phone that will not pass the command). Best
+    /// effort and read-only: any failure just means "no signature".</summary>
+    private static byte[]? OriginalitySignature(MifareClassic classic)
+    {
+        try
+        {
+            // READ_SIG needs the card in the authenticated state; sector 0 with a public key is enough.
+            bool authed = false;
+            foreach (var (key, _) in MifareClassicKeys.Defaults)
+            {
+                try { if (classic.AuthenticateSectorWithKeyA(0, key)) { authed = true; break; } } catch { }
+            }
+            if (!authed) return null;
+
+            var response = classic.Transceive([0x3C, 0x00]);
+            // A real signature is 32 bytes and not all zeros; a NAK or echo is short or empty.
+            return response is { Length: >= 16 } && response.Any(b => b != 0) ? response : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

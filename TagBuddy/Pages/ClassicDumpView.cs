@@ -12,6 +12,11 @@ internal static class ClassicDumpView
     private static readonly Color KeyB = Color.FromArgb("#F59E0B");    // amber
     private static readonly Color Dim = Colors.Gray;
 
+    // Block 0, the manufacturer block, by field.
+    private static readonly Color Uid = Color.FromArgb("#22C55E");     // green
+    private static readonly Color Bcc = Color.FromArgb("#EF4444");     // red
+    private static readonly Color Maker = Color.FromArgb("#F59E0B");   // amber
+
     /// <summary>Fills <paramref name="legend"/> and <paramref name="label"/> from the read's lines.</summary>
     public static void Show(Label legend, Label label, IReadOnlyList<string> lines)
     {
@@ -23,6 +28,13 @@ internal static class ClassicDumpView
         key.Spans.Add(new Span { Text = " · " });
         key.Spans.Add(new Span { Text = "key B", TextColor = KeyB, FontAttributes = FontAttributes.Bold });
         key.Spans.Add(new Span { Text = ". Keys read back as zeros, except key B where the rules make it plain data. The rules are spelled out under each trailer." });
+        key.Spans.Add(new Span { Text = "\nBlock 0 is the maker block: " });
+        key.Spans.Add(new Span { Text = "UID", TextColor = Uid, FontAttributes = FontAttributes.Bold });
+        key.Spans.Add(new Span { Text = " · " });
+        key.Spans.Add(new Span { Text = "check byte", TextColor = Bcc, FontAttributes = FontAttributes.Bold });
+        key.Spans.Add(new Span { Text = " · " });
+        key.Spans.Add(new Span { Text = "maker bytes", TextColor = Maker, FontAttributes = FontAttributes.Bold });
+        key.Spans.Add(new Span { Text = ". It is read-only on a genuine card, but writable on a \"magic\" clone." });
         legend.FormattedText = key;
 
         var text = new FormattedString();
@@ -33,12 +45,36 @@ internal static class ClassicDumpView
                 Add(text, label, line, Dim);
             else if (line.StartsWith("  rules:"))
                 Add(text, label, line, Rules);
+            else if (DataBlock(line) == 0)
+                AddManufacturer(text, label, line);
             else if (TrailerBlock(line))
                 AddTrailer(text, label, line);
             else
                 Add(text, label, line, null);
         }
         label.FormattedText = text;
+    }
+
+    /// <summary>The block number of a "  NNN  ..." block line, or -1 for other lines.</summary>
+    private static int DataBlock(string line) =>
+        line.Length > 5 && int.TryParse(line.AsSpan(2, 3), out int block) && line[5] == ' ' ? block : -1;
+
+    /// <summary>Block 0: the UID (bytes 0-3), its check byte (byte 4), then the maker bytes (5-15). Same column layout
+    /// as a trailer (hex from column 7, four 8-digit groups with a space between).</summary>
+    private static void AddManufacturer(FormattedString text, Label label, string line)
+    {
+        const int hexStart = 7;
+        Add(text, label, line[..hexStart], Dim);
+        int pos = hexStart;
+        for (int k = 0; k < 16; k++)
+        {
+            if (k > 0 && k % 4 == 0) { Add(text, label, " ", null); pos++; }
+            if (pos + 2 > line.Length) break;
+            var color = k < 4 ? Uid : k == 4 ? Bcc : Maker;
+            Add(text, label, line.Substring(pos, 2), color);
+            pos += 2;
+        }
+        if (pos < line.Length) Add(text, label, line[pos..], Dim);
     }
 
     /// <summary>"  NNN  ..." where block NNN is a sector trailer.</summary>
