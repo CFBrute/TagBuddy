@@ -5,7 +5,7 @@ namespace TagBuddy.Models;
 /// <summary>Everything the Saved menu can do with an item.</summary>
 public enum SavedAction
 {
-    Open, ViewPage, ShareImage, SaveImage, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename,
+    Open, ViewPage, ShareImage, SaveImage, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
     WriteDump, ShareDump, CopyDumpText,
 }
 
@@ -35,6 +35,7 @@ public static class SavedMenu
             menu.Add(new("Share .bin file", SavedAction.ShareDump));
             if (item.HasDumpText) menu.Add(new("Copy readable text", SavedAction.CopyDumpText));
             menu.Add(new("Rename", SavedAction.Rename));
+            menu.Add(new(GroupLabel(item), SavedAction.MoveToGroup));
             return menu;
         }
 
@@ -61,8 +62,12 @@ public static class SavedMenu
 
         if (item.IsText) menu.Add(new("Edit text", SavedAction.EditText));
         menu.Add(new("Rename", SavedAction.Rename));
+        menu.Add(new(GroupLabel(item), SavedAction.MoveToGroup));
         return menu;
     }
+
+    /// <summary>"Move to a group" for an item in none, "Group: Work" for one filed under Work.</summary>
+    public static string GroupLabel(SavedItem item) => item.HasGroup ? $"Group: {item.Group}" : "Move to a group";
 
     /// <summary>A group; a group of one is no group, just that line.</summary>
     private static MenuEntry Group(string label, params MenuEntry[] children) =>

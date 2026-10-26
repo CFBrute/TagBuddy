@@ -14,16 +14,21 @@
             <Button x:Name="FilterCodes" Text="Codes" Clicked="OnFilterCodes" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
             <Button x:Name="FilterTexts" Text="Text" Clicked="OnFilterTexts" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
             <Button x:Name="FilterDumps" Text="Tags" Clicked="OnFilterDumps" Padding="12,4" MinimumHeightRequest="34" FontSize="13" />
+            <!-- Narrows the list to one group; shown once any item is in a group -->
+            <Button x:Name="FilterGroup" Text="Group ▾" Clicked="OnFilterGroup" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    IsVisible="False" />
         </HorizontalStackLayout>
 
         <!-- Select mode, started by a long press on a row: how many are picked, and what to do with them -->
-        <Grid Grid.Row="0" x:Name="SelectBar" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6" Padding="12,10,12,4">
+        <Grid Grid.Row="0" x:Name="SelectBar" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Padding="12,10,12,4">
             <Button Grid.Column="0" Text="Cancel" Clicked="OnCancelSelect" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
                     BackgroundColor="#6B7280" TextColor="White" />
             <Label Grid.Column="1" x:Name="SelectCount" FontSize="15" FontFamily="OpenSansSemibold" VerticalOptions="Center" Margin="6,0,0,0" />
             <Button Grid.Column="2" x:Name="SelectAllButton" Text="All" Clicked="OnSelectAll" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
                     BackgroundColor="#6B7280" TextColor="White" />
-            <Button Grid.Column="3" x:Name="DeleteSelectedButton" Text="Delete" Clicked="OnDeleteSelected" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+            <Button Grid.Column="3" Text="Group" Clicked="OnGroupSelected" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
+                    BackgroundColor="#6B7280" TextColor="White" />
+            <Button Grid.Column="4" x:Name="DeleteSelectedButton" Text="Delete" Clicked="OnDeleteSelected" Padding="12,4" MinimumHeightRequest="34" FontSize="13"
                     BackgroundColor="#DC2626" TextColor="White" />
         </Grid>
 
@@ -121,11 +126,12 @@
                                         </DataTrigger>
                                     </Label.Triggers>
                                 </Label>
-                                <Label Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
-                                       Text="{Binding FormatLabel}"
-                                       FontSize="11"
-                                       TextColor="#C7780B"
-                                       VerticalOptions="Center" />
+                                <VerticalStackLayout Grid.Row="0" Grid.Column="2" Grid.RowSpan="2" Spacing="2" VerticalOptions="Center">
+                                    <Label Text="{Binding FormatLabel}" FontSize="11" TextColor="#C7780B" HorizontalTextAlignment="End" />
+                                    <!-- The group it is filed under -->
+                                    <Label Text="{Binding Group}" IsVisible="{Binding HasGroup}" FontSize="11" TextColor="Gray"
+                                           HorizontalTextAlignment="End" LineBreakMode="TailTruncation" MaximumWidthRequest="90" />
+                                </VerticalStackLayout>
                                 <Button Grid.Row="0" Grid.Column="3" Grid.RowSpan="2"
                                         Text="⋮"
                                         FontSize="22"

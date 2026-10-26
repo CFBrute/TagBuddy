@@ -549,8 +549,10 @@ public partial class NfcPage : ContentPage
                 accept: "Save", cancel: "Cancel", initialValue: suggested, maxLength: 60);
             if (name is null) return;
 
+            if (await CodeActions.PickGroupAsync(this, _saved, title: "Save in which group?") is not { } group) return;
             var dump = await _saved.AddDumpAsync(name, tag.Id, DumpChipName, tag.RawMemory);
-            Notice.Show($"Dump saved: {dump.DisplayName}");
+            if (group.Length > 0) await _saved.SetGroupAsync([dump], group);
+            Notice.Show(group.Length > 0 ? $"Dump saved in {group}: {dump.DisplayName}" : $"Dump saved: {dump.DisplayName}");
         }
         catch (Exception ex)
         {

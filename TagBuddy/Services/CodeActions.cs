@@ -54,6 +54,31 @@ public static class CodeActions
         Notice.Show("Copied");
     }
 
+    /// <summary>Lets the person pick a group for what is being saved or moved: one of the groups in use, a new one, or
+    /// none. Returns the group ("" for none), or null when they cancelled. <paramref name="current"/> is marked.</summary>
+    public static async Task<string?> PickGroupAsync(Page page, SavedService saved, string current = "", string title = "Which group?")
+    {
+        const string none = "No group", fresh = "New group…";
+        await saved.LoadAsync();
+        var groups = saved.Groups;
+        var options = groups.Select(g => string.Equals(g, current, StringComparison.CurrentCultureIgnoreCase) ? $"✓ {g}" : g)
+                            .Prepend(current.Length == 0 ? $"✓ {none}" : none).Append(fresh).ToArray();
+        var choice = await page.DisplayActionSheetAsync(title, "Cancel", null, options);
+        if (choice == $"✓ {none}") choice = none;
+        if (choice is null || choice == "Cancel") return null;
+        if (choice == none) return "";
+        if (choice == fresh)
+        {
+            var name = await page.DisplayPromptAsync("New group", "A name for the group:", accept: "OK", cancel: "Cancel", maxLength: 40);
+            return name is null ? null : name.Trim().Length == 0 ? null : name.Trim();
+        }
+        return choice.StartsWith("✓ ") ? choice[2..] : choice;
+    }
+
+    /// <summary>At save time: the group to file the item under (none, one in use, or a new one).</summary>
+    private static Task<string?> GroupForNewAsync(Page page, SavedService saved) =>
+        PickGroupAsync(page, saved, title: "Save in which group?");
+
     /// <summary>Asks for an optional name and keeps the code in Saved, unless the same code is there already.</summary>
     public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage)
     {
@@ -79,9 +104,11 @@ public static class CodeActions
             accept: "Save", cancel: "Cancel", placeholder: item.Value, maxLength: 60);
         if (name is null) return;
 
+        if (await GroupForNewAsync(page, saved) is not { } group) return;
         item.Name = name.Trim();
+        item.Group = group;
         await saved.AddAsync(item);
-        Notice.Show("Saved");
+        Notice.Show(group.Length > 0 ? $"Saved in {group}" : "Saved");
     }
 
     /// <summary>Asks for an optional name and keeps the text in Saved as a text note, unless it is there already.
@@ -98,8 +125,9 @@ public static class CodeActions
             accept: "Save", cancel: "Cancel", placeholder: text, maxLength: 60);
         if (name is null) return;
 
-        await saved.AddTextAsync(name, text);
-        Notice.Show("Saved as text");
+        if (await GroupForNewAsync(page, saved) is not { } group) return;
+        await saved.AddTextAsync(name, text, group);
+        Notice.Show(group.Length > 0 ? $"Saved as text in {group}" : "Saved as text");
     }
 
     /// <summary>Shares a tag dump as a .bin file through the Android share sheet.</summary>

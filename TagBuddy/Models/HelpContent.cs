@@ -272,7 +272,8 @@ public static class HelpContent
         new("saved", "Saved", "tab_saved.png", "Everything you keep: codes, text notes and tag backups.",
         [
             new HelpText("Use the buttons at the top to show everything, or only codes, text notes or tags. Text notes come from saving the content of a scanned code or an NFC tag as text."),
-            new HelpTip("Long-press an item to start selecting, tap more items to add them, then tap Delete to remove them all at once. Cancel, or the back button, stops selecting."),
+            new HelpText("Items can be filed in groups. When you save something, pick a group, make a new one, or choose none. \"Move to a group\" in an item's menu moves it later, and the Group button at the top shows one group at a time. A group with nothing left in it simply disappears."),
+            new HelpTip("Long-press an item to start selecting, tap more items to add them, then tap Delete to remove them all at once, or Group to move them to a group together. Cancel, or the back button, stops selecting."),
             new HelpText("The list keeps what you used last at the top: showing, opening, sharing, copying or writing an item moves it up the next time you come back to Saved. Renaming or editing does not."),
             new HelpList(false,
                 "Tap a code to show it full screen.",
