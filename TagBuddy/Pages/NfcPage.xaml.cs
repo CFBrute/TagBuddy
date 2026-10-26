@@ -1413,22 +1413,6 @@ public partial class NfcPage : ContentPage
         Notice.Show($"{what} copied as hex");
     }
 
-    /// <summary>Pastes hex bytes from the clipboard over the bytes from the cursor on (bytes past the end are left).</summary>
-    private async void OnSegmentPaste(object? sender, EventArgs e)
-    {
-        if (_edit is not { Length: > 0 } edit) return;
-        if (SavedService.ParseHex(await Clipboard.Default.GetTextAsync()) is not { Length: > 0 } bytes)
-        {
-            Notice.Show("The clipboard has no hex bytes to paste");
-            return;
-        }
-        int wrote = edit.TypeBytes(bytes);
-        SegmentEdited();
-        Notice.Show(wrote < bytes.Length
-            ? $"Pasted {wrote} of {bytes.Length} bytes; the rest were past the end of the range"
-            : $"Pasted {wrote} byte{(wrote == 1 ? "" : "s")} from the cursor");
-    }
-
     /// <summary>The rule pickers' choices, in picker order: data rules and trailer rules from <see cref="MifareClassicKeys"/>.</summary>
     private static readonly string[] DataRuleItems = MifareClassicKeys.DataRules.Select(r => r.Text).ToArray();
     private static readonly string[] TrailerRuleItems = MifareClassicKeys.TrailerRules.Select(r => r.Permanent ? "⚠ " + r.Text : r.Text).ToArray();
