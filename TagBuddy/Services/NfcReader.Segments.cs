@@ -193,8 +193,8 @@ public sealed partial class NfcReader
 
                             if (pending.Count == 0 && wantsKey)
                             {
-                                var (done, why, keysNow) = WriteClassicTrailer(classic, sectorNo, key, useB, change!);
-                                if (done) keysSet.AddRange(keysNow.Select(k => (sectorNo, MifareClassicKeys.KeyHex(k))));
+                                var (done, why, keyNow) = WriteClassicTrailer(classic, sectorNo, key, useB, change!);
+                                if (done) keysSet.Add((sectorNo, MifareClassicKeys.KeyHex(keyNow)));
                                 else if (why is not null) keyNotes.Add(why);
                                 wantsKey = false;                           // one attempt: never retried with another key
                             }
@@ -228,15 +228,16 @@ public sealed partial class NfcReader
     /// no new one is given), and the new rules (or the current ones kept). The sector was just opened with a known key,
     /// which is what entitles a change; whether the card lets that key rewrite the trailer is up to its rules, and a
     /// refusal is reported. The sector is opened again afterwards to confirm the write; only then is it reported done.
-    /// Returns the sector's keys now, the one it opened with first, for remembering.</summary>
-    private static (bool Done, string? Why, byte[][] KeysNow) WriteClassicTrailer(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, SectorChange change)
+    /// Returns the key to remember for the sector: the strongest one under its rules (one that reads and writes the data
+    /// if there is one, else one that reads), as long as it opens the sector; else the other key that does.</summary>
+    private static (bool Done, string? Why, byte[] KeyNow) WriteClassicTrailer(MifareClassic classic, int sector, byte[] openedWith, bool asKeyB, SectorChange change)
     {
         int trailer = classic.SectorToBlock(sector) + classic.GetBlockCountInSector(sector) - 1;
         byte[]? current;
         try { current = classic.ReadBlock(trailer); }
         catch { current = null; }
         if (current is not { Length: >= 16 })
-            return (false, $"Sector {sector} did not take its change: its trailer could not be read.", new[] { openedWith });
+            return (false, $"Sector {sector} did not take its change: its trailer could not be read.", openedWith);
 
         // A new key A and/or key B are written as given; the one not being changed must be kept, but keys read back as
         // zeros. The kept key is the one that opened the sector (key A when opened with A, key B when opened with B), or
@@ -246,7 +247,7 @@ public sealed partial class NfcReader
         byte[]? keyB = change.KeyB ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : null);
         if (keyA is null || keyB is null)
             return (false, $"Sector {sector} did not take its change: key {(keyA is null ? 'A' : 'B')} could not be kept " +
-                           $"(open the sector with key {(keyA is null ? 'A' : 'B')}, or set it too). Nothing was written to this sector.", new[] { openedWith });
+                           $"(open the sector with key {(keyA is null ? 'A' : 'B')}, or set it too). Nothing was written to this sector.", openedWith);
         byte[] keyNow = change.KeyA ?? change.KeyB ?? openedWith;
 
         try
@@ -257,19 +258,24 @@ public sealed partial class NfcReader
         {
             try { classic.Close(); classic.Connect(); classic.Timeout = 1000; } catch { }
             return (false, $"Sector {sector} did not take its change: the card refused the write (its rules may not let " +
-                           $"key {(asKeyB ? 'B' : 'A')} change the trailer) or it moved away.", new[] { openedWith });
+                           $"key {(asKeyB ? 'B' : 'A')} change the trailer) or it moved away.", openedWith);
         }
 
-        // Writing the trailer ends the session; the proof is opening the sector again.
-        try
+        // Writing the trailer ends the session; the proof is opening the sector again, with the stronger key first so
+        // that is the one remembered (unknown rules: key A first, as before).
+        var rules = change.Rules ?? MifareClassicKeys.DecodeRules(current);
+        bool bFirst = rules is not null && MifareClassicKeys.KeyStrength(rules, keyB: true) > MifareClassicKeys.KeyStrength(rules, keyB: false);
+        foreach (bool useB in bFirst ? new[] { true, false } : new[] { false, true })
         {
-            classic.Close(); classic.Connect(); classic.Timeout = 1000;
-            // Both keys are kept for the card, the one that opened it first: key B too, so it is known if key A is lost.
-            if (classic.AuthenticateSectorWithKeyA(sector, keyA)) return (true, null, new[] { keyA, keyB });
-            if (classic.AuthenticateSectorWithKeyB(sector, keyB)) return (true, null, new[] { keyB, keyA });
+            try
+            {
+                classic.Close(); classic.Connect(); classic.Timeout = 1000;   // a failed try halts the card: start afresh
+                if (useB ? classic.AuthenticateSectorWithKeyB(sector, keyB) : classic.AuthenticateSectorWithKeyA(sector, keyA))
+                    return (true, null, useB ? keyB : keyA);
+            }
+            catch { }
         }
-        catch { }
-        return (false, $"Sector {sector}: the trailer was written but the sector did not open afterwards. Hold the card still and read it again before trying once more.", new[] { keyNow });
+        return (false, $"Sector {sector}: the trailer was written but the sector did not open afterwards. Hold the card still and read it again before trying once more.", keyNow);
     }
 
     // ------------------------------------------------------------------------------------------------ ISO 15693

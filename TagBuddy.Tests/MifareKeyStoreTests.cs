@@ -87,6 +87,19 @@ public class MifareKeyStoreTests : IDisposable
         Assert.Equal(2, _store.RememberedCardCount());
     }
 
+    [Theory]
+    [InlineData(0b000, 0b001, false)]   // factory: A reads and writes, B is plain data
+    [InlineData(0b100, 0b011, true)]    // A reads, B reads and writes: B
+    [InlineData(0b011, 0b011, true)]    // only B reads and writes
+    [InlineData(0b010, 0b011, true)]    // both only read: B, which also changes the keys
+    [InlineData(0b000, 0b011, true)]    // both read and write: B, which also changes the keys
+    public void The_key_remembered_is_the_strongest(int data, int trailer, bool keyB)
+    {
+        var rules = new SectorRules(data, data, data, trailer);
+        bool bStronger = MifareClassicKeys.KeyStrength(rules, keyB: true) > MifareClassicKeys.KeyStrength(rules, keyB: false);
+        Assert.Equal(keyB, bStronger);
+    }
+
     [Fact]
     public void A_card_given_a_new_serial_keeps_its_keys_under_both()
     {

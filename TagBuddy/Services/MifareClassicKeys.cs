@@ -98,6 +98,28 @@ public static class MifareClassicKeys
     public static bool KeyAUnused(SectorRules rules) =>
         rules.Data.All(d => d is 0b011 or 0b101 or 0b111) && rules.Trailer is not (0b000 or 0b001);
 
+    /// <summary>Whether key A (or, with <paramref name="keyB"/>, key B) may read and write a data block under its rule,
+    /// as <see cref="DataRules"/> spells out (decrementing and incrementing a value block do not count as writing).</summary>
+    public static (bool Read, bool Write) DataAccess(int bits, bool keyB) =>
+        keyB ? (bits != 0b111, bits is 0b000 or 0b100 or 0b110 or 0b011)
+             : (bits is 0b000 or 0b010 or 0b100 or 0b110 or 0b001, bits == 0b000);
+
+    /// <summary>How much a key can do in a sector under these rules, to pick the one worth remembering: writing a data
+    /// group counts most, then reading one, then changing the keys or rules. Key B counts for nothing where the rules
+    /// make it plain data (readable, so not a key at all).</summary>
+    public static int KeyStrength(SectorRules rules, bool keyB)
+    {
+        if (keyB && rules.Trailer is 0b000 or 0b001 or 0b010) return 0;
+        int score = 0;
+        foreach (var bits in rules.Data)
+        {
+            var (read, write) = DataAccess(bits, keyB);
+            score += (write ? 4 : 0) + (read ? 1 : 0);
+        }
+        bool changes = keyB ? rules.Trailer is 0b011 or 0b100 or 0b101 : rules.Trailer is 0b000 or 0b001;
+        return score + (changes ? 1 : 0);
+    }
+
     /// <summary>Whether a key is one of the built-in public defaults (the sign of a blank or unsecured sector).</summary>
     public static bool IsDefault(byte[] key) => Defaults.Any(d => d.Key.AsSpan().SequenceEqual(key));
 
