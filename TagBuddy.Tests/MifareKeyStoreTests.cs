@@ -88,6 +88,17 @@ public class MifareKeyStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_card_given_a_new_serial_keeps_its_keys_under_both()
+    {
+        _store.Remember("04:AA:BB:CC", ["A0A1A2A3A4A5", "B0B1B2B3B4B5"]);
+        _store.CarryOver("04:AA:BB:CC", "DE:AD:BE:EF");
+        Assert.Equal(2, _store.RememberedFor("DEADBEEF").Count);
+        Assert.Equal(2, _store.RememberedFor("04AABBCC").Count);   // kept, in case the serial is put back
+        _store.CarryOver("11:22:33:44", "55:66:77:88");             // nothing known for it: nothing made up
+        Assert.Empty(_store.RememberedFor("55667788"));
+    }
+
+    [Fact]
     public void Remembered_keys_survive_a_new_store_on_the_same_folder()
     {
         _store.Remember("04AABB", ["FFFFFFFFFFFF"]);

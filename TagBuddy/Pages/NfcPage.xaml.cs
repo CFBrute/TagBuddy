@@ -1066,6 +1066,21 @@ public partial class NfcPage : ContentPage
             if (expected) foreach (var (sector, _) in keysSet) _edit!.SectorChanged(sector);
             UpdateSectorKeyPanel();
         }
+        // A magic card given a new UID answers to it from now on: its known keys go with it, and the edit (and the
+        // undo on the tag) expect the new serial, or the next touch of that same card would be refused.
+        if (record.IdAfter is var newId && !TagEdit.SameId(newId, record.TagId))
+        {
+            _keyStore.CarryOver(record.TagId, newId);
+            if (expected)
+            {
+                _edit!.ExpectedId = newId;
+                _renderingSegments = true;
+                ExpectedIdEntry.Text = newId;
+                _renderingSegments = false;
+                UpdateExpectSummary();
+            }
+            note += $" The card's serial is now {newId} (it shows once the card is held again); its remembered keys go with it.";
+        }
         if (expected && (ok || step is not null))
             _edit!.Commit(record.After.ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()));
         SegmentGrid.Invalidate();
