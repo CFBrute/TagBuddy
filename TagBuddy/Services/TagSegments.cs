@@ -445,6 +445,23 @@ public sealed class TagEdit
         Nibble = 0;
     }
 
+    /// <summary>Puts the byte under the cursor back as the tag had it and steps one byte left, so pressing it again and
+    /// again walks back over a run of changes wherever the cursor was put, unlike Undo, which goes by time. A byte
+    /// already as the tag had it just steps left. One undo step when something changed.</summary>
+    public void ResetAtCursor()
+    {
+        if (Length == 0) return;
+        int at = Math.Min(Cursor, Length - 1);
+        var (segment, index) = At(at);
+        if (IsEdited(segment, index))
+        {
+            Begin();
+            Clear(segment, index);
+        }
+        Cursor = Math.Max(0, at - 1);
+        Nibble = 0;
+    }
+
     /// <summary>Puts every byte back as the tag had it. One undo step.</summary>
     public void RevertAll()
     {
