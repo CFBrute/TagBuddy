@@ -100,11 +100,12 @@ public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, 
     public IReadOnlySet<int> OpenedSectors { get; init; } = new HashSet<int>();
 }
 
-/// <summary>A change to a MIFARE Classic sector's trailer: a new key (as A and B), new rules, or both; null keeps what
-/// the sector has.</summary>
-public sealed record SectorChange(byte[]? Key, SectorRules? Rules)
+/// <summary>A change to a MIFARE Classic sector's trailer: a new key (as A and B), new rules, key A set to chosen data
+/// (keeping key B), or a mix; null keeps what the sector has. <see cref="Key"/> and <see cref="KeyAData"/> are mutually
+/// exclusive — a new key sets both A and B, while key-A data changes only key A and leaves key B as it is.</summary>
+public sealed record SectorChange(byte[]? Key, SectorRules? Rules, byte[]? KeyAData = null)
 {
-    public bool IsEmpty => Key is null && Rules is null;
+    public bool IsEmpty => Key is null && Rules is null && KeyAData is null;
 }
 
 /// <summary>An armed segment write: for each segment the bytes to put there, where null keeps the byte the tag has
@@ -162,7 +163,9 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
                           $"({bytes} byte{(bytes == 1 ? "" : "s")})");
             var keyed = Sectors.Where(s => s.Value.Key is not null).Select(s => s.Key).Order().ToList();
             var ruled = Sectors.Where(s => s.Value.Rules is not null).Select(s => s.Key).Order().ToList();
+            var keyedA = Sectors.Where(s => s.Value.KeyAData is not null).Select(s => s.Key).Order().ToList();
             if (keyed.Count > 0) parts.Add($"a new key for sector{(keyed.Count == 1 ? "" : "s")} {Type2Memory.Ranges(keyed)}");
+            if (keyedA.Count > 0) parts.Add($"key A as data for sector{(keyedA.Count == 1 ? "" : "s")} {Type2Memory.Ranges(keyedA)}");
             if (ruled.Count > 0) parts.Add($"new rules for sector{(ruled.Count == 1 ? "" : "s")} {Type2Memory.Ranges(ruled)}");
             return string.Join(" and ", parts);
         }
@@ -261,8 +264,34 @@ public sealed class TagEdit
     /// <summary>An empty edit for a tag type chosen by hand: every byte unknown, nothing written until typed.</summary>
     public static TagEdit Blank(SegmentLayout layout) => new(layout, [], [], fromRead: false);
 
-    public string? WhyNotWritable(int segment) =>
-        Layout.WhyNotWritable(segment) ?? (_blocked.TryGetValue(segment, out var why) ? why : null);
+    /// <summary>Whether block 0 (the serial/manufacturer block) may be edited on this card. Off by default: it is only
+    /// unlocked by hand, for a magic/clone card whose block 0 is writable. See <see cref="SetBlockZeroEditable"/>.</summary>
+    public bool AllowBlockZero { get; private set; }
+
+    /// <summary>Whether block 0 could be offered for editing at all: a MIFARE Classic card that was read and whose block 0
+    /// was read (sector 0 opened). Whether the card actually lets block 0 be written is only known at write time.</summary>
+    public bool CanEditBlockZero =>
+        Layout.Family == TagFamily.Classic && FromRead &&
+        _original.TryGetValue(0, out var o) && o.Any(b => b is not null) && Layout.WhyNotWritable(0) is not null;
+
+    /// <summary>Unlocks (or locks) editing of block 0. Only a card that was read and opened block 0 can take it; turning it
+    /// off drops any block-0 edits. On a normal card the write simply fails; on a magic/clone card it rewrites the UID.</summary>
+    public void SetBlockZeroEditable(bool on)
+    {
+        if (on && !CanEditBlockZero) on = false;
+        if (AllowBlockZero == on) return;
+        AllowBlockZero = on;
+        if (!on) _edits.Remove(0);
+        RecomputeSegments();
+        Place(Math.Clamp(Cursor, 0, Math.Max(0, Length - 1)), InText);
+    }
+
+    public string? WhyNotWritable(int segment)
+    {
+        if (_blocked.TryGetValue(segment, out var blocked)) return blocked;   // a page/sector the read could not reach
+        if (AllowBlockZero && Layout.Family == TagFamily.Classic && segment == 0) return null;
+        return Layout.WhyNotWritable(segment);
+    }
 
     /// <summary>The writable segments in the range, in order: together they make the run the cursor moves over. Cached
     /// because the drawing, cursor maths and write all read it many times; it changes only when the range does, so it
@@ -270,17 +299,40 @@ public sealed class TagEdit
     private List<int> _segments = [];
     private Dictionary<int, int> _segmentIndex = [];
 
+    /// <summary>The run of writable bytes the cursor moves over, as (segment, index) cells. Usually every byte of each
+    /// writable segment, but block 0's check byte is skipped: it is derived from the UID, never typed.</summary>
+    private List<(int Segment, int Index)> _cells = [];
+    private Dictionary<long, int> _cellPos = [];
+
     public IReadOnlyList<int> Segments => _segments;
+
+    private static long CellKey(int segment, int index) => (long)segment * 64 + index;
+
+    /// <summary>Whether a byte may be typed over: any byte of a writable segment, except block 0's check byte (BCC),
+    /// which the editor derives from the UID so a UID change always keeps a valid check byte.</summary>
+    private bool WritableByte(int segment, int index) =>
+        WhyNotWritable(segment) is null &&
+        !(AllowBlockZero && Layout.Family == TagFamily.Classic && segment == 0 && index == 4);
 
     private void RecomputeSegments()
     {
-        _segments = Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+        var segs = Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+        // Block 0 sits before the writable range (From is 1 for Classic); when unlocked it leads the run.
+        if (AllowBlockZero && Layout.Family == TagFamily.Classic && From > 0 && WhyNotWritable(0) is null)
+            segs.Insert(0, 0);
+        _segments = segs;
         _segmentIndex = new Dictionary<int, int>(_segments.Count);
         for (int i = 0; i < _segments.Count; i++) _segmentIndex[_segments[i]] = i;
+
+        _cells = [];
+        _cellPos = new Dictionary<long, int>(_segments.Count * Layout.SegmentSize);
+        foreach (var s in _segments)
+            for (int i = 0; i < Layout.SegmentSize; i++)
+                if (WritableByte(s, i)) { _cellPos[CellKey(s, i)] = _cells.Count; _cells.Add((s, i)); }
     }
 
     /// <summary>How many writable bytes the range has.</summary>
-    public int Length => _segments.Count * Layout.SegmentSize;
+    public int Length => _cells.Count;
 
     /// <summary>Limits the edit to segments <paramref name="from"/>-<paramref name="to"/>. Returns why not, or null.</summary>
     public string? SetRange(int from, int to)
@@ -313,16 +365,13 @@ public sealed class TagEdit
             : Layout.Family == TagFamily.Classic ? "sector not opened" : "locked for good";
 
     /// <summary>The segment and byte at a position of the run.</summary>
-    public (int Segment, int Index) At(int position)
-    {
-        int size = Layout.SegmentSize;
-        position = Math.Clamp(position, 0, Math.Max(0, _segments.Count * size - 1));
-        return (_segments.Count == 0 ? From : _segments[position / size], position % size);
-    }
+    public (int Segment, int Index) At(int position) =>
+        _cells.Count == 0 ? (From, 0) : _cells[Math.Clamp(position, 0, _cells.Count - 1)];
 
-    /// <summary>The run position of a byte, or -1 when its segment is not writable or not in the range.</summary>
+    /// <summary>The run position of a byte, or -1 when it is not a writable byte of the range (a locked segment, a byte
+    /// outside the range, or block 0's derived check byte).</summary>
     public int PositionOf(int segment, int index) =>
-        _segmentIndex.TryGetValue(segment, out var k) ? k * Layout.SegmentSize + Math.Clamp(index, 0, Layout.SegmentSize - 1) : -1;
+        _cellPos.TryGetValue(CellKey(segment, Math.Clamp(index, 0, Layout.SegmentSize - 1)), out var k) ? k : -1;
 
     /// <summary>The segments to write, with the typed bytes (null for those kept as the tag has them).</summary>
     public IReadOnlyDictionary<int, byte?[]> Changes =>
@@ -340,12 +389,37 @@ public sealed class TagEdit
     /// default, or one the person entered, imported or had remembered from setting it before).</summary>
     public bool CanChangeKey(int sector) => Layout.Family == TagFamily.Classic && FromRead && _openedSectors.Contains(sector);
 
-    /// <summary>Sets (or, with null, drops) the new key for a sector. False when the sector cannot take one.</summary>
+    /// <summary>Sets (or, with null, drops) the new key for a sector (as key A and key B). Clears any key-A-as-data
+    /// change, which sets only key A. False when the sector cannot take one.</summary>
     public bool SetSectorKey(int sector, byte[]? key) =>
-        Change(sector, c => c with { Key = key is { Length: 6 } ? key.ToArray() : null });
+        Change(sector, c => key is { Length: 6 } ? c with { Key = key.ToArray(), KeyAData = null } : c with { Key = null });
+
+    /// <summary>Sets (or, with null, drops) six bytes to store in key A, keeping key B as the sector's working key: a
+    /// trailer whose rules rely on key B can use key A's six bytes as data. Clears any whole-key change. False when the
+    /// sector cannot take it. Key bytes read back masked, so this is write-only unless a reader authenticates with it.</summary>
+    public bool SetSectorKeyAData(int sector, byte[]? data) =>
+        Change(sector, c => data is { Length: 6 } ? c with { KeyAData = data.ToArray(), Key = null } : c with { KeyAData = null });
 
     /// <summary>Sets (or, with null, drops) new rules for a sector. False when the sector cannot take them.</summary>
     public bool SetSectorRules(int sector, SectorRules? rules) => Change(sector, c => c with { Rules = rules });
+
+    /// <summary>The sectors whose keys are known (the read opened them), so their keys and rules can be changed.</summary>
+    public IReadOnlyList<int> ChangeableSectors =>
+        Layout.Family == TagFamily.Classic && FromRead ? _openedSectors.Order().ToList() : [];
+
+    /// <summary>Sets the same rule on all three data groups of a sector, keeping its trailer rule. When that matches
+    /// the sector's current rules, the change is dropped. False when the sector cannot be changed.</summary>
+    public bool SetAllDataRules(int sector, int bits)
+    {
+        if (!CanChangeKey(sector)) return false;
+        var basis = SectorChangeFor(sector)?.Rules ?? CurrentRules(sector) ?? SectorRules.Transport;
+        var next = basis with { Data0 = bits, Data1 = bits, Data2 = bits };
+        var read = CurrentRules(sector);
+        return SetSectorRules(sector, read is not null && next == read ? null : next);
+    }
+
+    /// <summary>Sets the same data-block rule on every changeable sector at once. Returns how many sectors took it.</summary>
+    public int SetAllSectorsDataRules(int bits) => ChangeableSectors.Count(s => SetAllDataRules(s, bits));
 
     private bool Change(int sector, Func<SectorChange, SectorChange> update)
     {
@@ -476,10 +550,10 @@ public sealed class TagEdit
     public void Fill(byte value, int? segment = null)
     {
         List<int> targets = segment is { } one ? (_segmentIndex.ContainsKey(one) ? [one] : []) : _segments;
-        if (!targets.Any(s => Enumerable.Range(0, Layout.SegmentSize).Any(i => ValueAt(s, i) != value))) return;   // already so
+        if (!targets.Any(s => Enumerable.Range(0, Layout.SegmentSize).Any(i => WritableByte(s, i) && ValueAt(s, i) != value))) return;   // already so
         Begin();
         foreach (var s in targets)
-            for (int i = 0; i < Layout.SegmentSize; i++) Set(s, i, value);
+            for (int i = 0; i < Layout.SegmentSize; i++) if (WritableByte(s, i)) Set(s, i, value);
     }
 
     /// <summary>Types the given bytes over whole segments, as if entered by hand (so they show as changes and are written
@@ -492,7 +566,7 @@ public sealed class TagEdit
         if (usable.Count == 0) return (0, skipped);
         Begin();
         foreach (var (segment, data) in usable)
-            for (int i = 0; i < data.Length; i++) Set(segment, i, data[i]);
+            for (int i = 0; i < data.Length; i++) if (WritableByte(segment, i)) Set(segment, i, data[i]);
         return (usable.Count, skipped);
     }
 
@@ -532,13 +606,38 @@ public sealed class TagEdit
         if (_original.TryGetValue(segment, out var o) && o[index] == value) { Clear(segment, index); return; }
         if (!_edits.TryGetValue(segment, out var e)) _edits[segment] = e = new byte?[Layout.SegmentSize];
         e[index] = value;
+        if (segment == 0 && index < 4) DeriveBcc();   // a UID byte changed: keep the check byte valid
     }
 
     private void Clear(int segment, int index)
     {
-        if (!_edits.TryGetValue(segment, out var e)) return;
-        e[index] = null;
-        if (e.All(b => b is null)) _edits.Remove(segment);
+        if (_edits.TryGetValue(segment, out var e))
+        {
+            e[index] = null;
+            if (e.All(b => b is null)) _edits.Remove(segment);
+        }
+        if (segment == 0 && index < 4) DeriveBcc();
+    }
+
+    /// <summary>Block 0's check byte (BCC) is the XOR of the four UID bytes. It is never typed; whenever a UID byte
+    /// changes while block 0 is editable, this recomputes it so the written block 0 always carries a valid check byte.</summary>
+    private void DeriveBcc()
+    {
+        if (!AllowBlockZero || Layout.Family != TagFamily.Classic) return;
+        byte bcc = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (ValueAt(0, i) is not { } b) return;   // UID not fully known: leave the check byte as read
+            bcc ^= b;
+        }
+        byte? original = _original.TryGetValue(0, out var o) ? o[4] : null;
+        if (original == bcc)                           // back to the card's own check byte: no edit needed
+        {
+            if (_edits.TryGetValue(0, out var e0)) { e0[4] = null; if (e0.All(x => x is null)) _edits.Remove(0); }
+            return;
+        }
+        if (!_edits.TryGetValue(0, out var e)) _edits[0] = e = new byte?[Layout.SegmentSize];
+        e[4] = bcc;
     }
 
     // ------------------------------------------------------------------------------------------------ serials
