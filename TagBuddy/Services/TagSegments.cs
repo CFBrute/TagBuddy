@@ -477,6 +477,25 @@ public sealed class TagEdit
     /// <summary>Sets the same data-block rule on every changeable sector at once. Returns how many sectors took it.</summary>
     public int SetAllSectorsDataRules(int bits) => ChangeableSectors.Count(s => SetAllDataRules(s, bits));
 
+    /// <summary>The blocks of a MIFARE Classic sector (four per sector, sixteen in a 4K's large sectors).</summary>
+    private static IEnumerable<int> SectorBlocks(int sector) =>
+        Enumerable.Range(sector < 32 ? sector * 4 : 128 + (sector - 32) * 16, sector < 32 ? 4 : 16);
+
+    /// <summary>Whether a sector has anything waiting to be written: new rules, new keys, or edited block bytes.</summary>
+    public bool SectorHasChanges(int sector) =>
+        _sectorRules.ContainsKey(sector) ||
+        SectorBlocks(sector).Any(b => _edits.TryGetValue(b, out var e) && e.Any(x => x is not null));
+
+    /// <summary>Puts one sector back as the tag had it: drops its new rules, its new keys and every edited byte in its
+    /// blocks. One undo step.</summary>
+    public void RevertSector(int sector)
+    {
+        if (!SectorHasChanges(sector)) return;
+        Begin();
+        _sectorRules.Remove(sector);
+        foreach (var b in SectorBlocks(sector)) _edits.Remove(b);
+    }
+
     /// <summary>Whether a sector's keys may be typed over: it opened, and its rules (as pending, else as read) still
     /// let the keys change. Unknown rules do not block it; the tag has the last word at write time.</summary>
     public bool KeysChangeable(int sector)
@@ -521,12 +540,9 @@ public sealed class TagEdit
                          .ToDictionary(x => x.s, x => x.c!);
 
     /// <summary>The rules a sector's trailer holds as read, or null when it was not read or its bits are corrupt.</summary>
-    public SectorRules? CurrentRules(int sector)
-    {
-        int trailer = sector < 32 ? sector * 4 + 3 : 128 + (sector - 32) * 16 + 15;
-        return _original.TryGetValue(trailer, out var t) && t.All(b => b is not null)
+    public SectorRules? CurrentRules(int sector) =>
+        _original.TryGetValue(TrailerOf(sector), out var t) && t.All(b => b is not null)
             ? MifareClassicKeys.DecodeRules(t.Select(b => b!.Value).ToArray()) : null;
-    }
 
     /// <summary>After the tag took a sector's trailer change: clear its pending rules and key edits (the key is known,
     /// so it can be changed again).</summary>

@@ -643,6 +643,30 @@ public class TagEditTests
     }
 
     [Fact]
+    public void Reverting_one_sector_drops_its_keys_rules_and_block_edits_but_leaves_others()
+    {
+        var edit = TagEdit.FromTag(ReadClassic(1, 2), "04");
+        At(edit, 4, 0);                                         // sector 1, block 4 (a data block)
+        Hex(edit, "AA");
+        edit.SetSectorKey(1, keyB: false, [1, 2, 3, 4, 5, 6]);  // sector 1 key A
+        edit.SetSectorRules(1, SectorRules.Transport.WithData(0, 0b100));
+        At(edit, 8, 0);                                         // sector 2, block 8
+        Hex(edit, "BB");
+
+        Assert.True(edit.SectorHasChanges(1));
+        Assert.True(edit.SectorHasChanges(2));
+
+        edit.RevertSector(1);
+        Assert.False(edit.SectorHasChanges(1));                 // sector 1 back as read
+        Assert.DoesNotContain(1, edit.Sectors.Keys);
+        Assert.DoesNotContain(4, edit.Changes.Keys);
+        Assert.Contains(8, edit.Changes.Keys);                  // sector 2 untouched
+
+        Assert.True(edit.Undo());                               // one step: sector 1 changes come back
+        Assert.True(edit.SectorHasChanges(1));
+    }
+
+    [Fact]
     public void Key_A_and_key_B_can_be_set_on_their_own_and_show_in_the_trailer_row()
     {
         var edit = TagEdit.FromTag(ReadClassic(1), "04");

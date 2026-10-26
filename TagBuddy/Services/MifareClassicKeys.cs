@@ -93,6 +93,10 @@ public static class MifareClassicKeys
     /// keys for the life of the sector.</summary>
     public static bool KeysChangeable(int trailerBits) => trailerBits is 0b000 or 0b001 or 0b011 or 0b100;
 
+    /// <summary>Whether a sector's trailer rule leaves key B readable (plain data). When it is, key B cannot be used to
+    /// authenticate the sector, so a data block's "key A or B" permission means key A only.</summary>
+    public static bool KeyBReadable(int trailerBits) => trailerBits is 0b000 or 0b001 or 0b010;
+
     /// <summary>Whether key A has no use under these rules: it cannot read or write any data block, nor change the
     /// trailer. Its six bytes are then free to store data (though they still read back blank).</summary>
     public static bool KeyAUnused(SectorRules rules) =>
