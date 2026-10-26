@@ -35,6 +35,12 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>The group the item is filed under in Saved ("Work", "Home"), or empty for none. Groups exist only
+    /// through their items: one with no items left is gone.</summary>
+    public string Group { get; set; } = string.Empty;
+
+    [JsonIgnore] public bool HasGroup => !string.IsNullOrWhiteSpace(Group);
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public SavedKind Kind { get; set; } = SavedKind.Code;
 

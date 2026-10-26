@@ -13,6 +13,9 @@ public partial class SavedPage : ContentPage
     private readonly ObservableCollection<SavedItem> _shown = [];
     private SavedKind? _filter;
 
+    /// <summary>The group the list is narrowed to, or null for every item.</summary>
+    private string? _groupFilter;
+
     public SavedPage(SavedService saved)
     {
         InitializeComponent();
@@ -65,9 +68,30 @@ public partial class SavedPage : ContentPage
 
     private void Refill()
     {
+        // A group that lost its last item is no filter any more.
+        if (_groupFilter is { } g && !_saved.Groups.Contains(g, StringComparer.CurrentCultureIgnoreCase)) _groupFilter = null;
+        FilterGroup.IsVisible = _saved.Groups.Count > 0;
+        FilterGroup.Text = _groupFilter is null ? "Group ▾" : $"{_groupFilter} ▾";
+        Palette.Select(FilterGroup, _groupFilter is not null);
+
         _shown.Clear();
         foreach (var item in _saved.Items)
-            if (_filter is null || item.Kind == _filter) _shown.Add(item);
+            if ((_filter is null || item.Kind == _filter)
+                && (_groupFilter is null || string.Equals(item.Group.Trim(), _groupFilter, StringComparison.CurrentCultureIgnoreCase)))
+                _shown.Add(item);
+    }
+
+    /// <summary>Narrows the list to one group, or widens it to all again.</summary>
+    private async void OnFilterGroup(object? sender, EventArgs e)
+    {
+        const string all = "All groups";
+        var options = _saved.Groups.Select(g => string.Equals(g, _groupFilter, StringComparison.CurrentCultureIgnoreCase) ? $"✓ {g}" : g)
+                            .Prepend(_groupFilter is null ? $"✓ {all}" : all).ToArray();
+        var choice = await DisplayActionSheetAsync("Show which group?", "Cancel", null, options);
+        if (choice is null || choice == "Cancel") return;
+        if (choice.StartsWith("✓ ")) choice = choice[2..];
+        _groupFilter = choice == all ? null : choice;
+        Refill();
     }
 
     // ---------------------------------------------------------------- select mode (long press)
@@ -117,6 +141,27 @@ public partial class SavedPage : ContentPage
         foreach (var item in _shown) item.IsSelected = true;
         SelectCount.Text = $"{_shown.Count} selected";
         SelectAllButton.IsVisible = false;
+    }
+
+    /// <summary>Moves every picked item to a group (or out of its group).</summary>
+    private async void OnGroupSelected(object? sender, EventArgs e)
+    {
+        var picked = _saved.Items.Where(i => i.IsSelected).ToList();
+        if (picked.Count == 0) return;
+        var shared = picked.Select(i => i.Group.Trim()).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
+        var current = shared.Count == 1 ? shared[0] : "";
+        var what = picked.Count == 1 ? $"\"{picked[0].DisplayName}\"" : $"{picked.Count} items";
+        if (await CodeActions.PickGroupAsync(this, _saved, current, $"Move {what} to which group?") is not { } group) return;
+        try
+        {
+            await _saved.SetGroupAsync(picked, group);
+            Notice.Show(group.Length > 0 ? $"Moved to {group}" : "Taken out of the group");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("Could not move", ex.Message, "OK");
+        }
+        StopSelecting();
     }
 
     private async void OnDeleteSelected(object? sender, EventArgs e)
@@ -218,8 +263,8 @@ public partial class SavedPage : ContentPage
 
     private async Task RunAsync(SavedItem item, SavedAction action)
     {
-        // Doing something with the item counts as using it; tidying it (rename, edit) does not.
-        if (action is not (SavedAction.Rename or SavedAction.EditText))
+        // Doing something with the item counts as using it; tidying it (rename, edit, group) does not.
+        if (action is not (SavedAction.Rename or SavedAction.EditText or SavedAction.MoveToGroup))
             await _saved.MarkUsedAsync(item);
 
         switch (action)
@@ -282,6 +327,14 @@ public partial class SavedPage : ContentPage
 
             case SavedAction.Rename:
                 await RenameAsync(item);
+                break;
+
+            case SavedAction.MoveToGroup:
+                if (await CodeActions.PickGroupAsync(this, _saved, item.Group, $"Move \"{item.DisplayName}\" to which group?") is { } group)
+                {
+                    await _saved.SetGroupAsync([item], group);
+                    Notice.Show(group.Length > 0 ? $"Moved to {group}" : "Taken out of the group");
+                }
                 break;
         }
     }

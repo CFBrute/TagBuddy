@@ -22,6 +22,26 @@ public class SavedService
 
     public IEnumerable<SavedItem> Dumps => Items.Where(i => i.IsDump);
 
+    /// <summary>The groups in use, in alphabetical order (a group is only the items filed under it).</summary>
+    public IReadOnlyList<string> Groups =>
+        Items.Where(i => i.HasGroup).Select(i => i.Group.Trim()).Distinct(StringComparer.CurrentCultureIgnoreCase)
+             .OrderBy(g => g, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    /// <summary>Files the items under <paramref name="group"/> (empty: under none).</summary>
+    public async Task SetGroupAsync(IReadOnlyList<SavedItem> items, string group)
+    {
+        await LoadAsync();
+        group = group.Trim();
+        foreach (var item in items)
+        {
+            if (item.Group == group) continue;
+            item.Group = group;
+            int index = Items.IndexOf(item);      // re-insert so the list view notices
+            if (index >= 0) { Items.RemoveAt(index); Items.Insert(index, item); }
+        }
+        await SaveAsync();
+    }
+
     public async Task LoadAsync()
     {
         if (_loaded) return;
@@ -160,9 +180,9 @@ public class SavedService
         LinkPreviews.Prefetch(item.Value);   // Saved then shows the preview and icon without waiting
     }
 
-    public async Task<SavedItem> AddTextAsync(string name, string text)
+    public async Task<SavedItem> AddTextAsync(string name, string text, string group = "")
     {
-        var item = new SavedItem { Kind = SavedKind.Text, Name = name.Trim(), Value = text };
+        var item = new SavedItem { Kind = SavedKind.Text, Name = name.Trim(), Value = text, Group = group.Trim() };
         await AddAsync(item);
         return item;
     }
