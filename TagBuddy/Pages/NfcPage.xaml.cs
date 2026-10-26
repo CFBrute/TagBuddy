@@ -103,7 +103,8 @@ public partial class NfcPage : ContentPage
         }
 
         SegmentGrid.CursorPlaced += OnSegmentCursorPlaced;
-        SegmentGrid.SelectionChanged += UpdateSegmentTools;   // keep the Copy count in step as the selection grows
+        SegmentGrid.SelectionChanged += UpdateSegmentTools;   // keep the selection count in step as it grows
+        SegmentGrid.LongPressed += OnGridLongPressed;         // a copy menu on the pressed byte or the selection
         SectorKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
         SectorKeyBGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
         AllKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.AllKeys);
@@ -431,6 +432,7 @@ public partial class NfcPage : ContentPage
 
         Palette.SelectTab(ReadModeButton, ReadUnderline, !write);
         Palette.SelectTab(WriteModeButton, WriteUnderline, write);
+        UpdateFloatingToolsVisibility();   // the floating editor tools belong to write mode only
 
         if (write) ArmWrite();
         else _nfc.Disarm();
@@ -678,13 +680,31 @@ public partial class NfcPage : ContentPage
         ShowContent();
     }
 
-    private async void OnCopyMemory(object? sender, EventArgs e)
+    /// <summary>Long press on the read's memory: copy it as the shown listing, or as plain hex bytes.</summary>
+    private async void OnReadMemoryLongPressed(object? sender, EventArgs e)
     {
-        if (_last?.MemoryDump is { Count: > 0 } dump)
+        if (_last is not { } tag || !tag.HasMemoryDump && tag.RawMemory is not { Length: > 0 }) return;
+        var choice = await DisplayActionSheet("Copy memory", "Cancel", null, "Copy as text", "Copy as hex");
+        if (choice == "Copy as text")
         {
-            await Clipboard.Default.SetTextAsync(string.Join("\n", dump));
-            Notice.Show($"{dump.Count} pages copied");
+            var lines = tag.MemoryDump ?? NfcReader.FormatDump(tag.RawMemory ?? []) ?? [];
+            await Clipboard.Default.SetTextAsync(string.Join("\n", lines));
+            Notice.Show("Memory copied as text");
         }
+        else if (choice == "Copy as hex")
+        {
+            await Clipboard.Default.SetTextAsync(string.Concat(SavedService.TagBytes(tag).Select(b => b.ToString("X2"))));
+            Notice.Show("Memory copied as hex");
+        }
+    }
+
+    /// <summary>Long press on the details: copy the serial and the detail lines as text.</summary>
+    private async void OnReadDetailsLongPressed(object? sender, EventArgs e)
+    {
+        if (_last is not { } tag) return;
+        var lines = tag.Details.Select(d => $"{d.Label}: {d.Value}").Prepend($"Tag {tag.Id}");
+        await Clipboard.Default.SetTextAsync(string.Join("\n", lines));
+        Notice.Show("Details copied");
     }
 
     // ---------------------------------------------------------------- compare
@@ -836,6 +856,7 @@ public partial class NfcPage : ContentPage
         }
         DumpPanel.IsVisible = WriteType == WriteMode.Dump;
         ErasePanel.IsVisible = WriteType == WriteMode.Erase;
+        UpdateFloatingToolsVisibility();   // only the segment editor shows the floating tools
         WriteHint.IsVisible = TextPanel.IsVisible;
         WriteHint.Text = WriteType switch
         {
@@ -1235,10 +1256,17 @@ public partial class NfcPage : ContentPage
         SegmentRevertButton.IsEnabled = edit.HasChanges;
         SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
 
-        // Byte selection: the Select button lights up while on, and Copy names how many bytes it will copy.
+        // Byte selection: the Select button lights up while on (long-press the grid to copy the selection).
         Palette.Select(SegmentSelectButton, SegmentGrid.Selecting);
         SegmentSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
-        SegmentCopyButton.Text = SegmentGrid.Selection is { } range ? $"Copy {range.End - range.Start + 1}" : "Copy row";
+
+        // The floating toolbar mirrors the most-used buttons so they stay reachable while the grid scrolls.
+        FloatUndoButton.IsEnabled = edit.CanUndo;
+        FloatRedoButton.IsEnabled = edit.CanRedo;
+        FloatRevertButton.IsEnabled = edit.HasChanges;
+        Palette.Select(FloatSelectButton, SegmentGrid.Selecting);
+        FloatSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
+        UpdateFloatingToolsVisibility();
 
         // Sector keys & rules live on their own tab for a MIFARE Classic card; other tags have no sectors, so the
         // tab bar is hidden and only the grid shows.
@@ -1284,6 +1312,23 @@ public partial class NfcPage : ContentPage
         SectorsTab.IsVisible = sectors;
         Palette.SelectTab(EditTabButton, EditUnderline, !sectors);
         Palette.SelectTab(SectorsTabButton, SectorsUnderline, sectors);
+        UpdateFloatingToolsVisibility();
+    }
+
+    /// <summary>Whether the floating toolbar is tucked away to its little handle.</summary>
+    private bool _floatingToolsCollapsed;
+
+    private void OnFloatingCollapse(object? sender, EventArgs e) { _floatingToolsCollapsed = true; UpdateFloatingToolsVisibility(); }
+    private void OnFloatingShow(object? sender, EventArgs e) { _floatingToolsCollapsed = false; UpdateFloatingToolsVisibility(); }
+
+    /// <summary>Shows the floating editor tools only while editing bytes (the Edit tab of a segment write), as either the
+    /// toolbar or, when tucked away, its handle.</summary>
+    private void UpdateFloatingToolsVisibility()
+    {
+        bool show = _writeMode && _edit is not null && SegmentPanel.IsVisible && EditTab.IsVisible;
+        FloatingTools.IsVisible = show;
+        FloatingBar.IsVisible = show && !_floatingToolsCollapsed;
+        FloatingShow.IsVisible = show && _floatingToolsCollapsed;
     }
 
     /// <summary>After any change to the bytes or the cursor: redraw, update the tools, re-arm the write.</summary>
@@ -1413,9 +1458,9 @@ public partial class NfcPage : ContentPage
         UpdateSegmentTools();
     }
 
-    /// <summary>Copies the selected run of bytes — or, with nothing selected, the cursor's page or block — to the
-    /// clipboard as hex, to paste into another block or keep.</summary>
-    private async void OnSegmentCopy(object? sender, EventArgs e)
+    /// <summary>A long press on the grid: offer to copy the selected run of bytes — or, with nothing selected, the block
+    /// that was pressed — as hex or as text.</summary>
+    private async void OnGridLongPressed((int Segment, int Index) cell)
     {
         if (_edit is not { Length: > 0 } edit) return;
         byte[] bytes;
@@ -1428,12 +1473,21 @@ public partial class NfcPage : ContentPage
         }
         else
         {
-            int segment = edit.At(edit.Cursor).Segment;
-            bytes = edit.SegmentBytes(segment);
-            what = $"{edit.Layout.Noun} {segment}";
+            bytes = edit.SegmentBytes(cell.Segment);
+            what = $"{edit.Layout.Noun} {cell.Segment}";
         }
-        await Clipboard.Default.SetTextAsync(string.Concat(bytes.Select(b => b.ToString("X2"))));
-        Notice.Show($"{what} copied as hex");
+
+        var choice = await DisplayActionSheet($"Copy {what}", "Cancel", null, "Copy as hex", "Copy as text");
+        if (choice == "Copy as hex")
+        {
+            await Clipboard.Default.SetTextAsync(string.Concat(bytes.Select(b => b.ToString("X2"))));
+            Notice.Show($"{what} copied as hex");
+        }
+        else if (choice == "Copy as text")
+        {
+            await Clipboard.Default.SetTextAsync(new string(bytes.Select(b => b is >= 0x20 and < 0x7F ? (char)b : '.').ToArray()));
+            Notice.Show($"{what} copied as text");
+        }
     }
 
     /// <summary>The rule pickers' choices, in picker order: data rules and trailer rules from <see cref="MifareClassicKeys"/>.</summary>

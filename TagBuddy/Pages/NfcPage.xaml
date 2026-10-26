@@ -2,10 +2,12 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:controls="clr-namespace:TagBuddy.Controls"
+             xmlns:pages="clr-namespace:TagBuddy.Pages"
              x:Class="TagBuddy.Pages.NfcPage"
              Title="NFC">
+    <Grid>
     <ScrollView>
-        <VerticalStackLayout Padding="20" Spacing="12">
+        <VerticalStackLayout Padding="20,20,20,80" Spacing="12">
 
             <!-- Read / Write mode switch, in the QR/Barcode top-tab style but each filling half the width -->
             <Grid ColumnDefinitions="*,*">
@@ -123,9 +125,14 @@
                         <controls:LinkPreviewView x:Name="Preview" />
                     </VerticalStackLayout>
 
+                    <!-- Long-press the details to copy them as text -->
                     <VerticalStackLayout x:Name="Details" Spacing="4"
                                          Padding="12"
-                                         BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}" />
+                                         BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                        <VerticalStackLayout.Behaviors>
+                            <pages:RowPressBehavior LongPressed="OnReadDetailsLongPressed" />
+                        </VerticalStackLayout.Behaviors>
+                    </VerticalStackLayout>
 
                     <!-- Readable memory: every page of a Type 2 tag, or the opened sectors of a MIFARE Classic card -->
                     <VerticalStackLayout x:Name="MemoryPanel" Spacing="8" IsVisible="False">
@@ -163,14 +170,18 @@
                             <!-- CharacterWrap, not NoWrap: NoWrap collapses a multi-line label to one line on Android.
                                  The horizontal scroll gives unbounded width, so no line actually wraps. -->
                             <ScrollView Orientation="Horizontal">
+                                <!-- Long-press the memory to copy it as text or as hex -->
                                 <Label x:Name="MemoryLabel"
                                        FontFamily="monospace"
                                        FontSize="12"
-                                       LineBreakMode="CharacterWrap" />
+                                       LineBreakMode="CharacterWrap">
+                                    <Label.Behaviors>
+                                        <pages:RowPressBehavior LongPressed="OnReadMemoryLongPressed" />
+                                    </Label.Behaviors>
+                                </Label>
                             </ScrollView>
                         </Border>
-                        <Button Text="Copy memory as text" Clicked="OnCopyMemory"
-                                BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Center" />
+                        <Label Text="Long-press the memory to copy it" FontSize="12" TextColor="Gray" HorizontalOptions="Center" />
                     </VerticalStackLayout>
 
                     <Label Text="Hold another tag to read it"
@@ -301,13 +312,12 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 
-                    <!-- Clipboard: select a run of bytes and copy it (or the cursor's block) as hex. Pasting uses the
-                         keyboard's own paste (type over the bytes), so there is no separate paste button. -->
+                    <!-- Select a run of bytes to work with; long-press the grid to copy (the selection, or the block
+                         pressed) as hex or as text. Pasting uses the keyboard's own paste (type over the bytes). -->
                     <HorizontalStackLayout Spacing="6">
                         <Button x:Name="SegmentSelectButton" Text="Select" Clicked="OnSegmentSelect"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
-                        <Button x:Name="SegmentCopyButton" Text="Copy row" Clicked="OnSegmentCopy"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Label Text="Long-press the grid to copy" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
                     </HorizontalStackLayout>
 
                     <!-- Block 0 (the UID) is never written on a normal card; a magic/clone card lets it be rewritten.
@@ -537,4 +547,38 @@
 
         </VerticalStackLayout>
     </ScrollView>
+
+    <!-- Floating editor tools: the most-used byte-editing buttons, pinned to the bottom so they stay reachable while
+         the long grid scrolls. "▾" tucks them away to a small "▴ Tools" handle; tapping it brings them back. Shown
+         only while editing bytes (the Edit tab of a segment write). -->
+    <VerticalStackLayout x:Name="FloatingTools" IsVisible="False" VerticalOptions="End" Margin="10,0,10,10" Spacing="0">
+        <Border x:Name="FloatingBar" StrokeThickness="0" Padding="6"
+                BackgroundColor="{AppThemeBinding Light=#EDEFF2, Dark=#2A2A2A}">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="14" />
+            </Border.StrokeShape>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                <ScrollView Grid.Column="0" Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout Spacing="6">
+                        <Button x:Name="FloatUndoButton" Text="↶" Clicked="OnSegmentUndo"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
+                        <Button x:Name="FloatRedoButton" Text="↷" Clicked="OnSegmentRedo"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
+                        <Button x:Name="FloatResetButton" Text="◀ Reset" Clicked="OnSegmentResetByte"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                        <Button x:Name="FloatRevertButton" Text="Revert" Clicked="OnSegmentRevert"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                        <Button x:Name="FloatSelectButton" Text="Select" Clicked="OnSegmentSelect"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                    </HorizontalStackLayout>
+                </ScrollView>
+                <Button Grid.Column="1" x:Name="FloatingCollapse" Text="▾" Clicked="OnFloatingCollapse"
+                        BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="15" />
+            </Grid>
+        </Border>
+        <Button x:Name="FloatingShow" Text="▴ Tools" IsVisible="False" Clicked="OnFloatingShow"
+                HorizontalOptions="End" BackgroundColor="#6B7280" TextColor="White"
+                Padding="12,4" MinimumHeightRequest="36" FontSize="13" />
+    </VerticalStackLayout>
+    </Grid>
 </ContentPage>
