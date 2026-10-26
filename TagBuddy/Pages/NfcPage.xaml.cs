@@ -440,8 +440,17 @@ public partial class NfcPage : ContentPage
                 ? "Every block of this label that answered a read."
                 : "The sectors that opened with common default keys. A card secured with custom keys shows only its serial number.";
             DumpButtons.IsVisible = false;
-            MemoryOverview.IsVisible = false;
-            MemoryLabel.Text = string.Join("\n", tag.MemoryDump!);
+            if (label)
+            {
+                MemoryOverview.IsVisible = false;
+                MemoryLabel.Text = string.Join("\n", tag.MemoryDump!);
+            }
+            else
+            {
+                // MIFARE Classic: the trailers and rules in colour, with a legend in the overview label.
+                MemoryOverview.IsVisible = true;
+                ClassicDumpView.Show(MemoryOverview, MemoryLabel, tag.MemoryDump!);
+            }
         }
         else
         {
