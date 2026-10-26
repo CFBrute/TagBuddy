@@ -79,6 +79,25 @@ public static class MifareClassicKeys
         return true;
     }
 
+    /// <summary>A key typed as 12 hex digits (any separators) or as six characters of text. The six bytes either way.</summary>
+    public static bool TryParseKeyOrText(string? text, out byte[] key)
+    {
+        if (TryParseKey(text, out key)) return true;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text ?? "");
+        if (bytes.Length == 6) { key = bytes; return true; }
+        key = [];
+        return false;
+    }
+
+    /// <summary>Whether a sector's trailer rule still lets its keys be changed (by key A or key B); the others freeze the
+    /// keys for the life of the sector.</summary>
+    public static bool KeysChangeable(int trailerBits) => trailerBits is 0b000 or 0b001 or 0b011 or 0b100;
+
+    /// <summary>Whether key A has no use under these rules: it cannot read or write any data block, nor change the
+    /// trailer. Its six bytes are then free to store data (though they still read back blank).</summary>
+    public static bool KeyAUnused(SectorRules rules) =>
+        rules.Data.All(d => d is 0b011 or 0b101 or 0b111) && rules.Trailer is not (0b000 or 0b001);
+
     /// <summary>Whether a key is one of the built-in public defaults (the sign of a blank or unsecured sector).</summary>
     public static bool IsDefault(byte[] key) => Defaults.Any(d => d.Key.AsSpan().SequenceEqual(key));
 

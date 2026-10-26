@@ -1323,25 +1323,23 @@ public partial class NfcPage : ContentPage
             SectorKeyPanel.IsVisible = can || edit.Sectors.Count > 0;
             if (SectorKeyPanel.IsVisible)
             {
-                SectorKeyTitle.Text = can ? $"Sector {sector}: key and rules" : $"Sector {sector} did not open, so it cannot be changed";
-                SectorKeyEntry.IsVisible = can;
-                SectorKeyHint.IsVisible = can;
-                SectorKeyAPanel.IsVisible = can;
+                SectorKeyTitle.Text = can ? $"Sector {sector}: keys and rules" : $"Sector {sector} did not open, so it cannot be changed";
                 SectorRulesPanel.IsVisible = can;
                 var change = edit.SectorChangeFor(sector);
-                var pending = change?.Key;
-                var shown = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var typed) ? typed : null;
-                if (pending is null ? shown is not null || !string.IsNullOrEmpty(SectorKeyEntry.Text) : shown is null || !shown.AsSpan().SequenceEqual(pending))
-                    SectorKeyEntry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+                var rules = change?.Rules ?? edit.CurrentRules(sector);
 
-                var pendingA = change?.KeyAData;
-                var shownA = MifareClassicKeys.TryParseKey(SectorKeyAEntry.Text, out var typedA) ? typedA : null;
-                if (pendingA is null ? shownA is not null || !string.IsNullOrEmpty(SectorKeyAEntry.Text) : shownA is null || !shownA.AsSpan().SequenceEqual(pendingA))
-                    SectorKeyAEntry.Text = pendingA is null ? string.Empty : MifareClassicKeys.KeyHex(pendingA);
+                // Keys can be edited only when the sector opened and the rules still let them change.
+                bool keysOpen = can && (rules is null || MifareClassicKeys.KeysChangeable(rules.Trailer));
+                SectorKeysPanel.IsVisible = can;
+                KeyARow.IsEnabled = SectorKeyAEntry.IsEnabled = SectorKeyBEntry.IsEnabled = keysOpen;
+                SectorKeyHint.IsVisible = keysOpen;
+                KeysLockedLabel.IsVisible = can && !keysOpen;
+                KeyASpareLabel.IsVisible = keysOpen && rules is not null && MifareClassicKeys.KeyAUnused(rules);
+                SyncKeyField(SectorKeyAEntry, edit.PendingKey(sector, keyB: false));
+                SyncKeyField(SectorKeyBEntry, edit.PendingKey(sector, keyB: true));
 
                 if (can)
                 {
-                    var rules = change?.Rules ?? edit.CurrentRules(sector);
                     bool wide = sector >= 32;
                     Picker[] pickers = [DataRule0Picker, DataRule1Picker, DataRule2Picker];
                     Label[] labels = [DataRule0Label, DataRule1Label, DataRule2Label];
@@ -1416,44 +1414,35 @@ public partial class NfcPage : ContentPage
             "Waiting to be written: " + string.Join("; ", edit.Sectors.OrderBy(k => k.Key).Select(k =>
                 $"sector {k.Key}: " + string.Join(", ", new[]
                 {
-                    k.Value.Key is { } key ? "key " + MifareClassicKeys.KeyHex(key) : null,
-                    k.Value.KeyAData is { } ka ? "key A data " + MifareClassicKeys.KeyHex(ka) : null,
+                    k.Value.SameKey ? "key " + MifareClassicKeys.KeyHex(k.Value.KeyA!) : null,
+                    !k.Value.SameKey && k.Value.KeyA is { } a ? "key A " + MifareClassicKeys.KeyHex(a) : null,
+                    !k.Value.SameKey && k.Value.KeyB is { } b ? "key B " + MifareClassicKeys.KeyHex(b) : null,
                     k.Value.Rules is { } r ? (r.IsPermanent ? "rules (PERMANENT)" : "rules") : null,
                 }.Where(x => x is not null))));
     }
 
-    /// <summary>The key typed for the cursor's sector: a whole key is set for it, anything else drops it.</summary>
-    private void OnSectorKeyChanged(object? sender, TextChangedEventArgs e)
+    /// <summary>Fills a key field from the sector's pending key without its TextChanged handler treating it as input.
+    /// Leaves the field alone when it already shows that key (as hex or as text), so typing is not clobbered.</summary>
+    private void SyncKeyField(Entry entry, byte[]? pending)
+    {
+        var shown = MifareClassicKeys.TryParseKeyOrText(entry.Text, out var typed) ? typed : null;
+        bool matches = pending is null ? shown is null && string.IsNullOrEmpty(entry.Text) : shown is not null && shown.AsSpan().SequenceEqual(pending);
+        if (!matches) entry.Text = pending is null ? string.Empty : MifareClassicKeys.KeyHex(pending);
+    }
+
+    private void OnKeyAChanged(object? sender, TextChangedEventArgs e) => OnKeyFieldChanged(SectorKeyAEntry, keyB: false);
+    private void OnKeyBChanged(object? sender, TextChangedEventArgs e) => OnKeyFieldChanged(SectorKeyBEntry, keyB: true);
+
+    /// <summary>A key typed in a Sectors-tab field: set the cursor sector's key A (or B) as those six bytes, blank keeps
+    /// it. The same bytes are in the trailer row, so the grid redraws; the field is not re-synced, so typing is kept.</summary>
+    private void OnKeyFieldChanged(Entry entry, bool keyB)
     {
         if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
         int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
-        bool full = MifareClassicKeys.TryParseKey(SectorKeyEntry.Text, out var key);
-        edit.SetSectorKey(sector, full ? key : null);
-        if (full) ClearEntry(SectorKeyAEntry);   // a whole key clears any key-A-as-data for the sector
+        edit.SetSectorKey(sector, keyB, MifareClassicKeys.TryParseKeyOrText(entry.Text, out var key) ? key : null);
+        SegmentGrid.Invalidate();
         UpdateSectorChangeList(edit);
         ArmWrite();
-    }
-
-    /// <summary>Six bytes typed to store in key A for the cursor's sector (keeping key B); anything else drops it.</summary>
-    private void OnSectorKeyADataChanged(object? sender, TextChangedEventArgs e)
-    {
-        if (_renderingSegments || _edit is not { Length: > 0 } edit) return;
-        int sector = MifareClassicKeys.SectorOf(edit.At(edit.Cursor).Segment);
-        bool full = MifareClassicKeys.TryParseKey(SectorKeyAEntry.Text, out var key);
-        edit.SetSectorKeyAData(sector, full ? key : null);
-        if (full) ClearEntry(SectorKeyEntry);   // key-A-as-data clears any whole-key change for the sector
-        UpdateSectorChangeList(edit);
-        ArmWrite();
-    }
-
-    /// <summary>Clears an entry without its TextChanged handler treating it as input.</summary>
-    private void ClearEntry(Entry entry)
-    {
-        if (entry.Text.Length == 0) return;
-        bool wasRendering = _renderingSegments;
-        _renderingSegments = true;
-        entry.Text = string.Empty;
-        _renderingSegments = wasRendering;
     }
 
     /// <summary>Unlocks or locks editing of block 0 (the UID). Only a magic/clone card can take the write; a warning

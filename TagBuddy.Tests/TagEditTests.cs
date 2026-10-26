@@ -405,14 +405,17 @@ public class TagEditTests
 
         Assert.True(edit.CanChangeKey(1));
         Assert.False(edit.CanChangeKey(2));                     // did not open: its key is not known
-        Assert.True(edit.SetSectorKey(1, key));
-        Assert.False(edit.SetSectorKey(2, key));
+        Assert.True(edit.SetSectorKey(1, keyB: false, key));    // a new key = key A and key B both set to it
+        Assert.True(edit.SetSectorKey(1, keyB: true, key));
+        Assert.False(edit.SetSectorKey(2, keyB: false, key));
         Assert.True(edit.HasChanges);
-        Assert.Empty(edit.Changes);
+        Assert.Empty(edit.Changes);                             // the trailer is written through the trailer path, not as data
 
         var write = edit.ToWrite();
         Assert.False(write.IsEmpty);
-        Assert.Equal(key, write.Sectors[1].Key);
+        Assert.Equal(key, write.Sectors[1].KeyA);
+        Assert.Equal(key, write.Sectors[1].KeyB);
+        Assert.True(write.Sectors[1].SameKey);
         Assert.Equal("a new key for sector 1", write.Summary);
 
         edit.SectorChanged(1);
@@ -434,7 +437,7 @@ public class TagEditTests
         var readOnly = SectorRules.Transport.WithData(0, 0b010);
         Assert.True(edit.SetSectorRules(1, readOnly));
         Assert.Equal(readOnly, edit.SectorChangeFor(1)!.Rules);
-        Assert.Null(edit.SectorChangeFor(1)!.Key);
+        Assert.Null(edit.SectorChangeFor(1)!.KeyA);
         Assert.Equal("new rules for sector 1", edit.ToWrite().Summary);
         Assert.False(edit.SetSectorRules(2, readOnly));
 
@@ -606,26 +609,32 @@ public class TagEditTests
     }
 
     [Fact]
-    public void Key_A_can_be_set_as_data_keeping_key_B_and_is_exclusive_with_a_new_key()
+    public void Key_A_and_key_B_can_be_set_on_their_own_and_show_in_the_trailer_row()
     {
         var edit = TagEdit.FromTag(ReadClassic(1), "04");
-        byte[] dataA = [0xDA, 0x7A, 0x00, 0x00, 0x00, 0x01];
+        byte[] keyA = [0xDA, 0x7A, 0x00, 0x00, 0x00, 0x01];
 
-        Assert.True(edit.SetSectorKeyAData(1, dataA));
-        Assert.False(edit.SetSectorKeyAData(2, dataA));    // sector 2 did not open
-        Assert.Equal(dataA, edit.SectorChangeFor(1)!.KeyAData);
-        Assert.Null(edit.SectorChangeFor(1)!.Key);
-        Assert.Equal("key A as data for sector 1", edit.ToWrite().Summary);
+        Assert.True(edit.SetSectorKey(1, keyB: false, keyA));   // key A only — key B kept
+        Assert.False(edit.SetSectorKey(2, keyB: false, keyA));  // sector 2 did not open
+        Assert.Equal(keyA, edit.SectorChangeFor(1)!.KeyA);
+        Assert.Null(edit.SectorChangeFor(1)!.KeyB);
+        Assert.Equal(keyA, edit.PendingKey(1, keyB: false));
+        Assert.False(edit.SectorChangeFor(1)!.SameKey);
+        Assert.Equal("key A for sector 1", edit.ToWrite().Summary);
 
-        edit.SetSectorKey(1, [1, 2, 3, 4, 5, 6]);           // a whole new key clears the key-A-as-data change
-        Assert.Null(edit.SectorChangeFor(1)!.KeyAData);
-        Assert.NotNull(edit.SectorChangeFor(1)!.Key);
+        // The key bytes are edited in the trailer row (sector 1's trailer is block 7), so inline and field agree.
+        int trailer = TagEdit.TrailerOf(1);
+        Assert.Equal(7, trailer);
+        Assert.Equal((byte)0xDA, edit.ValueAt(trailer, 0));
+        Assert.True(edit.IsEdited(trailer, 0));
 
-        edit.SetSectorKeyAData(1, dataA);                   // and the other way round
-        Assert.Null(edit.SectorChangeFor(1)!.Key);
-        Assert.NotNull(edit.SectorChangeFor(1)!.KeyAData);
+        byte[] keyB = [9, 9, 9, 9, 9, 9];
+        edit.SetSectorKey(1, keyB: true, keyB);
+        Assert.Equal(keyB, edit.SectorChangeFor(1)!.KeyB);
+        Assert.Equal(keyA, edit.SectorChangeFor(1)!.KeyA);      // key A still pending
 
-        edit.SetSectorKeyAData(1, null);
+        edit.SetSectorKey(1, keyB: false, null);
+        edit.SetSectorKey(1, keyB: true, null);
         Assert.Empty(edit.Sectors);
     }
 }

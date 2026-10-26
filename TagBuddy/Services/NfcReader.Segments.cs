@@ -237,27 +237,16 @@ public sealed partial class NfcReader
         if (current is not { Length: >= 16 })
             return (false, $"Sector {sector} did not take its change: its trailer could not be read.", openedWith);
 
-        // The keys read back as zeros (except key B under the factory rules, where it is plain data), so a slot not
-        // given a new key gets the key that opened the sector, or the readable key B. Nothing is ever left unknown.
+        // A new key A and/or key B are written as given; the one not being changed must be kept, but keys read back as
+        // zeros. The kept key is the one that opened the sector (key A when opened with A, key B when opened with B), or
+        // a readable key B under factory rules. If the key to keep is not known, nothing is written to this sector.
         byte[] readableB = current[10..16];
-        byte[] keyA, keyB, keyNow;
-        if (change.KeyAData is { Length: 6 } dataA)
-        {
-            // Key A becomes chosen data; key B stays the working key. Preserve it only when it is known: the sector was
-            // opened with key B, or key B is readable (factory rules). Otherwise refuse rather than risk losing key B.
-            if (asKeyB) keyB = openedWith;
-            else if (readableB.Any(b => b != 0)) keyB = readableB;
-            else return (false, $"Sector {sector} did not take its key-A change: key B could not be preserved. " +
-                                "Open the sector with key B (enter it as the card's key) and try again.", openedWith);
-            keyA = dataA;
-            keyNow = keyB;   // the sector opens with key B from now on; key A is data
-        }
-        else
-        {
-            keyA = change.Key ?? openedWith;
-            keyB = change.Key ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : openedWith);
-            keyNow = change.Key ?? openedWith;
-        }
+        byte[]? keyA = change.KeyA ?? (asKeyB ? null : openedWith);
+        byte[]? keyB = change.KeyB ?? (asKeyB ? openedWith : readableB.Any(b => b != 0) ? readableB : null);
+        if (keyA is null || keyB is null)
+            return (false, $"Sector {sector} did not take its change: key {(keyA is null ? 'A' : 'B')} could not be kept " +
+                           $"(open the sector with key {(keyA is null ? 'A' : 'B')}, or set it too). Nothing was written to this sector.", openedWith);
+        byte[] keyNow = change.KeyA ?? change.KeyB ?? openedWith;
 
         try
         {
