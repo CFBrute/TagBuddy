@@ -301,6 +301,17 @@
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                     </HorizontalStackLayout>
 
+                    <!-- Clipboard: select a run of bytes, copy the selection (or the cursor's block) as hex, or paste
+                         hex over the bytes from the cursor on -->
+                    <HorizontalStackLayout Spacing="6">
+                        <Button x:Name="SegmentSelectButton" Text="Select" Clicked="OnSegmentSelect"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentCopyButton" Text="Copy row" Clicked="OnSegmentCopy"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                        <Button x:Name="SegmentPasteButton" Text="Paste hex" Clicked="OnSegmentPaste"
+                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
+                    </HorizontalStackLayout>
+
                     <!-- Block 0 (the UID) is never written on a normal card; a magic/clone card lets it be rewritten.
                          Off by default, shown only for a MIFARE Classic card that was read. Sits above the grid so it
                          is to hand without scrolling the long list of blocks. -->

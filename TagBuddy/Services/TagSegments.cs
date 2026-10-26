@@ -619,6 +619,29 @@ public sealed class TagEdit
         return written;
     }
 
+    /// <summary>Writes the given bytes over the run from the cursor on (for a paste), moving on as it goes. Returns how
+    /// many it wrote, fewer than given when the range ends first. One undo step.</summary>
+    public int TypeBytes(byte[] bytes)
+    {
+        if (bytes.Length == 0 || Cursor >= Length) return 0;
+        Begin();
+        int written = 0;
+        foreach (var b in bytes)
+        {
+            if (Cursor >= Length) break;
+            var (segment, index) = At(Cursor);
+            Set(segment, index, b);
+            Cursor++;
+            written++;
+        }
+        Nibble = 0;
+        return written;
+    }
+
+    /// <summary>The bytes of the cursor's segment as read/typed, for copying. Unknown bytes count as 00.</summary>
+    public byte[] SegmentBytes(int segment) =>
+        Enumerable.Range(0, Layout.SegmentSize).Select(i => ValueAt(segment, i) ?? (byte)0).ToArray();
+
     /// <summary>Steps back one byte and puts it back as the tag had it (in hex, half a typed byte is taken back first).</summary>
     public void Backspace()
     {

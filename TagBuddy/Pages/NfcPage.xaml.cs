@@ -103,6 +103,7 @@ public partial class NfcPage : ContentPage
         }
 
         SegmentGrid.CursorPlaced += OnSegmentCursorPlaced;
+        SegmentGrid.SelectionChanged += UpdateSegmentTools;   // keep the Copy count in step as the selection grows
         SectorKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
         SectorKeyBGrid.CursorPlaced += () => StartTyping(TypingTarget.SectorKeys);
         AllKeyAGrid.CursorPlaced += () => StartTyping(TypingTarget.AllKeys);
@@ -1211,6 +1212,11 @@ public partial class NfcPage : ContentPage
         SegmentRevertButton.IsEnabled = edit.HasChanges;
         SegmentZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
 
+        // Byte selection: the Select button lights up while on, and Copy names how many bytes it will copy.
+        Palette.Select(SegmentSelectButton, SegmentGrid.Selecting);
+        SegmentSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
+        SegmentCopyButton.Text = SegmentGrid.Selection is { } range ? $"Copy {range.End - range.Start + 1}" : "Copy row";
+
         // Sector keys & rules live on their own tab for a MIFARE Classic card; other tags have no sectors, so the
         // tab bar is hidden and only the grid shows.
         bool classic = edit.Layout.Family == TagFamily.Classic;
@@ -1374,6 +1380,53 @@ public partial class NfcPage : ContentPage
     {
         _edit?.ResetAtCursor();
         SegmentEdited();
+    }
+
+    /// <summary>Turns byte selection on or off: on, tapping bytes extends a highlighted run; off clears it.</summary>
+    private void OnSegmentSelect(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 }) return;
+        SegmentGrid.Selecting = !SegmentGrid.Selecting;
+        UpdateSegmentTools();
+    }
+
+    /// <summary>Copies the selected run of bytes — or, with nothing selected, the cursor's page or block — to the
+    /// clipboard as hex, to paste into another block or keep.</summary>
+    private async void OnSegmentCopy(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit) return;
+        byte[] bytes;
+        string what;
+        if (SegmentGrid.Selection is { } sel)
+        {
+            bytes = Enumerable.Range(sel.Start, sel.End - sel.Start + 1)
+                .Select(p => { var (s, i) = edit.At(p); return edit.ValueAt(s, i) ?? (byte)0; }).ToArray();
+            what = $"{bytes.Length} byte{(bytes.Length == 1 ? "" : "s")}";
+        }
+        else
+        {
+            int segment = edit.At(edit.Cursor).Segment;
+            bytes = edit.SegmentBytes(segment);
+            what = $"{edit.Layout.Noun} {segment}";
+        }
+        await Clipboard.Default.SetTextAsync(string.Concat(bytes.Select(b => b.ToString("X2"))));
+        Notice.Show($"{what} copied as hex");
+    }
+
+    /// <summary>Pastes hex bytes from the clipboard over the bytes from the cursor on (bytes past the end are left).</summary>
+    private async void OnSegmentPaste(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit) return;
+        if (SavedService.ParseHex(await Clipboard.Default.GetTextAsync()) is not { Length: > 0 } bytes)
+        {
+            Notice.Show("The clipboard has no hex bytes to paste");
+            return;
+        }
+        int wrote = edit.TypeBytes(bytes);
+        SegmentEdited();
+        Notice.Show(wrote < bytes.Length
+            ? $"Pasted {wrote} of {bytes.Length} bytes; the rest were past the end of the range"
+            : $"Pasted {wrote} byte{(wrote == 1 ? "" : "s")} from the cursor");
     }
 
     /// <summary>The rule pickers' choices, in picker order: data rules and trailer rules from <see cref="MifareClassicKeys"/>.</summary>
