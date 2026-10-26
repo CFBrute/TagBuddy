@@ -155,12 +155,12 @@ public class SegmentGrid : GraphicsView, IDrawable
             }
 
             int s = row.Segment;
-            bool writable = edit.WhyNotWritable(s) is null;
             Cell(canvas, s.ToString("D3"), 0, y, 3, dim);
 
             for (int k = 0; k < size; k++)
             {
                 byte? value = edit.ValueAt(s, k);
+                bool writable = edit.WritableByte(s, k);   // per byte: a trailer's key bytes are editable, its access bits are not
                 var color = !writable || value is null ? dim : edit.IsEdited(s, k) ? typed : text;
                 // Colour block 0 and trailer bytes by their field, so each sector's structure is visible. A byte the
                 // person typed keeps the accent colour; an unknown byte stays dim. Block 0's check byte (BCC) is
@@ -181,7 +181,8 @@ public class SegmentGrid : GraphicsView, IDrawable
                 Cell(canvas, ch, AsciiStart(size) + k, y, 1, color);
             }
 
-            if (!writable && edit.RoleOf(s) is { Length: > 0 } role)
+            // A role (e.g. "serial", "trailer") labels a row the editor leaves alone as a whole.
+            if (edit.WhyNotWritable(s) is not null && edit.RoleOf(s) is { Length: > 0 } role)
                 Cell(canvas, role, RoleStart(size), y, role.Length, dim);
         }
     }

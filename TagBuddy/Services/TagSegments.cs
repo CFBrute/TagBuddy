@@ -100,12 +100,14 @@ public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, 
     public IReadOnlySet<int> OpenedSectors { get; init; } = new HashSet<int>();
 }
 
-/// <summary>A change to a MIFARE Classic sector's trailer: a new key (as A and B), new rules, key A set to chosen data
-/// (keeping key B), or a mix; null keeps what the sector has. <see cref="Key"/> and <see cref="KeyAData"/> are mutually
-/// exclusive — a new key sets both A and B, while key-A data changes only key A and leaves key B as it is.</summary>
-public sealed record SectorChange(byte[]? Key, SectorRules? Rules, byte[]? KeyAData = null)
+/// <summary>A change to a MIFARE Classic sector's trailer: a new key A, a new key B, new rules, or a mix; null for a
+/// field keeps what the sector has. Setting key A and key B to the same value is a new key for both.</summary>
+public sealed record SectorChange(byte[]? KeyA, byte[]? KeyB, SectorRules? Rules)
 {
-    public bool IsEmpty => Key is null && Rules is null && KeyAData is null;
+    public bool IsEmpty => KeyA is null && KeyB is null && Rules is null;
+
+    /// <summary>Key A and key B are both set to the same value: one new key for the sector.</summary>
+    public bool SameKey => KeyA is { } a && KeyB is { } b && a.AsSpan().SequenceEqual(b);
 }
 
 /// <summary>An armed segment write: for each segment the bytes to put there, where null keeps the byte the tag has
@@ -161,11 +163,13 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
             if (Writes.Count > 0)
                 parts.Add($"{Layout.Noun}{(Writes.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Writes.Keys.Order().ToList())} " +
                           $"({bytes} byte{(bytes == 1 ? "" : "s")})");
-            var keyed = Sectors.Where(s => s.Value.Key is not null).Select(s => s.Key).Order().ToList();
+            var keyed = Sectors.Where(s => s.Value.SameKey).Select(s => s.Key).Order().ToList();
+            var aOnly = Sectors.Where(s => s.Value.KeyA is not null && !s.Value.SameKey).Select(s => s.Key).Order().ToList();
+            var bOnly = Sectors.Where(s => s.Value.KeyB is not null && !s.Value.SameKey).Select(s => s.Key).Order().ToList();
             var ruled = Sectors.Where(s => s.Value.Rules is not null).Select(s => s.Key).Order().ToList();
-            var keyedA = Sectors.Where(s => s.Value.KeyAData is not null).Select(s => s.Key).Order().ToList();
             if (keyed.Count > 0) parts.Add($"a new key for sector{(keyed.Count == 1 ? "" : "s")} {Type2Memory.Ranges(keyed)}");
-            if (keyedA.Count > 0) parts.Add($"key A as data for sector{(keyedA.Count == 1 ? "" : "s")} {Type2Memory.Ranges(keyedA)}");
+            if (aOnly.Count > 0) parts.Add($"key A for sector{(aOnly.Count == 1 ? "" : "s")} {Type2Memory.Ranges(aOnly)}");
+            if (bOnly.Count > 0) parts.Add($"key B for sector{(bOnly.Count == 1 ? "" : "s")} {Type2Memory.Ranges(bOnly)}");
             if (ruled.Count > 0) parts.Add($"new rules for sector{(ruled.Count == 1 ? "" : "s")} {Type2Memory.Ranges(ruled)}");
             return string.Join(" and ", parts);
         }
@@ -217,8 +221,12 @@ public sealed class TagEdit
 
     private readonly HashSet<int> _openedSectors;
 
-    /// <summary>Trailer changes for MIFARE Classic sectors, by sector. Not part of the typing history.</summary>
-    private readonly Dictionary<int, SectorChange> _sectors = [];
+    /// <summary>Pending rule changes for MIFARE Classic sectors, by sector. Keys are edited as bytes in the trailer row
+    /// (so they are part of the typing history); only the rules, picked not typed, live here.</summary>
+    private readonly Dictionary<int, SectorRules> _sectorRules = [];
+
+    /// <summary>The trailer block of a MIFARE Classic sector (its last block).</summary>
+    public static int TrailerOf(int sector) => sector < 32 ? sector * 4 + 3 : 128 + (sector - 32) * 16 + 15;
 
     private readonly Stack<Snapshot> _undo = new(), _redo = new();
     private sealed record Snapshot(Dictionary<int, byte?[]> Edits, int Cursor, int Nibble, bool InText);
@@ -308,15 +316,25 @@ public sealed class TagEdit
 
     private static long CellKey(int segment, int index) => (long)segment * 64 + index;
 
-    /// <summary>Whether a byte may be typed over: any byte of a writable segment, except block 0's check byte (BCC),
-    /// which the editor derives from the UID so a UID change always keeps a valid check byte.</summary>
-    private bool WritableByte(int segment, int index) =>
-        WhyNotWritable(segment) is null &&
-        !(AllowBlockZero && Layout.Family == TagFamily.Classic && segment == 0 && index == 4);
+    /// <summary>Whether a byte may be typed over. Most of a writable segment is, with MIFARE Classic exceptions: block 0's
+    /// check byte (BCC) is derived from the UID, not typed; and a sector trailer, though "not writable" as a block, lets
+    /// key A (bytes 0-5) and key B (bytes 10-15) be typed once the sector opened — its access bits (6-8) and spare byte
+    /// (9) are set through the rule pickers, never as raw bytes.</summary>
+    public bool WritableByte(int segment, int index)
+    {
+        if (Layout.Family == TagFamily.Classic)
+        {
+            if (AllowBlockZero && segment == 0) return index != 4;
+            if (MifareClassicKeys.IsTrailer(segment) && CanChangeKey(MifareClassicKeys.SectorOf(segment)))
+                return index < 6 || index >= 10;
+        }
+        return WhyNotWritable(segment) is null;
+    }
 
     private void RecomputeSegments()
     {
-        var segs = Enumerable.Range(From, Math.Max(0, To - From + 1)).Where(s => WhyNotWritable(s) is null).ToList();
+        var segs = Enumerable.Range(From, Math.Max(0, To - From + 1))
+            .Where(s => Enumerable.Range(0, Layout.SegmentSize).Any(i => WritableByte(s, i))).ToList();
         // Block 0 sits before the writable range (From is 1 for Classic); when unlocked it leads the run.
         if (AllowBlockZero && Layout.Family == TagFamily.Classic && From > 0 && WhyNotWritable(0) is null)
             segs.Insert(0, 0);
@@ -373,15 +391,19 @@ public sealed class TagEdit
     public int PositionOf(int segment, int index) =>
         _cellPos.TryGetValue(CellKey(segment, Math.Clamp(index, 0, Layout.SegmentSize - 1)), out var k) ? k : -1;
 
-    /// <summary>The segments to write, with the typed bytes (null for those kept as the tag has them).</summary>
+    private bool IsTrailerSeg(int segment) => Layout.Family == TagFamily.Classic && MifareClassicKeys.IsTrailer(segment);
+
+    /// <summary>The data segments to write, with the typed bytes (null for those kept as the tag has them). Trailers are
+    /// left out: their key bytes are written through the trailer path (see <see cref="Sectors"/>), never as a data block,
+    /// because key bytes read back as zeros and writing them straight would wipe the keys.</summary>
     public IReadOnlyDictionary<int, byte?[]> Changes =>
-        Segments.Where(s => _edits.TryGetValue(s, out var e) && e.Any(b => b is not null))
+        Segments.Where(s => !IsTrailerSeg(s) && _edits.TryGetValue(s, out var e) && e.Any(b => b is not null))
                 .ToDictionary(s => s, s => _edits[s].ToArray());
 
-    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes) { Sectors = _sectors.ToDictionary(p => p.Key, p => p.Value) };
+    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes) { Sectors = Sectors.ToDictionary(p => p.Key, p => p.Value) };
 
-    /// <summary>Whether anything would be written: typed bytes, or a sector's new key or rules.</summary>
-    public bool HasChanges => _sectors.Count > 0 || Changes.Count > 0;
+    /// <summary>Whether anything would be written: typed data bytes, or a sector's new key(s) or rules.</summary>
+    public bool HasChanges => Changes.Count > 0 || Sectors.Count > 0;
 
     // ------------------------------------------------------------------------------------------------ sector keys
 
@@ -389,19 +411,36 @@ public sealed class TagEdit
     /// default, or one the person entered, imported or had remembered from setting it before).</summary>
     public bool CanChangeKey(int sector) => Layout.Family == TagFamily.Classic && FromRead && _openedSectors.Contains(sector);
 
-    /// <summary>Sets (or, with null, drops) the new key for a sector (as key A and key B). Clears any key-A-as-data
-    /// change, which sets only key A. False when the sector cannot take one.</summary>
-    public bool SetSectorKey(int sector, byte[]? key) =>
-        Change(sector, c => key is { Length: 6 } ? c with { Key = key.ToArray(), KeyAData = null } : c with { Key = null });
+    /// <summary>Sets (or, with null, clears) a sector's key A — or, with <paramref name="keyB"/>, key B — as six bytes in
+    /// the trailer row, exactly as typing them there would. Setting both A and B to the same value is a new key for the
+    /// sector. False when the sector cannot be changed. One undo step.</summary>
+    public bool SetSectorKey(int sector, bool keyB, byte[]? key)
+    {
+        if (!CanChangeKey(sector)) return false;
+        int trailer = TrailerOf(sector), off = keyB ? 10 : 0;
+        Begin();
+        for (int i = 0; i < 6; i++)
+            if (key is { Length: 6 }) Set(trailer, off + i, key[i]);
+            else Clear(trailer, off + i);
+        return true;
+    }
 
-    /// <summary>Sets (or, with null, drops) six bytes to store in key A, keeping key B as the sector's working key: a
-    /// trailer whose rules rely on key B can use key A's six bytes as data. Clears any whole-key change. False when the
-    /// sector cannot take it. Key bytes read back masked, so this is write-only unless a reader authenticates with it.</summary>
-    public bool SetSectorKeyAData(int sector, byte[]? data) =>
-        Change(sector, c => data is { Length: 6 } ? c with { KeyAData = data.ToArray(), Key = null } : c with { KeyAData = null });
+    /// <summary>The six bytes pending for a sector's key A — or, with <paramref name="keyB"/>, key B — or null when none
+    /// are typed (the key is kept as it is). Reads from the trailer row, so inline edits and the key fields agree.</summary>
+    public byte[]? PendingKey(int sector, bool keyB)
+    {
+        int trailer = TrailerOf(sector), off = keyB ? 10 : 0;
+        if (!_edits.TryGetValue(trailer, out var e) || !Enumerable.Range(off, 6).Any(i => e[i] is not null)) return null;
+        return Enumerable.Range(off, 6).Select(i => ValueAt(trailer, i) ?? 0).ToArray();
+    }
 
     /// <summary>Sets (or, with null, drops) new rules for a sector. False when the sector cannot take them.</summary>
-    public bool SetSectorRules(int sector, SectorRules? rules) => Change(sector, c => c with { Rules = rules });
+    public bool SetSectorRules(int sector, SectorRules? rules)
+    {
+        if (!CanChangeKey(sector)) return false;
+        if (rules is null) _sectorRules.Remove(sector); else _sectorRules[sector] = rules;
+        return true;
+    }
 
     /// <summary>The sectors whose keys are known (the read opened them), so their keys and rules can be changed.</summary>
     public IReadOnlyList<int> ChangeableSectors =>
@@ -421,18 +460,19 @@ public sealed class TagEdit
     /// <summary>Sets the same data-block rule on every changeable sector at once. Returns how many sectors took it.</summary>
     public int SetAllSectorsDataRules(int bits) => ChangeableSectors.Count(s => SetAllDataRules(s, bits));
 
-    private bool Change(int sector, Func<SectorChange, SectorChange> update)
+    /// <summary>The change waiting for a sector — new key A and/or key B (from the trailer row) and new rules — or null
+    /// when nothing is pending for it.</summary>
+    public SectorChange? SectorChangeFor(int sector)
     {
-        if (!CanChangeKey(sector)) return false;
-        var next = update(_sectors.TryGetValue(sector, out var c) ? c : new SectorChange(null, null));
-        if (next.IsEmpty) _sectors.Remove(sector);
-        else _sectors[sector] = next;
-        return true;
+        var change = new SectorChange(PendingKey(sector, false), PendingKey(sector, true),
+            _sectorRules.TryGetValue(sector, out var r) ? r : null);
+        return change.IsEmpty ? null : change;
     }
 
-    public SectorChange? SectorChangeFor(int sector) => _sectors.TryGetValue(sector, out var c) ? c : null;
-
-    public IReadOnlyDictionary<int, SectorChange> Sectors => _sectors;
+    /// <summary>Every sector with a change waiting, built from the trailer-row key edits and the pending rules.</summary>
+    public IReadOnlyDictionary<int, SectorChange> Sectors =>
+        ChangeableSectors.Select(s => (s, c: SectorChangeFor(s))).Where(x => x.c is not null)
+                         .ToDictionary(x => x.s, x => x.c!);
 
     /// <summary>The rules a sector's trailer holds as read, or null when it was not read or its bits are corrupt.</summary>
     public SectorRules? CurrentRules(int sector)
@@ -442,8 +482,18 @@ public sealed class TagEdit
             ? MifareClassicKeys.DecodeRules(t.Select(b => b!.Value).ToArray()) : null;
     }
 
-    /// <summary>After the tag took a sector's trailer change: it is done (the key is known, so it can be changed again).</summary>
-    public void SectorChanged(int sector) => _sectors.Remove(sector);
+    /// <summary>After the tag took a sector's trailer change: clear its pending rules and key edits (the key is known,
+    /// so it can be changed again).</summary>
+    public void SectorChanged(int sector)
+    {
+        _sectorRules.Remove(sector);
+        int trailer = TrailerOf(sector);
+        if (_edits.TryGetValue(trailer, out var e))
+        {
+            for (int i = 0; i < 6; i++) { e[i] = null; e[10 + i] = null; }
+            if (e.All(b => b is null)) _edits.Remove(trailer);
+        }
+    }
 
     /// <summary>After a successful write: the tag now holds these bytes, so they are no longer changes. The history is
     /// cleared, since undoing would now mean changing the tag back.</summary>
@@ -539,8 +589,9 @@ public sealed class TagEdit
     /// <summary>Puts every byte back as the tag had it. One undo step.</summary>
     public void RevertAll()
     {
-        _sectors.Clear();
-        if (_edits.Count == 0) return;
+        bool hadRules = _sectorRules.Count > 0;
+        _sectorRules.Clear();
+        if (_edits.Count == 0) { if (hadRules) Begin(); return; }
         Begin();
         _edits.Clear();
     }

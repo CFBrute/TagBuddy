@@ -343,19 +343,27 @@
                     <VerticalStackLayout x:Name="SectorKeyPanel" Spacing="6" IsVisible="False"
                                          Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
                         <Label x:Name="SectorKeyTitle" FontSize="13" FontAttributes="Bold" />
-                        <Entry x:Name="SectorKeyEntry" Placeholder="New key: 12 hex digits" MaxLength="17"
-                               IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyChanged" />
-                        <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
-                               Text="The read opened this sector, so its key is known and can be changed. A new key is written with the tag, as key A and key B. This phone remembers the key for this tag, so later reads open the sector. Keep a copy: without the key the sector cannot be opened on another phone." />
 
-                        <!-- Key A used as data: set six bytes in key A, keep key B as the working key. For a trailer whose
-                             rules authenticate with key B. Key bytes read back blank, so it is write-only. -->
-                        <VerticalStackLayout x:Name="SectorKeyAPanel" Spacing="4" Margin="0,6,0,0">
-                            <Label Text="Key A as data" FontSize="13" FontAttributes="Bold" />
-                            <Entry x:Name="SectorKeyAEntry" Placeholder="Key A bytes: 12 hex digits" MaxLength="17"
-                                   IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnSectorKeyADataChanged" />
-                            <Label FontSize="12" TextColor="Gray"
-                                   Text="Stores six bytes in key A and keeps key B as the sector's working key — for a sector whose rules use key B. The key bytes read back blank, so this is write-only unless a reader authenticates with it. Key B must be known: open the sector with key B (enter it as the card's key)." />
+                        <!-- Key A and key B as one-line editors (12 hex digits or 6 characters of text). The same bytes
+                             can be typed over key A (blue) and key B (amber) in the trailer row; the two stay in step.
+                             Shown when the sector opened and the rules still let the keys be changed. -->
+                        <VerticalStackLayout x:Name="SectorKeysPanel" Spacing="6">
+                            <Label x:Name="KeysLockedLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                   Text="The sector's rules lock its keys, so they cannot be changed." />
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" RowDefinitions="Auto" x:Name="KeyARow">
+                                <Label Grid.Column="0" Text="Key A" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" WidthRequest="54" />
+                                <Entry Grid.Column="1" x:Name="SectorKeyAEntry" Placeholder="12 hex / 6 chars — blank keeps it" MaxLength="17"
+                                       IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnKeyAChanged" />
+                            </Grid>
+                            <Label x:Name="KeyASpareLabel" FontSize="11" TextColor="Gray" IsVisible="False" Margin="54,0,0,0"
+                                   Text="(not used as a key by the rules — its six bytes are free to store data)" />
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" RowDefinitions="Auto">
+                                <Label Grid.Column="0" Text="Key B" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" WidthRequest="54" />
+                                <Entry Grid.Column="1" x:Name="SectorKeyBEntry" Placeholder="12 hex / 6 chars — blank keeps it" MaxLength="17"
+                                       IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" TextChanged="OnKeyBChanged" />
+                            </Grid>
+                            <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
+                                   Text="Keys read back blank, so a field shows only what you type. Set both the same for one new key. The phone remembers a new key for this tag — keep a copy, or the sector cannot be opened on another phone." />
                         </VerticalStackLayout>
 
                         <!-- The sector's rules, as read; pick another to change them. Built from the choice, never typed as bytes. -->
