@@ -24,9 +24,29 @@ public partial class SettingsPage : ContentPage
 
         KeySection.IsVisible = Features.MifareKeyTools;
         ShowKeyStoreInfo();
+        ShowPasswordStoreInfo();
     }
 
     private readonly MifareKeyStore _keyStore = new();
+    private readonly Type2PasswordStore _passwordStore = new();
+
+    private void ShowPasswordStoreInfo()
+    {
+        int tags = _passwordStore.CardCount();
+        PasswordStoreInfo.Text = tags == 0
+            ? "A password that opens a protected NTAG/Ultralight is remembered by its serial, so the tag opens on its own next time. None remembered yet."
+            : $"Passwords that opened a protected NTAG/Ultralight are remembered by serial, so each tag opens on its own next time: {tags} {(tags == 1 ? "tag" : "tags")} so far. Kept on this phone only.";
+        ForgetPasswordsButton.IsEnabled = tags > 0;
+    }
+
+    private async void OnForgetRememberedPasswords(object? sender, EventArgs e)
+    {
+        if (!await DisplayAlertAsync("Forget tag passwords", "Forget the passwords remembered for every tag? You will need to enter a tag's password again to open it.", "Forget", "Cancel"))
+            return;
+        _passwordStore.Clear();
+        ShowPasswordStoreInfo();
+        Notice.Show("Remembered tag passwords forgotten");
+    }
 
     private void ShowKeyStoreInfo()
     {

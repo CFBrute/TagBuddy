@@ -237,6 +237,7 @@ public partial class NfcPage : ContentPage
         _active = true;
         ApplyPassword();     // the fields may still hold a password or key from before the tab was left
         ApplyClassicKey();
+        _nfc.SetPasswordSearch(_passwordStore.All());   // a remembered password opens its tag on its own
         if (_writeMode) ArmWrite();
         OnTagDispatched();
     }
@@ -265,6 +266,7 @@ public partial class NfcPage : ContentPage
         _nfc.SetManualClassicKey(null);
         _tryAllKeys = false;
         _nfc.SetClassicKeySearch([], [], false);
+        _nfc.SetPasswordSearch(new Dictionary<string, byte[]>());   // re-armed from the store on the next appear
         _tryDefaultOnce = false;
         _nfc.SetTryDefaultOnce(false);
         _nfc.Stop();
@@ -344,8 +346,23 @@ public partial class NfcPage : ContentPage
     /// <summary>Known MIFARE Classic keys the app has learned or the person imported (sideload only).</summary>
     private readonly MifareKeyStore _keyStore = new();
 
+    /// <summary>Passwords the app has seen open protected NTAG/Ultralight tags, remembered by serial so the same tag
+    /// opens on its own next time, the way <see cref="_keyStore"/> remembers MIFARE Classic keys.</summary>
+    private readonly Type2PasswordStore _passwordStore = new();
+
     /// <summary>Set for one read when the person taps "Try all": that read runs the whole imported dictionary.</summary>
     private bool _tryAllKeys;
+
+    /// <summary>Remembers a working Type 2 password the last read or write found, so the tag opens on its own later,
+    /// and re-arms the reader's password search with every remembered password.</summary>
+    private void RememberType2Password()
+    {
+        if (NfcReader.Type2PasswordFound is { } found)
+        {
+            _passwordStore.Remember(found.Serial, found.Password);
+            _nfc.SetPasswordSearch(_passwordStore.All());
+        }
+    }
 
     private void OnClassicKeyChanged(object? sender, TextChangedEventArgs e) => ApplyClassicKey();
 
@@ -468,6 +485,9 @@ public partial class NfcPage : ContentPage
         // A MIFARE Classic card: remember the keys that opened its sectors, so this card opens quickly next time.
         if (!fromSaved && Features.MifareKeyTools && NfcReader.ClassicKeysFound.Count > 0)
             _keyStore.Remember(tag.Id, NfcReader.ClassicKeysFound.Select(k => k.Key));
+
+        // An NTAG/Ultralight opened with a password (typed, remembered, or the default): remember it for this tag.
+        if (!fromSaved) RememberType2Password();
 
         // Running the whole dictionary is a one-shot per tap; turn it off again now that this read is done.
         if (_tryAllKeys)
@@ -981,6 +1001,9 @@ public partial class NfcPage : ContentPage
     private void OnTagWritten(bool ok, string note)
     {
         Feedback.Tag(ok);
+
+        // A write that opened a protected NTAG/Ultralight with a password: remember it for this tag.
+        RememberType2Password();
 
         if (WriteType == WriteMode.Segments) note = SegmentWritten(ok, note);
 

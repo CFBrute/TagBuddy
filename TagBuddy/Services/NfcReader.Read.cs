@@ -20,6 +20,8 @@ public sealed partial class NfcReader
 
     private static NfcTagInfo Describe(Tag tag)
     {
+        Type2PasswordFound = null;   // a password worth remembering is recorded only if this read finds one
+
         // GetTechList can list the same tech twice on some phones; show each once.
         var techs = (tag.GetTechList() ?? [])
             .Select(t => t.Split('.').Last())
@@ -136,21 +138,30 @@ public sealed partial class NfcReader
                         string serial = ToHex(link.Uid);
                         bool amiiboAuto = Features.Amiibo && LooksAmiibo(rawMemory);
                         byte[]? manual = ManualPasswordFor(serial);
-                        // Try the default only when it is not already known to fail on this tag (and the setting is
-                        // on), and only when the tag confirms it has no wrong-attempt lock-out (AUTHLIM == 0); if that
-                        // cannot be read, do not risk an automatic attempt.
-                        bool autoDefault = !amiiboAuto && manual is null && ShouldTryDefault(serial)
+                        // A password this app saw open this tag before (remembered by serial): tried like a typed one,
+                        // ahead of the default, since it is known to authenticate rather than spend a wrong attempt.
+                        byte[]? remembered = manual is null ? RememberedPasswordFor(serial) : null;
+                        // Try the default only when no password is known for the tag, it is not already known to fail
+                        // on it (and the setting is on), and the tag confirms it has no wrong-attempt lock-out
+                        // (AUTHLIM == 0); if that cannot be read, do not risk an automatic attempt.
+                        bool autoDefault = !amiiboAuto && manual is null && remembered is null && ShouldTryDefault(serial)
                             && ReadAuthLimit(link, chip) == 0;
-                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid) : manual ?? (autoDefault ? TagPassword.FactoryDefault : null);
+                        byte[]? pwd = amiiboAuto ? AmiiboPassword(link.Uid)
+                            : manual ?? remembered ?? (autoDefault ? TagPassword.FactoryDefault : null);
 
-                        if (pwd is not null && TryAuthenticate(link, pwd, singleAttempt: autoDefault))
+                        // A remembered password opened the tag before, so one attempt suffices; capping it at one means
+                        // a tag whose password was changed elsewhere ticks its wrong-attempt counter at most once.
+                        if (pwd is not null && TryAuthenticate(link, pwd, singleAttempt: autoDefault || remembered is not null))
                         {
+                            RecordType2Password(serial, pwd, amiiboAuto);   // store a working password for next time
                             rawMemory = ReadMemory(link, chip);
                             if (autoDefault && rawMemory.Length >= chip.TotalPages * 4)
                             {
                                 RecordDefault(serial, true);
                                 details.Add(("Password", "Read with the factory default password (FFFFFFFF); this tag still has it."));
                             }
+                            else if (remembered is not null && rawMemory.Length >= chip.TotalPages * 4)
+                                details.Add(("Password", "Opened with the password remembered for this tag."));
                         }
                         else if (autoDefault)
                         {
