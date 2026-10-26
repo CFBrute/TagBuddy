@@ -1,5 +1,6 @@
 using System.Text;
 using Android.Nfc;
+using TagBuddy.Controls;
 using TagBuddy.Models;
 using TagBuddy.Services;
 
