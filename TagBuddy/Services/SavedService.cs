@@ -228,6 +228,50 @@ public class SavedService
         return item;
     }
 
+    /// <summary>The memory bytes behind a tag read: the full page image of a Type 2 tag, or the segments that were read
+    /// laid end to end, the same bytes a saved read keeps as its .bin.</summary>
+    public static byte[] TagBytes(NfcTagInfo tag) => tag.RawMemory ?? ReadImage(tag);
+
+    /// <summary>After reading a tag, the saved read of that same tag (serial) to offer updating: null when it is not
+    /// saved, or a saved copy already matches what was read (nothing to update). When several copies differ, the most
+    /// recent is returned.</summary>
+    public async Task<SavedItem?> OutdatedReadAsync(NfcTagInfo tag)
+    {
+        if (string.IsNullOrEmpty(tag.Id)) return null;
+        await LoadAsync();
+        var current = TagBytes(tag);
+        if (current.Length == 0) return null;
+        var saved = Items.Where(i => i.HasRead && string.Equals(i.DumpSerial, tag.Id, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (saved.Count == 0) return null;
+
+        SavedItem? newest = null;
+        foreach (var item in saved)
+        {
+            byte[] bytes;
+            try { bytes = await ReadDumpAsync(item); } catch { continue; }
+            if (bytes.AsSpan().SequenceEqual(current)) return null;   // a saved copy is already up to date
+            if (newest is null || item.SortTime > newest.SortTime) newest = item;
+        }
+        return newest;
+    }
+
+    /// <summary>Replaces a saved read's memory and read file with a tag just read (the same tag): keeps the saved copy
+    /// current. The item keeps its name, group and place.</summary>
+    public async Task UpdateReadAsync(SavedItem item, NfcTagInfo tag)
+    {
+        var bytes = TagBytes(tag);
+        await File.WriteAllBytesAsync(DumpPath(item), bytes);
+        item.DumpSize = bytes.Length;
+        item.DumpText = DumpText.Describe(bytes);
+        item.DumpChip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? item.DumpChip;
+        if (item.HasRead)
+        {
+            Directory.CreateDirectory(_readDir);
+            await File.WriteAllTextAsync(ReadPath(item), TagReadFile.From(tag).ToJson());
+        }
+        await SaveAsync();
+    }
+
     /// <summary>The read a dump was saved from, or null when it was imported or the file is gone.</summary>
     public async Task<NfcTagInfo?> LoadReadAsync(SavedItem item)
     {

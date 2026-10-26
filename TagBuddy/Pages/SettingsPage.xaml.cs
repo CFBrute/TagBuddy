@@ -16,6 +16,7 @@ public partial class SettingsPage : ContentPage
         SoundSwitch.IsToggled = AppSettings.Sound;
         NfcSoundSwitch.IsToggled = AppSettings.NfcSound;
         AutoDefaultSwitch.IsToggled = AppSettings.AutoTryDefaultPassword;
+        UpdateSavedSwitch.IsToggled = AppSettings.AskUpdateSavedTag;
         MaxBrightnessSwitch.IsToggled = AppSettings.MaxBrightness;
         AutoPreviewSwitch.IsToggled = AppSettings.AutoPreviews;
         _loading = false;
@@ -102,6 +103,12 @@ public partial class SettingsPage : ContentPage
     {
         if (_loading) return;
         AppSettings.AutoTryDefaultPassword = e.Value;
+    }
+
+    private void OnUpdateSavedToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_loading) return;
+        AppSettings.AskUpdateSavedTag = e.Value;
     }
 
     private void OnMaxBrightnessToggled(object? sender, ToggledEventArgs e)
