@@ -37,7 +37,7 @@
                     <Button x:Name="PasswordDefaultButton" Grid.Column="1" Text="FFFFFFFF" Clicked="OnPasswordDefault"
                             BackgroundColor="#6B7280" TextColor="White" FontSize="12" Padding="10,4" />
                 </Grid>
-                <Label x:Name="PasswordFormatHint" FontSize="12" TextColor="Gray"
+                <controls:InfoExpander x:Name="PasswordFormatHint" Title="About the password"
                        Text="A tag's password is 4 bytes, shown as 8 hex digits; a new NTAG/Ultralight's factory password is FFFFFFFF. It is kept only while this tab is open." />
                 <Label FontSize="12" TextColor="#DC2626"
                        Text="Warning: some tags lock for good after a few wrong passwords. Only enter one you know." />
@@ -52,7 +52,7 @@
                 <Label Text="Some sectors use a custom key" FontSize="13" FontAttributes="Bold" />
                 <Entry x:Name="ClassicKeyEntry" Placeholder="12 hex digits, e.g. A0A1A2A3A4A5" MaxLength="17"
                        TextChanged="OnClassicKeyChanged" />
-                <Label FontSize="12" TextColor="Gray"
+                <controls:InfoExpander Title="About MIFARE Classic keys"
                        Text="A MIFARE Classic key is 6 bytes (12 hex digits). Enter one and hold the card again to open the sectors it unlocks. Trying a wrong key is safe: Classic cards have no wrong-key lockout. The key is kept only while this tab is open." />
 
                 <!-- Run a whole imported dictionary against the locked sectors; keys that open a card are remembered -->
@@ -323,7 +323,7 @@
                             </Grid>
                         </ScrollView>
                     </Border>
-                    <Label x:Name="SegmentHint" FontSize="12" TextColor="Gray" />
+                    <controls:InfoExpander x:Name="SegmentHint" Title="How editing works" />
                     </VerticalStackLayout>
 
                     <!-- Sector keys & rules tab: settings for one sector, chosen here or by tapping a block in Edit. -->
@@ -367,31 +367,45 @@
                             </Border>
                             <Label x:Name="KeyASpareLabel" FontSize="11" TextColor="Gray" IsVisible="False"
                                    Text="Key A is not used as a key by the rules — its six bytes are free to store data." />
-                            <Label x:Name="SectorKeyHint" FontSize="12" TextColor="Gray"
+                            <controls:InfoExpander x:Name="SectorKeyHint" Title="How to type a key"
                                    Text="Tap a key's hex and type 12 hex digits, or tap its text and type 6 characters; typing runs on from key A into key B. Key A reads back as 00, so only the bytes you type are written and an untouched key is kept. Set both the same for one new key. The phone remembers a new key for this tag — keep a copy, or the sector cannot be opened on another phone." />
                         </VerticalStackLayout>
 
-                        <!-- The sector's rules, as read; pick another to change them. Built from the choice, never typed as bytes. -->
-                        <VerticalStackLayout x:Name="SectorRulesPanel" Spacing="4">
-                            <Label Text="Rules" FontSize="13" FontAttributes="Bold" Margin="0,6,0,0" />
-                            <Label FontSize="12" TextColor="Gray"
-                                   Text="What key A and key B may do. The tag enforces these: a write the rules do not allow is refused. They are shown as the tag has them; pick another to change them with the next write." />
-                            <Label x:Name="RulesUnknownLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
-                                   Text="This sector's rules could not be read or are corrupt, so they cannot be changed here." />
+                        <!-- The sector's rules, as read; pick another to change them. Built from the choice, never typed as bytes.
+                             Each caption sits tight above its own picker (Spacing 2 inside a group), with a wider gap
+                             between groups (the panel's Spacing), so it is clear which picker a caption belongs to. -->
+                        <VerticalStackLayout x:Name="SectorRulesPanel" Spacing="12">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Rules" FontSize="13" FontAttributes="Bold" Margin="0,6,0,0" />
+                                <controls:InfoExpander Title="What the rules mean"
+                                    Text="What key A and key B may do. The tag enforces these: a write the rules do not allow is refused. They are shown as the tag has them; pick another to change them with the next write." />
+                                <Label x:Name="RulesUnknownLabel" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                       Text="This sector's rules could not be read or are corrupt, so they cannot be changed here." />
+                            </VerticalStackLayout>
                             <!-- One choice that sets all three data blocks of this sector at once -->
-                            <Label Text="All data blocks in this sector" FontSize="12" TextColor="Gray" Margin="0,2,0,0" />
-                            <Picker x:Name="AllBlocksPicker" FontSize="13" SelectedIndexChanged="OnAllBlocksRuleChanged" />
-                            <Label Text="…or set each block on its own" FontSize="12" TextColor="Gray" Margin="0,4,0,0" />
-                            <Label x:Name="DataRule0Label" FontSize="12" TextColor="Gray" />
-                            <Picker x:Name="DataRule0Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                            <Label x:Name="DataRule1Label" FontSize="12" TextColor="Gray" />
-                            <Picker x:Name="DataRule1Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                            <Label x:Name="DataRule2Label" FontSize="12" TextColor="Gray" />
-                            <Picker x:Name="DataRule2Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                            <Label Text="The keys and these rules" FontSize="12" TextColor="Gray" />
-                            <Picker x:Name="TrailerRulePicker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
-                            <Label x:Name="PermanentWarning" FontSize="12" TextColor="#DC2626" IsVisible="False"
-                                   Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="All data blocks in this sector" FontSize="13" FontAttributes="Bold" />
+                                <Picker x:Name="AllBlocksPicker" FontSize="13" SelectedIndexChanged="OnAllBlocksRuleChanged" />
+                            </VerticalStackLayout>
+                            <Label Text="…or set each block on its own" FontSize="12" TextColor="Gray" />
+                            <VerticalStackLayout Spacing="2">
+                                <Label x:Name="DataRule0Label" FontSize="12" TextColor="Gray" />
+                                <Picker x:Name="DataRule0Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="2">
+                                <Label x:Name="DataRule1Label" FontSize="12" TextColor="Gray" />
+                                <Picker x:Name="DataRule1Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="2">
+                                <Label x:Name="DataRule2Label" FontSize="12" TextColor="Gray" />
+                                <Picker x:Name="DataRule2Picker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="The keys and these rules" FontSize="13" FontAttributes="Bold" />
+                                <Picker x:Name="TrailerRulePicker" FontSize="13" SelectedIndexChanged="OnSectorRuleChanged" />
+                                <Label x:Name="PermanentWarning" FontSize="12" TextColor="#DC2626" IsVisible="False"
+                                       Text="⚠ The chosen rule for the keys is permanent: once written, nothing in this sector can ever be changed again." />
+                            </VerticalStackLayout>
                         </VerticalStackLayout>
                         <Label x:Name="SectorKeyList" FontSize="12" />
                     </VerticalStackLayout>
@@ -400,7 +414,9 @@
                     <VerticalStackLayout x:Name="AllSectorsPanel" Spacing="6" Padding="12" IsVisible="False"
                                          BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
                         <Label Text="All sectors at once" FontSize="13" FontAttributes="Bold" />
-                        <Label Text="Keys" FontSize="12" TextColor="Gray" />
+                        <controls:InfoExpander Title="What this does"
+                            Text="Sets the same key A and/or key B, or the same data-block rule, on every sector that opened and whose rules let it change. Each sector's own key rows and the block grid update to match. Nothing is written until you hold the tag." />
+                        <Label Text="Keys" FontSize="13" FontAttributes="Bold" Margin="0,4,0,0" />
                         <Border Stroke="#D1D5DB" StrokeThickness="1" Padding="4" HorizontalOptions="Start"
                                 BackgroundColor="{AppThemeBinding Light=White, Dark=#111111}">
                             <Border.StrokeShape>
@@ -424,10 +440,12 @@
                                     BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="34" FontSize="13" />
                         </HorizontalStackLayout>
                         <Label x:Name="AllKeysHint" FontSize="12" TextColor="Gray" />
-                        <Label Text="Rule for every data block" FontSize="12" TextColor="Gray" Margin="0,6,0,0" />
-                        <Label FontSize="12" TextColor="Gray"
-                               Text="Sets the same rule on every data block of every sector that opened. Each sector's trailer rule and keys are left as they are." />
-                        <Picker x:Name="AllSectorsPicker" FontSize="13" SelectedIndexChanged="OnAllSectorsRuleChanged" />
+                        <VerticalStackLayout Spacing="2" Margin="0,6,0,0">
+                            <Label Text="Rule for every data block" FontSize="13" FontAttributes="Bold" />
+                            <controls:InfoExpander Title="What this does"
+                                Text="Sets the same rule on every data block of every sector that opened. Each sector's trailer rule and keys are left as they are." />
+                            <Picker x:Name="AllSectorsPicker" FontSize="13" SelectedIndexChanged="OnAllSectorsRuleChanged" />
+                        </VerticalStackLayout>
                     </VerticalStackLayout>
                     </VerticalStackLayout>
 
@@ -468,16 +486,14 @@
                                 BackgroundColor="#6B7280" TextColor="White" />
                     </Grid>
 
-                    <Label x:Name="DumpHint" Text="Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable. An Amiibo dump also gets the Nintendo password set from this tag's serial. Amiibo data is tied to the serial it was made for, so write it back to the same tag."
-                           FontSize="12" TextColor="Gray"
-                           HorizontalTextAlignment="Center" />
+                    <controls:InfoExpander x:Name="DumpHint" Title="What this writes"
+                           Text="Writes page 3 and every user page of the dump to an NTAG or Ultralight tag. The serial number (pages 0-2) and the permanent lock bits are never written, so the tag stays rewritable. An Amiibo dump also gets the Nintendo password set from this tag's serial. Amiibo data is tied to the serial it was made for, so write it back to the same tag." />
                 </VerticalStackLayout>
 
                 <!-- Erase -->
                 <VerticalStackLayout x:Name="ErasePanel" Spacing="12" IsVisible="False">
-                    <Label x:Name="EraseHint" Text="Clears every user page of the tag (all zeros with an empty NDEF message) and removes password protection when the tag uses the Amiibo key. The serial number and one-time pages are untouched. Save a dump first if you may want the content back."
-                           FontSize="12" TextColor="Gray"
-                           HorizontalTextAlignment="Center" />
+                    <controls:InfoExpander x:Name="EraseHint" Title="What this erases"
+                           Text="Clears every user page of the tag (all zeros with an empty NDEF message) and removes password protection when the tag uses the Amiibo key. The serial number and one-time pages are untouched. Save a dump first if you may want the content back." />
                 </VerticalStackLayout>
 
                 <Label x:Name="WriteStatus"
@@ -489,10 +505,8 @@
                 <Button x:Name="UseRawButton" Text="Write it as raw bytes instead" Clicked="OnUseRaw" IsVisible="False"
                         HorizontalOptions="Center" />
 
-                <Label x:Name="WriteHint"
-                       Text="Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written."
-                       FontSize="12" TextColor="Gray"
-                       HorizontalTextAlignment="Center" />
+                <controls:InfoExpander x:Name="WriteHint" Title="What this writes"
+                       Text="Writes NDEF content to writable tags only (NTAG, Ultralight and other NDEF tags). The tag's serial number is fixed and is never changed. Locked cards cannot be written." />
             </VerticalStackLayout>
 
         </VerticalStackLayout>

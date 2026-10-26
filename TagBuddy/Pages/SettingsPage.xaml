@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:TagBuddy.Controls"
              x:Class="TagBuddy.Pages.SettingsPage"
              Title="Settings">
     <ScrollView>
@@ -13,30 +14,26 @@
                 <Switch Grid.Column="1" x:Name="VibrateSwitch" Toggled="OnVibrateToggled"
                         OnColor="{StaticResource Primary}" VerticalOptions="Center" />
             </Grid>
-            <Label FontSize="12" TextColor="Gray"
-                   Text="A short buzz when a code is scanned or a tag is read or written. It follows the phone's notification vibration setting." />
+            <controls:InfoExpander Text="A short buzz when a code is scanned or a tag is read or written. It follows the phone's notification vibration setting." />
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <Label Grid.Column="0" Text="Beep when a code is scanned" VerticalOptions="Center" />
                 <Switch Grid.Column="1" x:Name="SoundSwitch" Toggled="OnSoundToggled"
                         OnColor="{StaticResource Primary}" VerticalOptions="Center" />
             </Grid>
-            <Label FontSize="12" TextColor="Gray"
-                   Text="For the camera. The beep stays quiet while the phone is on silent or vibrate." />
+            <controls:InfoExpander Text="For the camera. The beep stays quiet while the phone is on silent or vibrate." />
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <Label Grid.Column="0" Text="Android's NFC sound" VerticalOptions="Center" />
                 <Switch Grid.Column="1" x:Name="NfcSoundSwitch" Toggled="OnNfcSoundToggled"
                         OnColor="{StaticResource Primary}" VerticalOptions="Center" />
             </Grid>
-            <Label FontSize="12" TextColor="Gray"
-                   Text="The sound Android plays when the NFC tab finds a tag. Off keeps it quiet while you read or write tags here. A private tag that opens Tag Buddy from outside the app still gets Android's sound." />
+            <controls:InfoExpander Text="The sound Android plays when the NFC tab finds a tag. Off keeps it quiet while you read or write tags here. A private tag that opens Tag Buddy from outside the app still gets Android's sound." />
 
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <Label Grid.Column="0" Text="Try the default tag password" VerticalOptions="Center" />
                 <Switch Grid.Column="1" x:Name="AutoDefaultSwitch" Toggled="OnAutoDefaultToggled"
                         OnColor="{StaticResource Primary}" VerticalOptions="Center" />
             </Grid>
-            <Label FontSize="12" TextColor="Gray"
-                   Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. To avoid locking a tag, the default is tried only when the tag confirms it has no wrong-attempt lock-out, and at most once per tag each session." />
+            <controls:InfoExpander Text="When a protected NTAG/Ultralight is read or written, try the factory default FFFFFFFF once. Off, nothing is tried automatically; the password box appears and the FFFFFFFF button is still there. To avoid locking a tag, the default is tried only when the tag confirms it has no wrong-attempt lock-out, and at most once per tag each session." />
 
             <!-- NTAG/Ultralight passwords the app has seen open a tag, remembered by serial like the Classic keys -->
             <Label x:Name="PasswordStoreInfo" FontSize="12" TextColor="Gray" />
