@@ -541,14 +541,26 @@
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                 <ScrollView Grid.Column="0" Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
                     <HorizontalStackLayout Spacing="6">
-                        <Button x:Name="FloatUndoButton" Text="↶" Clicked="OnSegmentUndo"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
-                        <Button x:Name="FloatRedoButton" Text="↷" Clicked="OnSegmentRedo"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
-                        <Button x:Name="FloatResetButton" Text="◀ Reset" Clicked="OnSegmentResetByte"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
-                        <Button x:Name="FloatZeroRowButton" Text="Block to 00" Clicked="OnSegmentZeroRow"
-                                BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                        <!-- Editing tools, shown when not selecting -->
+                        <HorizontalStackLayout x:Name="FloatEditTools" Spacing="6">
+                            <Button x:Name="FloatUndoButton" Text="↶" Clicked="OnSegmentUndo"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
+                            <Button x:Name="FloatRedoButton" Text="↷" Clicked="OnSegmentRedo"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="15" />
+                            <Button x:Name="FloatResetButton" Text="◀ Reset" Clicked="OnSegmentResetByte"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                            <Button x:Name="FloatZeroRowButton" Text="Block to 00" Clicked="OnSegmentZeroRow"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
+                        </HorizontalStackLayout>
+                        <!-- Selection tools, shown while selecting: act on the highlighted run -->
+                        <HorizontalStackLayout x:Name="FloatSelectTools" Spacing="6" IsVisible="False">
+                            <Button x:Name="FloatCopyButton" Text="Copy" Clicked="OnCopySelection"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="13" />
+                            <Button x:Name="FloatResetSelButton" Text="Reset" Clicked="OnResetSelection"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="13" />
+                            <Button x:Name="FloatZeroSelButton" Text="00" Clicked="OnZeroSelection"
+                                    BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="38" FontSize="13" />
+                        </HorizontalStackLayout>
                         <Button x:Name="FloatSelectButton" Text="Select" Clicked="OnSegmentSelect"
                                 BackgroundColor="#6B7280" TextColor="White" Padding="10,4" MinimumHeightRequest="38" FontSize="13" />
                     </HorizontalStackLayout>

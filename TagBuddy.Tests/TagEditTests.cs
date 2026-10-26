@@ -546,6 +546,27 @@ public class TagEditTests
     }
 
     [Fact]
+    public void A_selection_can_be_zeroed_and_reset_over_its_run()
+    {
+        var edit = TagEdit.FromTag(ReadNtag213(), "04");   // page n holds n,n,n,n
+        int start = edit.PositionOf(5, 2), end = edit.PositionOf(6, 1);
+
+        edit.FillRange(0x00, start, end);                   // (5,2),(5,3),(6,0),(6,1)
+        Assert.Equal((byte)0, edit.ValueAt(5, 2));
+        Assert.Equal((byte)0, edit.ValueAt(6, 1));
+        Assert.Equal((byte)5, edit.ValueAt(5, 1));          // just outside: untouched
+        Assert.Equal((byte)6, edit.ValueAt(6, 2));
+        Assert.Equal([5, 6], edit.Changes.Keys);
+
+        edit.ResetRange(start, end);                         // back as read
+        Assert.Equal((byte)5, edit.ValueAt(5, 2));
+        Assert.Equal((byte)6, edit.ValueAt(6, 1));
+        Assert.Empty(edit.Changes);
+        Assert.True(edit.Undo());                            // one step each
+        Assert.True(edit.Undo());
+    }
+
+    [Fact]
     public void A_segments_bytes_for_copying_reflect_the_edits()
     {
         var edit = TagEdit.FromTag(ReadNtag213(), "04");

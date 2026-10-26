@@ -1254,13 +1254,18 @@ public partial class NfcPage : ContentPage
         // Whole-tag buttons kept at the top.
         SegmentRevertButton.IsEnabled = edit.HasChanges;
 
-        // The floating toolbar holds the per-byte tools so they stay reachable while the grid scrolls.
-        string row = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
+        // The floating toolbar holds the per-byte tools so they stay reachable while the grid scrolls; in select mode
+        // it swaps to actions on the highlighted run (copy, reset, zero).
+        bool selecting = SegmentGrid.Selecting;
+        FloatEditTools.IsVisible = !selecting;
+        FloatSelectTools.IsVisible = selecting;
         FloatUndoButton.IsEnabled = edit.CanUndo;
         FloatRedoButton.IsEnabled = edit.CanRedo;
-        FloatZeroRowButton.Text = row;
-        Palette.Select(FloatSelectButton, SegmentGrid.Selecting);
-        FloatSelectButton.Text = SegmentGrid.Selecting ? "Done" : "Select";
+        FloatZeroRowButton.Text = $"{(edit.Layout.Noun == "page" ? "Page" : "Block")} to 00";
+        Palette.Select(FloatSelectButton, selecting);
+        FloatSelectButton.Text = selecting ? "Done" : "Select";
+        bool hasSelection = SegmentGrid.Selection is not null;
+        FloatCopyButton.IsEnabled = FloatResetSelButton.IsEnabled = FloatZeroSelButton.IsEnabled = hasSelection;
         UpdateFloatingToolsVisibility();
 
         // Sector keys & rules live on their own tab for a MIFARE Classic card; other tags have no sectors, so the
@@ -1453,25 +1458,46 @@ public partial class NfcPage : ContentPage
         UpdateSegmentTools();
     }
 
-    /// <summary>A long press on the grid: offer to copy the selected run of bytes — or, with nothing selected, the block
-    /// that was pressed — as hex or as text.</summary>
+    /// <summary>A long press on the grid: copy the selected run — or, with nothing selected, the block pressed.</summary>
     private async void OnGridLongPressed((int Segment, int Index) cell)
     {
         if (_edit is not { Length: > 0 } edit) return;
-        byte[] bytes;
-        string what;
         if (SegmentGrid.Selection is { } sel)
-        {
-            bytes = Enumerable.Range(sel.Start, sel.End - sel.Start + 1)
-                .Select(p => { var (s, i) = edit.At(p); return edit.ValueAt(s, i) ?? (byte)0; }).ToArray();
-            what = $"{bytes.Length} byte{(bytes.Length == 1 ? "" : "s")}";
-        }
+            await CopyBytesMenuAsync(SelectedBytes(edit, sel), $"{SelectedBytes(edit, sel).Length} byte(s)");
         else
-        {
-            bytes = edit.SegmentBytes(cell.Segment);
-            what = $"{edit.Layout.Noun} {cell.Segment}";
-        }
+            await CopyBytesMenuAsync(edit.SegmentBytes(cell.Segment), $"{edit.Layout.Noun} {cell.Segment}");
+    }
 
+    /// <summary>The Copy button in select mode: copy the highlighted run as hex or text.</summary>
+    private async void OnCopySelection(object? sender, EventArgs e)
+    {
+        if (_edit is not { Length: > 0 } edit || SegmentGrid.Selection is not { } sel) return;
+        var bytes = SelectedBytes(edit, sel);
+        await CopyBytesMenuAsync(bytes, $"{bytes.Length} byte{(bytes.Length == 1 ? "" : "s")}");
+    }
+
+    /// <summary>The Reset button in select mode: put the highlighted bytes back as the tag had them.</summary>
+    private void OnResetSelection(object? sender, EventArgs e)
+    {
+        if (_edit is not { } edit || SegmentGrid.Selection is not { } sel) return;
+        edit.ResetRange(sel.Start, sel.End);
+        SegmentEdited();
+    }
+
+    /// <summary>The 00 button in select mode: set the highlighted bytes to zero.</summary>
+    private void OnZeroSelection(object? sender, EventArgs e)
+    {
+        if (_edit is not { } edit || SegmentGrid.Selection is not { } sel) return;
+        edit.FillRange(0x00, sel.Start, sel.End);
+        SegmentEdited();
+    }
+
+    private static byte[] SelectedBytes(TagEdit edit, (int Start, int End) sel) =>
+        Enumerable.Range(sel.Start, sel.End - sel.Start + 1)
+                  .Select(p => { var (s, i) = edit.At(p); return edit.ValueAt(s, i) ?? (byte)0; }).ToArray();
+
+    private async Task CopyBytesMenuAsync(byte[] bytes, string what)
+    {
         var choice = await DisplayActionSheet($"Copy {what}", "Cancel", null, "Copy as hex", "Copy as text");
         if (choice == "Copy as hex")
         {
