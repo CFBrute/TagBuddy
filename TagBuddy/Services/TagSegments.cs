@@ -623,6 +623,37 @@ public sealed class TagEdit
     public byte[] SegmentBytes(int segment) =>
         Enumerable.Range(0, Layout.SegmentSize).Select(i => ValueAt(segment, i) ?? (byte)0).ToArray();
 
+    /// <summary>Puts a run of positions (a selection) back as the tag had them. One undo step; does nothing when none
+    /// of them was edited.</summary>
+    public void ResetRange(int start, int end)
+    {
+        if (!ClampRange(ref start, ref end)) return;
+        bool any = false;
+        for (int p = start; p <= end && !any; p++) { var (s, i) = At(p); any = IsEdited(s, i); }
+        if (!any) return;
+        Begin();
+        for (int p = start; p <= end; p++) { var (s, i) = At(p); Clear(s, i); }
+    }
+
+    /// <summary>Sets every byte of a run of positions (a selection) to a value. One undo step; does nothing when they
+    /// already hold it.</summary>
+    public void FillRange(byte value, int start, int end)
+    {
+        if (!ClampRange(ref start, ref end)) return;
+        bool changed = false;
+        for (int p = start; p <= end && !changed; p++) { var (s, i) = At(p); changed = ValueAt(s, i) != value; }
+        if (!changed) return;
+        Begin();
+        for (int p = start; p <= end; p++) { var (s, i) = At(p); Set(s, i, value); }
+    }
+
+    private bool ClampRange(ref int start, ref int end)
+    {
+        if (Length == 0) return false;
+        (start, end) = (Math.Clamp(Math.Min(start, end), 0, Length - 1), Math.Clamp(Math.Max(start, end), 0, Length - 1));
+        return true;
+    }
+
     /// <summary>Steps back one byte and puts it back as the tag had it (in hex, half a typed byte is taken back first).</summary>
     public void Backspace()
     {
