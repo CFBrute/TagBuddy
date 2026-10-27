@@ -64,12 +64,10 @@
                 </HorizontalStackLayout>
             </VerticalStackLayout>
 
-            <!-- Hardware: experimental Proxmark-over-USB probe -->
+            <!-- Hardware: the Proxmark/RF feature lives in its own tab, which appears when a Proxmark is plugged in -->
             <VerticalStackLayout x:Name="HardwareSection" Spacing="8" IsVisible="False">
                 <Label Text="Hardware" FontAttributes="Bold" FontSize="16" Margin="0,8,0,0" />
-                <Button Text="Proxmark (USB)…" Clicked="OnOpenProxmark" HorizontalOptions="Start"
-                        BackgroundColor="#6B7280" TextColor="White" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                <Label Text="Experimental. Plug a Proxmark3 into the phone with an OTG cable and probe it, to see whether this phone's USB can talk to the device."
+                <Label Text="Experimental: plug a Proxmark3 into the phone over USB-OTG and an RF tab appears, for reading tags the phone's own NFC can't (both HF and LF)."
                        FontSize="12" TextColor="Gray" />
             </VerticalStackLayout>
 

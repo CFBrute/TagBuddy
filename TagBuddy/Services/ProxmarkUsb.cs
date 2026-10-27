@@ -62,16 +62,23 @@ public sealed class ProxmarkUsb
 
     // --- auto-open: MainActivity notes a USB-attach intent, the shell navigates here on the next chance ---
 
-    /// <summary>Raised when Android hands the app a "Proxmark attached" intent, so the shell can open this page.</summary>
-    public static event Action? AttachDetected;
+    /// <summary>Raised when a Proxmark is plugged in or unplugged, so the shell can show or hide the RF tab. The
+    /// handler should re-check <see cref="IsAttached"/> rather than trust the event, since events can be missed.</summary>
+    public static event Action? PresenceChanged;
 
-    /// <summary>Set when an attach intent arrived before the shell could act on it.</summary>
+    /// <summary>Set when an attach arrived before the shell could act on it, so the RF tab can be opened on show.</summary>
     public static bool PendingAttach { get; private set; }
 
     public static void NoteAttached()
     {
         PendingAttach = true;
-        AttachDetected?.Invoke();
+        PresenceChanged?.Invoke();
+    }
+
+    public static void NoteDetached()
+    {
+        PendingAttach = false;
+        PresenceChanged?.Invoke();
     }
 
     public static void ClearPending() => PendingAttach = false;
