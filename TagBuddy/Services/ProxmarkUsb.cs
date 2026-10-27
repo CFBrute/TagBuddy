@@ -455,9 +455,9 @@ public sealed class ProxmarkUsb
 
     /// <summary>Captures 125 kHz samples over the Proxmark and tries to read an EM410x id from them. Returns the
     /// result (id may be null when nothing demodulated), or null if the device did not answer.</summary>
-    public Task<LfRead?> LfReadAsync() => WithLinkAsync(LfRead, null);
+    public Task<LfRead?> LfReadAsync() => WithLinkAsync(ReadLf, null);
 
-    private LfRead? LfRead(Link link)
+    private LfRead? ReadLf(Link link)
     {
         Say("Acquiring 125 kHz samples (hold the LF tag on the Proxmark's LF antenna)…");
         Command(link, CmdLfAcquireRaw125k, writeTimeoutMs: 1500, readTimeoutMs: 3000, what: "acquire command");   // its ack carries the sample count
