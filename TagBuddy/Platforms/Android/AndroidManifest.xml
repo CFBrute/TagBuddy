@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-	<application android:usesCleartextTraffic="true" android:extractNativeLibs="false" android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+	<application android:usesCleartextTraffic="true" android:extractNativeLibs="false" android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true">
+		<!-- Disable EmojiCompat's auto-initializer. Its text watcher crashes ("end should be < than charSequence length")
+		     on backspace in the hidden byte-typing inputs, which rewrite their own text each keystroke. Emoji still render
+		     natively on modern Android; only the back-compat processing is turned off. -->
+		<provider android:name="androidx.startup.InitializationProvider"
+		          android:authorities="${applicationId}.androidx-startup"
+		          android:exported="false"
+		          tools:node="merge">
+			<meta-data android:name="androidx.emoji2.text.EmojiCompatInitializer" tools:node="remove" />
+		</provider>
+	</application>
 	<uses-permission android:name="android.permission.CAMERA" />
 	<uses-permission android:name="android.permission.VIBRATE" />
 	<uses-permission android:name="android.permission.NFC" />
