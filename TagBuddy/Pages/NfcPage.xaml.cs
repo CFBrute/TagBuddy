@@ -452,6 +452,61 @@ public partial class NfcPage : ContentPage
         return bytes;
     }
 
+    /// <summary>Writes the pending block edits straight to the gen1a magic tag on the Proxmark's antenna (over USB),
+    /// instead of holding the tag to the phone, then re-reads it to show the result.</summary>
+    private async void OnProxmarkWrite(object? sender, EventArgs e)
+    {
+        if (_segmentWrite is not { } write || write.IsEmpty) return;
+
+        // Each change is a sparse byte?[] (null = leave that byte); merge it over the block as it was read.
+        var original = _last?.Segments?.Data;
+        var blocks = new Dictionary<int, byte[]>();
+        foreach (var (block, patch) in write.Writes)
+        {
+            var orig = original?.GetValueOrDefault(block);
+            var merged = orig is { Length: >= 16 } ? (byte[])orig[..16].Clone() : new byte[16];
+            for (int i = 0; i < 16 && i < patch.Length; i++)
+                if (patch[i] is byte v) merged[i] = v;
+            blocks[block] = merged;
+        }
+        if (blocks.Count == 0) return;
+
+        string list = string.Join("\n", blocks.OrderBy(b => b.Key).Select(b => $"blk {b.Key}: {Hex(b.Value)}"));
+        bool go = await DisplayAlertAsync("Write over USB?",
+            $"Write {blocks.Count} block(s) to the gen1a magic tag on the Proxmark's antenna?\n\n{list}\n\nThis writes through the backdoor and can always be rewritten.",
+            "Write", "Cancel");
+        if (!go) return;
+
+        ProxmarkWriteButton.IsEnabled = false;
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = new ProxmarkUsb();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            if (await usb.MagicWriteBlocksAsync(blocks))
+            {
+                Notice.Show("Written to the tag");
+                var dump = await usb.ReadCardAsync();
+                if (dump is { IsMagic: true })
+                {
+                    var tag = ProxmarkClassic.FromDump(dump.Uid, dump.Atqa, dump.Sak, dump.Blocks, "Proxmark3 (USB)");
+                    NfcReader.ClearClassicKeysFound();
+                    SetMode(write: false);
+                    OnTagRead(tag, fromSaved: false);
+                    TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
+                }
+            }
+            else Notice.Show("Some blocks did not write — see the log");
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally
+        {
+            usb.Log -= AppendProxmarkLog;
+            ProxmarkWriteButton.IsEnabled = true;
+        }
+    }
+
     private void AppendProxmarkLog(string line) => MainThread.BeginInvokeOnMainThread(() =>
         ProxmarkLog.Text = string.IsNullOrEmpty(ProxmarkLog.Text) ? line : ProxmarkLog.Text + "\n" + line);
 
@@ -640,6 +695,7 @@ public partial class NfcPage : ContentPage
         }
 
         _last = tag;
+        ProxmarkWriteButton.IsVisible = false;   // only shown while a block edit is pending in write mode
         if (!fromSaved) Feedback.Tag(ok: true);
 
         WaitingPanel.IsVisible = false;
@@ -1159,6 +1215,7 @@ public partial class NfcPage : ContentPage
     private void ArmWrite(bool updateStatus = true)
     {
         _sealGeneration++;   // an encryption still running for older input must not arm the writer
+        ProxmarkWriteButton.IsVisible = false;   // shown again below only for a pending Classic block write over USB
         switch (WriteType)
         {
             case WriteMode.Erase:
@@ -1256,6 +1313,8 @@ public partial class NfcPage : ContentPage
             _nfc.ArmSegmentWrite(write);
             var target = write.ExpectedId is { } id ? $"tag {id}" : $"any {write.Layout.ChipName}";
             ShowStatus($"Ready. Hold {target} to the back of the phone to write {write.Summary}", ok: true);
+            // Or write it straight over USB to a gen1a magic tag on the Proxmark's antenna.
+            ProxmarkWriteButton.IsVisible = write.Layout.Family == TagFamily.Classic && ProxmarkUsb.IsAttached();
         }
     }
 
