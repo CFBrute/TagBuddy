@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A Proxmark3 enumerates as a USB-CDC serial device with vendor id 0x9AC4 (39620, proxmark.org / RDV4 / the
+     community firmware's signed descriptor) or 0x2D2D (11565, the Proxmark3 Easy, product 0x504D = "PM"). Matching
+     the vendor alone covers every product id that firmware ships. When such a device is plugged in over OTG,
+     Android offers to open Tag Buddy for it (and the person can set it as default). -->
+<resources>
+    <usb-device vendor-id="39620" />
+    <usb-device vendor-id="11565" />
+</resources>

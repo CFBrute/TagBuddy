@@ -15,10 +15,16 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(HelpTopicPage.Route, typeof(HelpTopicPage));
 
 #if ANDROID
+        Routing.RegisterRoute(ProxmarkPage.Route, typeof(ProxmarkPage));
+
         // A private tag Android handed the app: go to the NFC tab, which shows it with the passphrase box. The tag
         // can arrive before the shell has loaded when it started the app.
         NfcReader.Instance.TagDispatched += ShowDispatchedTag;
         Loaded += (_, _) => ShowDispatchedTag();
+
+        // A Proxmark plugged into the phone (Android handed the app a USB-attach intent): open the Proxmark page.
+        ProxmarkUsb.AttachDetected += ShowProxmark;
+        Loaded += (_, _) => ShowProxmark();
 #endif
     }
 
@@ -38,6 +44,14 @@ public partial class AppShell : Shell
         if (!NfcReader.Instance.HasDispatchedTag || !IsLoaded || CurrentPage is NfcPage) return;
         try { await GoToAsync("//nfc"); }
         catch { /* navigation not possible right now; the tag waits for the next visit to the NFC tab */ }
+    }
+
+    private async void ShowProxmark()
+    {
+        if (!ProxmarkUsb.PendingAttach || !IsLoaded || CurrentPage is ProxmarkPage) return;
+        ProxmarkUsb.ClearPending();
+        try { await GoToAsync(ProxmarkPage.Route); }
+        catch { /* navigation not possible right now; the Settings button still opens the page */ }
     }
 #endif
 }
