@@ -463,6 +463,205 @@ public sealed class ProxmarkUsb
     }
 
 
+    // ------------------------------------------------------------------------------------------------ LF (125 kHz)
+    //
+    // EXPERIMENTAL and unverified on a device. LF is not like HF: the phone cannot reach 125 kHz at all, so every
+    // byte here goes through the Proxmark. A read ACQUIREs raw ADC samples into the device's big buffer, downloads
+    // them, and demodulates EM410x (the common door-fob format) on the phone. A write clones an EM410x id onto a
+    // T5577 (the common rewritable LF card). The OLD command ids below are the pre-NG values; if a given firmware
+    // numbers them differently the log will show no ack, which is the signal to adjust them.
+
+    private const ulong CmdLfAcquireRaw125k = 0x0205;     // CMD_ACQUIRE_RAW_ADC_SAMPLES_125K
+    private const ulong CmdLfDownloadRaw125k = 0x0207;    // CMD_DOWNLOAD_RAW_ADC_SAMPLES_125K (request)
+    private const ulong CmdLfDownloadedRaw125k = 0x0208;  // CMD_DOWNLOADED_RAW_ADC_SAMPLES_125K (each reply frame)
+    private const ulong CmdLfT55xxWriteBlock = 0x0219;    // CMD_T55XX_WRITE_BLOCK
+
+    /// <summary>A 125 kHz read: the raw samples captured, and the EM410x id if one demodulated.</summary>
+    public sealed record LfRead(int SampleCount, ulong? Em410xId)
+    {
+        public string? IdHex => Em410xId is { } v ? v.ToString("X10") : null;
+    }
+
+    /// <summary>Captures 125 kHz samples over the Proxmark and tries to read an EM410x id from them. Returns the
+    /// result (id may be null when nothing demodulated), or null if the device did not answer.</summary>
+    public Task<LfRead?> LfReadAsync() => WithLinkAsync(LfRead, null);
+
+    private LfRead? LfRead(Link link)
+    {
+        Say("Acquiring 125 kHz samples (hold the LF tag on the Proxmark's LF antenna)…");
+        Drain(link.Conn, link.In);
+        var acq = OldFrame(CmdLfAcquireRaw125k);
+        if (link.Conn.BulkTransfer(link.Out, acq, acq.Length, 1500) < 0) throw new Java.IO.IOException("the acquire command could not be written");
+        ReadReply(link.Conn, link.In, 3000);   // wait for the acquisition to finish (its ack carries the sample count)
+
+        var samples = DownloadRaw(link, 20000);
+        Say($"Captured {samples.Length} samples.");
+        if (samples.Length < 128)
+        {
+            Say("Too few samples — the LF antenna may not be powered, or the command id differs on this firmware.");
+            return new LfRead(samples.Length, null);
+        }
+
+        var id = DemodEm410x(samples);
+        if (id is { } v) Say($"EM410x id: {v:X10}");
+        else Say("No EM410x id decoded. The tag may be another LF format (HID, Indala…) or not coupled.");
+        return new LfRead(samples.Length, id);
+    }
+
+    /// <summary>Downloads up to <paramref name="maxBytes"/> of the device's captured sample buffer, one OLD frame at a
+    /// time (each carries an offset, a length and up to 512 bytes of samples).</summary>
+    private byte[] DownloadRaw(Link link, int maxBytes)
+    {
+        var outp = new List<byte>(maxBytes);
+        Drain(link.Conn, link.In);
+        var req = OldFrame(CmdLfDownloadRaw125k, 0, (ulong)maxBytes);
+        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1000) < 0) throw new Java.IO.IOException("the download command could not be written");
+
+        while (outp.Count < maxBytes)
+        {
+            var f = ReadReply(link.Conn, link.In, 1500);
+            if (f.Length < 32) break;
+            ulong cmd = BitConverter.ToUInt64(f, 0);
+            if (cmd != CmdLfDownloadedRaw125k) break;   // a non-sample frame (e.g. a final ack): the stream is done
+            ulong len = BitConverter.ToUInt64(f, 16);
+            int n = Math.Min(Math.Min((int)len, f.Length - 32), 512);
+            if (n <= 0) break;
+            for (int i = 0; i < n; i++) outp.Add(f[32 + i]);
+        }
+        return outp.ToArray();
+    }
+
+    /// <summary>Best-effort EM410x demodulation of raw 125 kHz samples: centre the signal, find the half-bit length
+    /// from the shortest run, sample to bits, Manchester-decode, then locate the 64-bit EM410x frame (9-bit header,
+    /// 10 rows of 4 data + row parity, 4 column parities, stop bit) and return its 40-bit id. Null if none is found.</summary>
+    private static ulong? DemodEm410x(byte[] samples)
+    {
+        int n = samples.Length;
+        // Samples are unsigned ADC bytes around a DC level; centre on the mean so a simple sign gives the bit level.
+        double mean = 0; for (int i = 0; i < n; i++) mean += samples[i]; mean /= n;
+        var hi = new bool[n];
+        for (int i = 0; i < n; i++) hi[i] = samples[i] >= mean;
+
+        // The shortest run of a constant level is one half-bit; EM410x is Manchester, so a bit is two half-bits.
+        int shortest = int.MaxValue, run = 1;
+        for (int i = 1; i < n; i++)
+        {
+            if (hi[i] == hi[i - 1]) run++;
+            else { if (run >= 3 && run < shortest) shortest = run; run = 1; }
+        }
+        if (shortest is int.MaxValue or < 3) return null;
+        int half = shortest;                 // samples per half-bit
+
+        // Sample the level at the centre of each half-bit across the capture.
+        var bits = new List<bool>(n / half + 1);
+        for (int i = half / 2; i < n; i += half) bits.Add(hi[i]);
+
+        // Manchester: each bit is a 01 or 10 pair of half-bits. Try both phase alignments and look for a valid frame.
+        for (int phase = 0; phase < 2; phase++)
+        {
+            var decoded = new List<int>(bits.Count / 2);
+            bool ok = true;
+            for (int i = phase; i + 1 < bits.Count; i += 2)
+            {
+                if (!bits[i] && bits[i + 1]) decoded.Add(0);
+                else if (bits[i] && !bits[i + 1]) decoded.Add(1);
+                else { ok = false; break; }   // 00 or 11: a glitch or wrong phase
+            }
+            if (ok && Em410xFromBits(decoded) is { } id) return id;
+        }
+        return null;
+    }
+
+    /// <summary>Finds the EM410x frame in a run of decoded bits and returns its 40-bit id, checking the row and
+    /// column parities. Null when no valid frame is present.</summary>
+    private static ulong? Em410xFromBits(List<int> b)
+    {
+        // Slide a 64-bit window looking for the 9-bit all-ones header.
+        for (int s = 0; s + 64 <= b.Count; s++)
+        {
+            bool header = true;
+            for (int i = 0; i < 9; i++) if (b[s + i] != 1) { header = false; break; }
+            if (!header) continue;
+
+            ulong id = 0;
+            var cols = new int[4];
+            bool good = true;
+            int p = s + 9;
+            for (int row = 0; row < 10 && good; row++)
+            {
+                int parity = 0;
+                for (int c = 0; c < 4; c++)
+                {
+                    int bit = b[p++];
+                    parity ^= bit;
+                    cols[c] ^= bit;
+                    id = (id << 1) | (ulong)bit;
+                }
+                if (b[p++] != parity) good = false;   // row parity (even)
+            }
+            if (!good) continue;
+            bool colsOk = true;
+            for (int c = 0; c < 4; c++) if (b[p++] != cols[c]) { colsOk = false; break; }
+            if (colsOk && b[p] == 0) return id;        // trailing stop bit is 0
+        }
+        return null;
+    }
+
+    /// <summary>Clones an EM410x id onto a T5577 card on the LF antenna: writes the EM config block and the two data
+    /// blocks that hold the encoded id. No password and no lock bits are set, so the card can always be rewritten.
+    /// Returns true if every block was acknowledged.</summary>
+    public Task<bool> LfWriteEm410xAsync(ulong id40) => WithLinkAsync(link => LfWriteEm410x(link, id40), false);
+
+    private bool LfWriteEm410x(Link link, ulong id40)
+    {
+        var (config, b1, b2) = EncodeEm410xT55xx(id40);
+        Say($"Writing EM410x {id40 & 0xFFFFFFFFFF:X10} to a T5577 (config {config:X8}, data {b1:X8} {b2:X8})…");
+        bool ok = T55xxWrite(link, 0, config) && T55xxWrite(link, 1, b1) && T55xxWrite(link, 2, b2);
+        Say(ok ? "All three blocks acknowledged. Re-read the card to confirm the id." : "A block was not acknowledged — see above.");
+        return ok;
+    }
+
+    private bool T55xxWrite(Link link, int block, uint data)
+    {
+        Drain(link.Conn, link.In);
+        // OLD T55xx write: arg0 = data, arg1 = block, arg2 = password (0, and no password flag set).
+        var req = OldFrame(CmdLfT55xxWriteBlock, data, (ulong)block, 0);
+        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1500) < 0) throw new Java.IO.IOException("the T55xx write could not be written");
+        var reply = ReadReply(link.Conn, link.In, 2000);
+        // The firmware does not always ack a T55xx write; treat any reply, or none, as "sent" and rely on a re-read.
+        ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
+        Say($"blk {block}: sent (reply cmd 0x{cmd:X}).");
+        return true;
+    }
+
+    /// <summary>Encodes a 40-bit EM410x id into the T5577 config word and two 32-bit data blocks: the 64-bit EM410x
+    /// frame (9-bit header, row/column parities, stop bit) split across blocks 1 and 2, with the standard EM config
+    /// (ASK, Manchester, RF/64, two data blocks).</summary>
+    private static (uint Config, uint Block1, uint Block2) EncodeEm410xT55xx(ulong id40)
+    {
+        ulong frame = 0;
+        for (int i = 0; i < 9; i++) frame = (frame << 1) | 1;   // 9-bit header of ones
+        var cols = new int[4];
+        for (int row = 0; row < 10; row++)
+        {
+            int nibble = (int)((id40 >> ((9 - row) * 4)) & 0xF);
+            int parity = 0;
+            for (int bit = 3; bit >= 0; bit--)
+            {
+                int v = (nibble >> bit) & 1;
+                parity ^= v;
+                cols[3 - bit] ^= v;
+                frame = (frame << 1) | (ulong)v;
+            }
+            frame = (frame << 1) | (ulong)parity;   // even row parity
+        }
+        for (int c = 0; c < 4; c++) frame = (frame << 1) | (ulong)cols[c];   // column parities
+        frame <<= 1;                                 // stop bit 0
+
+        const uint config = 0x00148040;              // EM410x: ASK, Manchester, RF/64, 2 data blocks
+        return (config, (uint)(frame >> 32), (uint)(frame & 0xFFFFFFFF));
+    }
+
     /// <summary>An open, claimed, CDC-configured connection to the Proxmark; releasing it on dispose.</summary>
     private sealed class Link(UsbDeviceConnection conn, UsbEndpoint epIn, UsbEndpoint epOut, UsbInterface data, UsbInterface? comm) : IDisposable
     {

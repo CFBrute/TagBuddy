@@ -323,6 +323,7 @@ public partial class NfcPage : ContentPage
             ProxmarkDot.Color = ProxmarkBusy;
             ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
             ProxmarkReadButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
+            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfResult.IsVisible = false;
             return;
         }
         if (known && !_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true, allowAny: false);
@@ -360,6 +361,8 @@ public partial class NfcPage : ContentPage
         ProxmarkReadButton.IsVisible = ok;
         ProxmarkMagicRow.IsVisible = ok;
         ProxmarkInfoButton.IsVisible = ok;
+        ProxmarkLfReadButton.IsVisible = ok;
+        ProxmarkLfWriteButton.IsVisible = ok;
         ProxmarkTryForeignButton.IsVisible = !ok && ProxmarkUsb.ForeignUsbPresent();
         if (!ok) ProxmarkLog.IsVisible = true;
         ProxmarkProbeButton.IsEnabled = ProxmarkUsb.IsAttached();
@@ -371,6 +374,60 @@ public partial class NfcPage : ContentPage
     /// <summary>The "try the connected USB device" button: verify whatever serial-like device is plugged in, even if
     /// its vendor id is not one we recognise (a Proxmark clone, or an unusual board).</summary>
     private void OnProxmarkTryForeign(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false, allowAny: true);
+
+    /// <summary>The "Read LF" button: capture 125 kHz and show the EM410x id if one decodes — the data the phone's own
+    /// radio can never reach. Displayed in the log and, when an id is found, on its own line like a tag's identity.</summary>
+    private async void OnProxmarkLfRead(object? sender, EventArgs e)
+    {
+        ProxmarkLfReadButton.IsEnabled = false;
+        ProxmarkLfResult.IsVisible = false;
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = NewProxmark();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            var read = await usb.LfReadAsync();
+            if (read?.IdHex is { } hex)
+            {
+                ProxmarkLfResult.Text = $"LF tag (EM410x)  ·  id {hex}  ·  via Proxmark";
+                ProxmarkLfResult.IsVisible = true;
+                ProxmarkStatus.Text = $"Read an EM410x LF tag: {hex}.";
+            }
+            else if (read is not null)
+                ProxmarkStatus.Text = "LF captured, but no EM410x id decoded — see the log.";
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally { usb.Log -= AppendProxmarkLog; ProxmarkLfReadButton.IsEnabled = true; }
+    }
+
+    /// <summary>The "Write LF" button: clone a typed EM410x id onto a T5577 card on the Proxmark's LF antenna.</summary>
+    private async void OnProxmarkLfWrite(object? sender, EventArgs e)
+    {
+        string? input = await DisplayPromptAsync("Write LF (EM410x)",
+            "Enter a 10-hex-digit EM410x id to clone onto a T5577 card on the Proxmark's LF antenna.",
+            accept: "Next", cancel: "Cancel", placeholder: "e.g. 1A2B3C4D5E", maxLength: 14, keyboard: Keyboard.Plain);
+        if (string.IsNullOrWhiteSpace(input)) return;
+
+        var hex = new string(input.Where(Uri.IsHexDigit).ToArray());
+        if (hex.Length != 10 || !ulong.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var id))
+        {
+            await DisplayAlertAsync("Not a valid id", "An EM410x id is 10 hex digits (40 bits), e.g. 1A2B3C4D5E.", "OK");
+            return;
+        }
+        if (!await DisplayAlertAsync("Clone onto a T5577?",
+            $"Write EM410x id {hex.ToUpperInvariant()} to a T5577 card on the LF antenna? No password or lock bits are set, so it can be rewritten later.",
+            "Write", "Cancel")) return;
+
+        ProxmarkLfWriteButton.IsEnabled = false;
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = NewProxmark();
+        usb.Log += AppendProxmarkLog;
+        try { await usb.LfWriteEm410xAsync(id); }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally { usb.Log -= AppendProxmarkLog; ProxmarkLfWriteButton.IsEnabled = true; }
+    }
 
     /// <summary>The "Device info" button: show the firmware banner and whether the newer (NG) protocol is supported.</summary>
     private async void OnProxmarkInfo(object? sender, EventArgs e)
