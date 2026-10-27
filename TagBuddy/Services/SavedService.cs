@@ -232,27 +232,31 @@ public class SavedService
     /// laid end to end, the same bytes a saved read keeps as its .bin.</summary>
     public static byte[] TagBytes(NfcTagInfo tag) => tag.RawMemory ?? ReadImage(tag);
 
-    /// <summary>After reading a tag, the saved read of that same tag (serial) to offer updating: null when it is not
-    /// saved, or a saved copy already matches what was read (nothing to update). When several copies differ, the most
-    /// recent is returned.</summary>
-    public async Task<SavedItem?> OutdatedReadAsync(NfcTagInfo tag)
+    /// <summary>How a just-read tag stands against what is saved.</summary>
+    public enum SavedMatch { NotSaved, Same, Changed }
+
+    /// <summary>Compares a just-read tag to the saved reads of the same tag (serial): <see cref="SavedMatch.NotSaved"/>
+    /// (no saved copy) with no item, <see cref="SavedMatch.Same"/> with the matching copy, or <see cref="SavedMatch.Changed"/>
+    /// with the most recent differing copy. A match wins over a difference, so a tag with several saved copies that
+    /// includes an exact one reads as Same.</summary>
+    public async Task<(SavedMatch Kind, SavedItem? Item)> SavedStatusAsync(NfcTagInfo tag)
     {
-        if (string.IsNullOrEmpty(tag.Id)) return null;
+        if (string.IsNullOrEmpty(tag.Id)) return (SavedMatch.NotSaved, null);
         await LoadAsync();
         var current = TagBytes(tag);
-        if (current.Length == 0) return null;
+        if (current.Length == 0) return (SavedMatch.NotSaved, null);
         var saved = Items.Where(i => i.HasRead && string.Equals(i.DumpSerial, tag.Id, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (saved.Count == 0) return null;
+        if (saved.Count == 0) return (SavedMatch.NotSaved, null);
 
         SavedItem? newest = null;
         foreach (var item in saved)
         {
             byte[] bytes;
             try { bytes = await ReadDumpAsync(item); } catch { continue; }
-            if (bytes.AsSpan().SequenceEqual(current)) return null;   // a saved copy is already up to date
+            if (bytes.AsSpan().SequenceEqual(current)) return (SavedMatch.Same, item);   // an exact saved copy
             if (newest is null || item.SortTime > newest.SortTime) newest = item;
         }
-        return newest;
+        return newest is null ? (SavedMatch.NotSaved, null) : (SavedMatch.Changed, newest);
     }
 
     /// <summary>Replaces a saved read's memory and read file with a tag just read (the same tag): keeps the saved copy

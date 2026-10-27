@@ -99,6 +99,10 @@ public sealed record SegmentRead(SegmentLayout Layout, IReadOnlyDictionary<int, 
     /// <summary>MIFARE Classic sectors a known key opened (a public default, one entered or remembered, or one from the
     /// dictionary). Knowing a sector's key is what lets the editor give it a new one.</summary>
     public IReadOnlySet<int> OpenedSectors { get; init; } = new HashSet<int>();
+
+    /// <summary>The key that opened each MIFARE Classic sector, and whether it worked as key B (else key A). The chip
+    /// returns 00 for the keys on a read, so the editor shows these in the trailer instead — the key actually used.</summary>
+    public IReadOnlyDictionary<int, (byte[] Key, bool KeyB)> SectorKeys { get; init; } = new Dictionary<int, (byte[], bool)>();
 }
 
 /// <summary>A change to a MIFARE Classic sector's trailer: a new key A, a new key B, new rules, or a mix; null for a
@@ -119,6 +123,11 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
     /// <summary>MIFARE Classic sectors whose trailer is to change (a new key, new rules, or both), after their data is
     /// written. A sector takes a change when a known key opens it; what is not changed is kept as it is.</summary>
     public IReadOnlyDictionary<int, SectorChange> Sectors { get; init; } = new Dictionary<int, SectorChange>();
+
+    /// <summary>Block 0 (the manufacturer/UID block) may be written: the editor unlocked it by hand for a magic/clone
+    /// card. Without this it is refused like any serial block; with it, the write attempts it and reports what the card
+    /// does (a normal card still refuses it).</summary>
+    public bool AllowBlockZero { get; init; }
 
     public bool IsEmpty => Writes.Count == 0 && Sectors.Count == 0;
 
@@ -187,6 +196,13 @@ public sealed record SegmentWrite(SegmentLayout Layout, string? ExpectedId, IRea
 public sealed record SegmentWriteRecord(string TagId, SegmentLayout Layout, IReadOnlyDictionary<int, byte[]> Before,
     IReadOnlyDictionary<int, byte[]> After)
 {
+    /// <summary>MIFARE Classic sectors whose key was changed by this write (no data-block bytes to undo). Lets the page
+    /// settle a key-only change and describe it, and tells it apart from a data write for the tag's undo history.</summary>
+    public IReadOnlyList<int> KeySectors { get; init; } = [];
+
+    /// <summary>True when the write only changed sector keys (no data blocks), so there is nothing to undo byte-wise.</summary>
+    public bool KeysOnly => Before.Count == 0 && KeySectors.Count > 0;
+
     /// <summary>The tag's serial once the write is on it: <see cref="TagId"/>, unless the write gave a MIFARE Classic
     /// magic card a new UID in block 0 (its first 4 or 7 bytes, as long as the serial it had).</summary>
     public string IdAfter
@@ -209,8 +225,10 @@ public sealed record SegmentWriteRecord(string TagId, SegmentLayout Layout, IRea
     /// <summary>Writes the same change again, after it was undone.</summary>
     public SegmentWrite RedoWrite => new(Layout, TagId, Whole(After));
 
-    /// <summary>"pages 5-6": which segments the write changed.</summary>
-    public string Segments => $"{Layout.Noun}{(Before.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Before.Keys.Order().ToList())}";
+    /// <summary>"pages 5-6": which segments the write changed, or the sectors whose keys it changed.</summary>
+    public string Segments => Before.Count == 0 && KeySectors.Count > 0
+        ? $"the key{(KeySectors.Count == 1 ? "" : "s")} of sector{(KeySectors.Count == 1 ? "" : "s")} {Type2Memory.Ranges(KeySectors.ToList())}"
+        : $"{Layout.Noun}{(Before.Count == 1 ? "" : "s")} {Type2Memory.Ranges(Before.Keys.Order().ToList())}";
 
     private static Dictionary<int, byte?[]> Whole(IReadOnlyDictionary<int, byte[]> bytes) =>
         bytes.ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray());
@@ -266,16 +284,31 @@ public sealed class TagEdit
     public bool InText { get; private set; }
 
     private TagEdit(SegmentLayout layout, Dictionary<int, byte?[]> original, Dictionary<int, string> blocked, bool fromRead,
-        IEnumerable<int>? openedSectors = null)
+        IEnumerable<int>? openedSectors = null, IReadOnlyDictionary<int, (byte[] Key, bool KeyB)>? sectorKeys = null)
     {
         Layout = layout;
         _original = original;
         _blocked = blocked;
         _openedSectors = [.. openedSectors ?? []];
         FromRead = fromRead;
+        SeedSectorKeys(sectorKeys);
         From = layout.FirstWritable;
         To = layout.Count > 0 || layout.Family != TagFamily.Iso15693 ? layout.LastWritable : layout.FirstWritable + 15;
         RecomputeSegments();
+    }
+
+    /// <summary>Writes the key that opened each sector into its trailer, where the read had 00, so the grid shows the
+    /// real key A/B. These are read values, not edits (they do not count as a change, and are kept on a reset).</summary>
+    private void SeedSectorKeys(IReadOnlyDictionary<int, (byte[] Key, bool KeyB)>? sectorKeys)
+    {
+        if (sectorKeys is null || Layout.Family != TagFamily.Classic) return;
+        foreach (var (sector, found) in sectorKeys)
+        {
+            if (found.Key is not { Length: 6 } key) continue;
+            if (!_original.TryGetValue(TrailerOf(sector), out var row) || row.Length < 16) continue;
+            int at = found.KeyB ? 10 : 0;   // key A is bytes 0-5, key B is bytes 10-15
+            for (int i = 0; i < 6; i++) row[at + i] = key[i];
+        }
     }
 
     /// <summary>An edit of the tag just read, expecting that same tag (its serial and chip).</summary>
@@ -283,7 +316,7 @@ public sealed class TagEdit
         new(read.Layout,
             read.Data.Where(p => p.Value.Length == read.Layout.SegmentSize)
                      .ToDictionary(p => p.Key, p => p.Value.Select(b => (byte?)b).ToArray()),
-            read.Blocked.ToDictionary(p => p.Key, p => p.Value), fromRead: true, read.OpenedSectors)
+            read.Blocked.ToDictionary(p => p.Key, p => p.Value), fromRead: true, read.OpenedSectors, read.SectorKeys)
         { ExpectedId = id };
 
     /// <summary>An empty edit for a tag type chosen by hand: every byte unknown, nothing written until typed.</summary>
@@ -417,7 +450,11 @@ public sealed class TagEdit
         Segments.Where(s => !IsTrailerSeg(s) && _edits.TryGetValue(s, out var e) && e.Any(b => b is not null))
                 .ToDictionary(s => s, s => _edits[s].ToArray());
 
-    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes) { Sectors = Sectors.ToDictionary(p => p.Key, p => p.Value) };
+    public SegmentWrite ToWrite() => new(Layout, ExpectedId, Changes)
+    {
+        Sectors = Sectors.ToDictionary(p => p.Key, p => p.Value),
+        AllowBlockZero = AllowBlockZero,
+    };
 
     /// <summary>Whether anything would be written: typed data bytes, or a sector's new key(s) or rules.</summary>
     public bool HasChanges => Changes.Count > 0 || Sectors.Count > 0;
@@ -546,13 +583,24 @@ public sealed class TagEdit
 
     /// <summary>After the tag took a sector's trailer change: clear its pending rules and key edits (the key is known,
     /// so it can be changed again).</summary>
+    /// <summary>Settles a sector's written key change: the typed key A/B bytes become the sector's new baseline (so the
+    /// trailer shows the new key as read, not as a pending edit) and the pending change is cleared. Like
+    /// <see cref="Commit"/> for data blocks, but for the key bytes, which the write path sends — never the data path.</summary>
     public void SectorChanged(int sector)
     {
         _sectorRules.Remove(sector);
         int trailer = TrailerOf(sector);
         if (_edits.TryGetValue(trailer, out var e))
         {
-            for (int i = 0; i < 6; i++) { e[i] = null; e[10 + i] = null; }
+            var original = _original.TryGetValue(trailer, out var o) ? o : new byte?[Layout.SegmentSize];
+            for (int i = 0; i < 6; i++)
+            {
+                if (e[i] is { } a) original[i] = a;             // the new key A is now what the sector holds
+                if (e[10 + i] is { } b) original[10 + i] = b;   // and the new key B
+                e[i] = null;
+                e[10 + i] = null;
+            }
+            _original[trailer] = original;
             if (e.All(b => b is null)) _edits.Remove(trailer);
         }
     }

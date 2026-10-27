@@ -396,6 +396,40 @@ public class TagEditTests
     }
 
     [Fact]
+    public void A_key_only_write_record_is_marked_keys_only_and_describes_its_sectors()
+    {
+        var layout = SegmentLayout.Known.First(l => l.ChipName == "MIFARE Classic 1K");
+        var keysOnly = new SegmentWriteRecord("04", layout, new Dictionary<int, byte[]>(), new Dictionary<int, byte[]>())
+            { KeySectors = [0, 1] };
+        Assert.True(keysOnly.KeysOnly);
+        Assert.Equal("the keys of sectors 0-1", keysOnly.Segments);
+
+        var dataWrite = new SegmentWriteRecord("04", layout,
+            new Dictionary<int, byte[]> { [4] = new byte[16] }, new Dictionary<int, byte[]> { [4] = new byte[16] });
+        Assert.False(dataWrite.KeysOnly);
+    }
+
+    [Fact]
+    public void The_key_that_opened_a_sector_is_shown_in_its_trailer()
+    {
+        var data = Enumerable.Range(0, 64).ToDictionary(b => b, _ => new byte[16]);   // trailer keys read back as 00
+        byte[] keyA = [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5];
+        byte[] keyB = [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5];
+        var read = new SegmentRead(Classic1K, data, new Dictionary<int, string>())
+        {
+            OpenedSectors = new HashSet<int> { 1, 2 },
+            SectorKeys = new Dictionary<int, (byte[] Key, bool KeyB)> { [1] = (keyA, false), [2] = (keyB, true) },
+        };
+        var edit = TagEdit.FromTag(read, "04");
+
+        for (int i = 0; i < 6; i++) Assert.Equal(keyA[i], edit.ValueAt(7, i));       // sector 1 opened with key A -> bytes 0-5
+        for (int i = 10; i < 16; i++) Assert.Equal((byte)0, edit.ValueAt(7, i));     // its key B unknown, stays 00
+        for (int i = 0; i < 6; i++) Assert.Equal((byte)0, edit.ValueAt(11, i));      // sector 2 opened with key B: key A stays 00
+        for (int i = 10; i < 16; i++) Assert.Equal(keyB[i - 10], edit.ValueAt(11, i));
+        Assert.False(edit.HasChanges);                                               // seeded keys are read values, not edits
+    }
+
+    [Fact]
     public void A_sector_the_read_opened_can_take_a_new_key()
     {
         var data = Enumerable.Range(0, 64).ToDictionary(b => b, _ => new byte[16]);
@@ -421,6 +455,13 @@ public class TagEditTests
         edit.SectorChanged(1);
         Assert.True(edit.CanChangeKey(1));                      // the new key is known too, so it can be changed again
         Assert.Empty(edit.Sectors);
+        Assert.False(edit.HasChanges);                          // the write settled: nothing pending
+        for (int i = 0; i < 6; i++)
+        {
+            Assert.Equal(key[i], edit.ValueAt(7, i));           // the new key A is the trailer's baseline now (block 7)
+            Assert.Equal(key[i], edit.ValueAt(7, 10 + i));      // and key B
+            Assert.False(edit.IsEdited(7, i));                  // shown as read, not as a pending edit
+        }
     }
 
     [Fact]

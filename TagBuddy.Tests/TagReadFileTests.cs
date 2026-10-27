@@ -12,7 +12,14 @@ public class TagReadFileTests
         var read = new SegmentRead(layout,
             new Dictionary<int, byte[]> { [1] = [1, 2, 3], [4] = [4] },
             new Dictionary<int, string> { [8] = "is in a sector no known key opened" })
-            { OpenedSectors = new HashSet<int> { 0, 1 } };
+            {
+                OpenedSectors = new HashSet<int> { 0, 1 },
+                SectorKeys = new Dictionary<int, (byte[] Key, bool KeyB)>
+                {
+                    [0] = ([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], false),
+                    [1] = ([0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5], true),
+                },
+            };
         var tag = new NfcTagInfo("04:A1:B2", ["NfcA", "MifareClassic"],
             [("Chip", "MIFARE Classic 1K, 16 sectors"), ("Access", "2 of 16 sectors opened")],
             [new NfcRecordInfo("Text (en)", "hello"), new NfcRecordInfo("Private text", "Encrypted", [9, 9, 9])],
@@ -31,6 +38,10 @@ public class TagReadFileTests
         Assert.Equal(new byte[] { 1, 2, 3 }, back.Segments.Data[1]);
         Assert.Equal("is in a sector no known key opened", back.Segments.Blocked[8]);
         Assert.Equal(new HashSet<int> { 0, 1 }, back.Segments.OpenedSectors);
+        Assert.Equal(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, back.Segments.SectorKeys[0].Key);
+        Assert.False(back.Segments.SectorKeys[0].KeyB);
+        Assert.Equal(new byte[] { 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5 }, back.Segments.SectorKeys[1].Key);
+        Assert.True(back.Segments.SectorKeys[1].KeyB);
     }
 
     [Fact]

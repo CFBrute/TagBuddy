@@ -22,6 +22,24 @@ public class MifareKeyStoreTests : IDisposable
     }
 
     [Fact]
+    public void Used_keys_are_listed_newest_first_and_a_reuse_moves_it_up()
+    {
+        _store.MarkUsed(["FFFFFFFFFFFF", "a0a1a2a3a4a5"]);   // mixed case: stored upper
+        System.Threading.Thread.Sleep(1100);                 // the store keeps whole-second times
+        _store.MarkUsed(["112233445566"]);
+
+        var used = _store.UsedKeys();
+        Assert.Equal("112233445566", used[0].Hex);           // the most recent is first
+        Assert.Equal(["112233445566", "A0A1A2A3A4A5", "FFFFFFFFFFFF"], used.Select(k => k.Hex).Order());  // all three, upper-cased
+
+        System.Threading.Thread.Sleep(1100);
+        _store.MarkUsed(["ffffffffffff"]);                   // reusing an old key brings it to the front, no duplicate
+        var after = _store.UsedKeys();
+        Assert.Equal("FFFFFFFFFFFF", after[0].Hex);
+        Assert.Equal(3, after.Count);
+    }
+
+    [Fact]
     public void ParseKeys_reads_keys_and_ignores_comments_separators_and_junk()
     {
         var text = """
