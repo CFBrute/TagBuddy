@@ -301,6 +301,20 @@ public partial class NfcPage : ContentPage
         return usb;
     }
 
+    /// <summary>Runs a Proxmark action with the connection log wired up: clears and shows the log, feeds the device's
+    /// lines into it, and reports any error there too. The caller keeps its own button state; because this swallows
+    /// exceptions, code the caller runs after awaiting it always runs (so a re-enable there is as good as a finally).</summary>
+    private async Task WithProxmarkLog(Func<ProxmarkUsb, Task> action)
+    {
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = NewProxmark();
+        usb.Log += AppendProxmarkLog;
+        try { await action(usb); }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally { usb.Log -= AppendProxmarkLog; }
+    }
+
     // Status light: orange while checking, green when the link is confirmed, red when it fails.
     private static readonly Color ProxmarkBusy = Color.FromArgb("#F59E0B");
     private static readonly Color ProxmarkOk = Color.FromArgb("#22C55E");
@@ -381,11 +395,7 @@ public partial class NfcPage : ContentPage
     {
         ProxmarkLfReadButton.IsEnabled = false;
         ProxmarkLfResult.IsVisible = false;
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             var read = await usb.LfReadAsync();
             if (read?.IdHex is { } hex)
@@ -396,9 +406,8 @@ public partial class NfcPage : ContentPage
             }
             else if (read is not null)
                 ProxmarkStatus.Text = "LF captured, but no EM410x id decoded — see the log.";
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally { usb.Log -= AppendProxmarkLog; ProxmarkLfReadButton.IsEnabled = true; }
+        });
+        ProxmarkLfReadButton.IsEnabled = true;
     }
 
     /// <summary>The "Write LF" button: clone a typed EM410x id onto a T5577 card on the Proxmark's LF antenna.</summary>
@@ -420,32 +429,22 @@ public partial class NfcPage : ContentPage
             "Write", "Cancel")) return;
 
         ProxmarkLfWriteButton.IsEnabled = false;
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try { await usb.LfWriteEm410xAsync(id); }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally { usb.Log -= AppendProxmarkLog; ProxmarkLfWriteButton.IsEnabled = true; }
+        await WithProxmarkLog(usb => usb.LfWriteEm410xAsync(id));
+        ProxmarkLfWriteButton.IsEnabled = true;
     }
 
     /// <summary>The "Device info" button: show the firmware banner and whether the newer (NG) protocol is supported.</summary>
     private async void OnProxmarkInfo(object? sender, EventArgs e)
     {
         ProxmarkInfoButton.IsEnabled = false;
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             if (await usb.DeviceInfoAsync())
                 ProxmarkStatus.Text = usb.SpeaksNg
                     ? "Modern firmware (supports the newer NG protocol). Connected."
                     : "Older firmware (OLD protocol only, which the app speaks). Connected.";
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally { usb.Log -= AppendProxmarkLog; ProxmarkInfoButton.IsEnabled = true; }
+        });
+        ProxmarkInfoButton.IsEnabled = true;
     }
 
     /// <summary>Reads the card on the Proxmark's antenna — a full backdoor dump for a gen1a magic card, its identity
@@ -453,11 +452,7 @@ public partial class NfcPage : ContentPage
     private async void OnProxmarkRead(object? sender, EventArgs e)
     {
         ProxmarkReadButton.IsEnabled = false;
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             var dump = await usb.ReadCardAsync();
             if (dump is not null)
@@ -469,13 +464,8 @@ public partial class NfcPage : ContentPage
                 OnTagRead(tag, fromSaved: false);
                 TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
             }
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally
-        {
-            usb.Log -= AppendProxmarkLog;
-            ProxmarkReadButton.IsEnabled = ProxmarkUsb.IsAttached();
-        }
+        });
+        ProxmarkReadButton.IsEnabled = ProxmarkUsb.IsAttached();
     }
 
     // The last block 0 read from a magic card, so "Set UID" can keep its SAK/ATQA/manufacturer bytes.
@@ -484,12 +474,8 @@ public partial class NfcPage : ContentPage
     /// <summary>Reads block 0 of a gen1a magic card through the backdoor and shows it decoded.</summary>
     private async void OnProxmarkReadBlock0(object? sender, EventArgs e)
     {
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
         ProxmarkReadBlock0Button.IsEnabled = false;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             var block = await usb.MagicReadBlockAsync(0);
             if (block is { Length: 16 })
@@ -499,13 +485,8 @@ public partial class NfcPage : ContentPage
                 AppendProxmarkLog($"UID {Hex(block[..4])}  ·  BCC {block[4]:X2}  ·  SAK {block[5]:X2}  ·  ATQA {Hex(block[6..8])}");
                 ProxmarkSetUidButton.IsEnabled = true;
             }
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally
-        {
-            usb.Log -= AppendProxmarkLog;
-            ProxmarkReadBlock0Button.IsEnabled = ProxmarkUsb.IsAttached();
-        }
+        });
+        ProxmarkReadBlock0Button.IsEnabled = ProxmarkUsb.IsAttached();
     }
 
     /// <summary>Asks for a new 4-byte UID, keeps the rest of block 0, computes the BCC, writes it and verifies.</summary>
@@ -530,12 +511,8 @@ public partial class NfcPage : ContentPage
             "Write", "Cancel");
         if (!go) return;
 
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
         ProxmarkSetUidButton.IsEnabled = false;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             var written = await usb.MagicWriteBlockAsync(0, block);
             if (written is { Length: 16 })
@@ -544,13 +521,8 @@ public partial class NfcPage : ContentPage
                 AppendProxmarkLog($"✓ Written and verified. Block 0: {Hex(written)}");
                 AppendProxmarkLog($"UID is now {Hex(written[..4])}.");
             }
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally
-        {
-            usb.Log -= AppendProxmarkLog;
-            ProxmarkSetUidButton.IsEnabled = ProxmarkUsb.IsAttached();
-        }
+        });
+        ProxmarkSetUidButton.IsEnabled = ProxmarkUsb.IsAttached();
     }
 
     private static string Hex(byte[] b) => string.Join(" ", b.Select(x => x.ToString("X2")));
@@ -591,11 +563,7 @@ public partial class NfcPage : ContentPage
         if (!go) return;
 
         ProxmarkWriteButton.IsEnabled = false;
-        ProxmarkLog.Text = "";
-        ProxmarkLog.IsVisible = true;
-        var usb = NewProxmark();
-        usb.Log += AppendProxmarkLog;
-        try
+        await WithProxmarkLog(async usb =>
         {
             if (await usb.MagicWriteBlocksAsync(blocks))
             {
@@ -611,13 +579,8 @@ public partial class NfcPage : ContentPage
                 }
             }
             else Notice.Show("Some blocks did not write — see the log");
-        }
-        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
-        finally
-        {
-            usb.Log -= AppendProxmarkLog;
-            ProxmarkWriteButton.IsEnabled = true;
-        }
+        });
+        ProxmarkWriteButton.IsEnabled = true;
     }
 
     private void AppendProxmarkLog(string line) => MainThread.BeginInvokeOnMainThread(() =>
