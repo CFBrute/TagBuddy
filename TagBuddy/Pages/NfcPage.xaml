@@ -37,14 +37,22 @@
                     <Label Text="Proxmark on USB" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
                 </HorizontalStackLayout>
                 <Label x:Name="ProxmarkStatus" FontSize="12" TextColor="Gray" />
-                <HorizontalStackLayout Spacing="8">
+                <!-- Offered when a USB device is connected that is not a recognised Proxmark (a clone, or an unusual
+                     descriptor): the person can still try talking to it. -->
+                <Button x:Name="ProxmarkTryForeignButton" Text="Try the connected USB device" Clicked="OnProxmarkTryForeign" IsVisible="False"
+                        BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                        Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                <FlexLayout Wrap="Wrap" JustifyContent="Start" AlignItems="Center">
                     <Button x:Name="ProxmarkReadButton" Text="Read tag" Clicked="OnProxmarkRead" IsVisible="False"
                             BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
-                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkInfoButton" Text="Device info" Clicked="OnProxmarkInfo" IsVisible="False"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                     <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
                             BackgroundColor="#6B7280" TextColor="White"
-                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                </HorizontalStackLayout>
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                </FlexLayout>
 
                 <!-- Magic (gen1a) UID tools, shown once the link is verified. Block 0 holds the UID. -->
                 <HorizontalStackLayout x:Name="ProxmarkMagicRow" Spacing="8" IsVisible="False">

@@ -77,6 +77,52 @@ public sealed class ProxmarkUsb
     /// <summary>True when something that looks like a Proxmark is plugged in right now.</summary>
     public static bool IsAttached() => Attached() is not null;
 
+    /// <summary>Any connected USB device that looks like it could be a serial port (has a bulk IN/OUT pair), preferring
+    /// a real Proxmark by vendor id. Used by the "try the connected device anyway" path, for a Proxmark clone or a
+    /// board that enumerates under a vendor id we do not list.</summary>
+    public static UsbDevice? AnyUsbCandidate()
+    {
+        var list = Manager?.DeviceList;
+        if (list is null) return null;
+        foreach (var d in list.Values) if (IsProxmark(d)) return d;
+        foreach (var d in list.Values) if (HasBulkPair(d)) return d;
+        return null;
+    }
+
+    /// <summary>A USB device is connected that we did not recognise as a Proxmark by its vendor id, but which could be
+    /// one (a clone, or an unusual descriptor). The page offers to try talking to it.</summary>
+    public static bool ForeignUsbPresent() => !IsAttached() && AnyUsbCandidate() is not null;
+
+    private static bool HasBulkPair(UsbDevice d)
+    {
+        for (int i = 0; i < d.InterfaceCount; i++)
+        {
+            var intf = d.GetInterface(i);
+            bool bin = false, bout = false;
+            for (int e = 0; e < intf.EndpointCount; e++)
+            {
+                var ep = intf.GetEndpoint(e);
+                if (ep is null || ep.Type != UsbAddressing.XferBulk) continue;
+                if (ep.Direction == UsbAddressing.In) bin = true; else bout = true;
+            }
+            if (bin && bout) return true;
+        }
+        return false;
+    }
+
+    /// <summary>When set, a command may open a connected USB device that is not a recognised Proxmark (see
+    /// <see cref="AnyUsbCandidate"/>). Off by default, so only known Proxmarks are touched without the person asking.</summary>
+    public bool AllowAnyDevice { get; set; }
+
+    /// <summary>The device a command should use: a recognised Proxmark, or (when <see cref="AllowAnyDevice"/> is set)
+    /// any serial-like USB device that is connected.</summary>
+    private UsbDevice? ResolveDevice() => Attached() ?? (AllowAnyDevice ? AnyUsbCandidate() : null);
+
+    /// <summary>Whether the device answered the newer "NG" framing on the last <see cref="DeviceInfoAsync"/>. When
+    /// true the firmware is a modern build (Iceman/RRG); the OLD framing is still used for operations, since newer
+    /// firmware accepts it too.</summary>
+    public bool SpeaksNg { get; private set; }
+
     // --- auto-open: MainActivity notes a USB-attach intent, the shell navigates here on the next chance ---
 
     /// <summary>Raised when a Proxmark is plugged in or unplugged, so the shell can show or hide the RF tab. The
@@ -125,7 +171,7 @@ public sealed class ProxmarkUsb
     private async Task<T> WithLinkAsync<T>(Func<Link, T> action, T onFail)
     {
         var mgr = Manager;
-        var device = Attached();
+        var device = ResolveDevice();
         if (mgr is null || device is null) { Say("No Proxmark connected."); return onFail; }
         if (!mgr.HasPermission(device) && !await RequestPermissionAsync(mgr, device)) { Say("Permission was denied."); return onFail; }
 
@@ -195,6 +241,63 @@ public sealed class ProxmarkUsb
         Say($"Reply command: 0x{cmd:X}.");
         if (text.Length > 3) Say($"Text: {text}");
         return true;
+    }
+
+    /// <summary>Asks the device for its firmware version (OLD framing, which every firmware accepts) and then tries the
+    /// newer "NG" framing too, to learn whether this is a modern (Iceman/RRG) build. Reports both through the log and
+    /// sets <see cref="SpeaksNg"/>. Returns true when the device answered at all.</summary>
+    public Task<bool> DeviceInfoAsync() => WithLinkAsync(DeviceInfo, false);
+
+    private bool DeviceInfo(Link link)
+    {
+        // OLD version: the banner text (firmware name, build, bootrom) lives in the reply's data area.
+        Drain(link.Conn, link.In);
+        var oldReq = OldFrame(CmdVersion);
+        if (link.Conn.BulkTransfer(link.Out, oldReq, oldReq.Length, 1000) < 0)
+            throw new Java.IO.IOException("the version request could not be written");
+        var oldReply = ReadReply(link.Conn, link.In, 2000);
+        if (oldReply.Length == 0)
+        {
+            Say("No reply to the version request — the port is open but the device sent nothing (it may need external power over OTG).");
+            return false;
+        }
+        var banner = AsciiRun(oldReply);
+        foreach (var line in banner.Split(new[] { "  ", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+            if (line.Trim().Length > 4) Say(line.Trim());
+
+        // NG version: a modern firmware answers with the "PM3b" magic; an OLD-only firmware ignores it or NAKs.
+        Drain(link.Conn, link.In);
+        var ngReq = NgFrame(0x0107, []);   // CMD_VERSION in NG framing
+        bool ngOk = link.Conn.BulkTransfer(link.Out, ngReq, ngReq.Length, 1000) >= 0
+                    && ContainsPm3b(ReadReply(link.Conn, link.In, 1500));
+        SpeaksNg = ngOk;
+        Say(ngOk
+            ? "Protocol: newer (NG) framing is supported — this is a modern firmware (Iceman/RRG). Operations still use the compatible OLD framing."
+            : "Protocol: OLD framing only — operations use it (and it is accepted by newer firmware too).");
+        return true;
+    }
+
+    /// <summary>Builds a host→device NG frame: 4-byte "PM3a" magic, a 15-bit length with the NG bit set, the 16-bit
+    /// command, the data, and a 2-byte postamble magic (the link is reliable over USB, so no real CRC is needed).</summary>
+    private static byte[] NgFrame(ushort cmd, byte[] data)
+    {
+        int len = data?.Length ?? 0;
+        var f = new byte[8 + len + 2];
+        BitConverter.TryWriteBytes(f.AsSpan(0), 0x61334D50u);          // "PM3a"
+        BitConverter.TryWriteBytes(f.AsSpan(4), (ushort)((len & 0x7FFF) | 0x8000));   // length | NG bit
+        BitConverter.TryWriteBytes(f.AsSpan(6), cmd);
+        if (len > 0) Array.Copy(data!, 0, f, 8, len);
+        BitConverter.TryWriteBytes(f.AsSpan(8 + len), (ushort)0x3361);  // COMMANDNG_POSTAMBLE_MAGIC
+        return f;
+    }
+
+    /// <summary>Whether a reply carries the NG response magic "PM3b" (0x62334D50, bytes 50 4D 33 62), the proof that
+    /// the device understood the NG framing.</summary>
+    private static bool ContainsPm3b(byte[] reply)
+    {
+        for (int i = 0; i + 4 <= reply.Length; i++)
+            if (reply[i] == 0x50 && reply[i + 1] == 0x4D && reply[i + 2] == 0x33 && reply[i + 3] == 0x62) return true;
+        return false;
     }
 
     /// <summary>Reads a block through the gen1a magic backdoor (block 0 is the UID block). Returns the 16 bytes, or
