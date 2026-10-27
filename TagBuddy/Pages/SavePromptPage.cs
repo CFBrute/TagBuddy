@@ -47,9 +47,9 @@ public sealed class SavePromptPage : ContentPage
             Padding = 18,
             StrokeThickness = 0,
             StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 14 },
-            VerticalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Start,   // top-anchored, so the keyboard never covers the Save/Cancel buttons
             HorizontalOptions = LayoutOptions.Fill,
-            Margin = 24,
+            Margin = new Thickness(24, 48, 24, 24),
             Content = new VerticalStackLayout
             {
                 Spacing = 12,
@@ -69,7 +69,8 @@ public sealed class SavePromptPage : ContentPage
             },
         };
         card.SetAppThemeColor(BackgroundColorProperty, Colors.White, Color.FromArgb("#1F2937"));
-        Content = card;
+        // Scrollable, so even on a short screen with the keyboard up the whole card (buttons included) can be reached.
+        Content = new ScrollView { Content = card };
     }
 
     private async void OnGroupChanged(object? sender, EventArgs e)
