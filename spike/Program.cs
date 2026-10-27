@@ -89,6 +89,47 @@ if (cmd == "magicget")
     return;
 }
 
+// lfwrite <id10hex>: clone an EM410x id onto a T5577 — write the config word + the two data blocks (0x0219), then
+// tell the user to re-read. Tests command id 0x0219 and the OLD arg layout (arg0=data, arg1=block, arg2=pwd).
+if (cmd == "lfwrite")
+{
+    ulong id40 = args.Length > 2 ? ParseU("0x" + args[2].Replace("0x", "")) : 0x5C002A72ABUL;
+    var (config, b1, b2) = EncodeEm410xT55xx(id40);
+    Console.WriteLine($"Writing EM410x {id40 & 0xFFFFFFFFFF:X10} -> config {config:X8}, data {b1:X8} {b2:X8}");
+    (uint blk, uint data)[] writes = [(1, b1), (2, b2), (0, config)];   // data blocks first, config block last
+    foreach (var (blk, data) in writes)
+    {
+        sp.Write(OldFrame(0x0215, data, blk, 0), 0, OldFrameSize);   // CMD_T55XX_WRITE_BLOCK (0x0215, was wrongly 0x0219)
+        var r = ReadFor(sp, 2000);
+        Console.WriteLine($"blk {blk}: wrote {data:X8}, reply {r.Length} bytes cmd 0x{(r.Length >= 8 ? BitConverter.ToUInt64(r, 0) : 0):X}");
+    }
+    Console.WriteLine("Done. Run 'lfread' to confirm the id reads back.");
+    return;
+}
+
+static (uint Config, uint Block1, uint Block2) EncodeEm410xT55xx(ulong id40)
+{
+    ulong frame = 0;
+    for (int i = 0; i < 9; i++) frame = (frame << 1) | 1;
+    var cols = new int[4];
+    for (int row = 0; row < 10; row++)
+    {
+        int nibble = (int)((id40 >> ((9 - row) * 4)) & 0xF);
+        int parity = 0;
+        for (int bit = 3; bit >= 0; bit--)
+        {
+            int v = (nibble >> bit) & 1;
+            parity ^= v; cols[3 - bit] ^= v;
+            frame = (frame << 1) | (ulong)v;
+        }
+        frame = (frame << 1) | (ulong)parity;
+    }
+    for (int c = 0; c < 4; c++) frame = (frame << 1) | (ulong)cols[c];
+    frame <<= 1;
+    const uint config = 0x00148040;
+    return (config, (uint)(frame >> 32), (uint)(frame & 0xFFFFFFFF));
+}
+
 // magicdump: poll until coupled, then read all 64 blocks (1K) via the backdoor, per block, reporting how many
 // succeed — tests whether coupling holds for a whole dump, or whether we need a field-on sequence.
 if (cmd == "magicdump")
@@ -157,6 +198,69 @@ if (cmd == "magicdump2")
         else { string t = new string(cr.Where(x => x is >= 0x20 and < 0x7F).Select(x => (char)x).ToArray()); Console.WriteLine($"blk {b,2}: FAIL ({(t.Length > 2 ? t : $"cmd 0x{rcmd:X} a0 {a0}")})"); }
     }
     Console.WriteLine($"\n{ok}/64 blocks read in {sw.ElapsedMilliseconds} ms");
+    return;
+}
+
+// lfread: verify the LF (125 kHz) path — acquire raw ADC samples, download them, report count + stats + a preview.
+// Tests command ids 0x0205 (acquire) / 0x0207-0x0208 (download). A blank/written T5577 should return thousands of
+// samples; "0 samples" or no 0x0208 frames means the ids are wrong for this firmware.
+if (cmd == "lfread")
+{
+    Console.WriteLine("Acquiring 125 kHz samples (tag on the LF antenna)…");
+    sp.Write(OldFrame(0x0205), 0, OldFrameSize);          // CMD_ACQUIRE_RAW_ADC_SAMPLES_125K
+    var ack = ReadFor(sp, 3000);
+    Console.WriteLine($"acquire ack: {ack.Length} bytes, cmd 0x{(ack.Length >= 8 ? BitConverter.ToUInt64(ack, 0) : 0):X}, arg0 {(ack.Length >= 16 ? BitConverter.ToUInt64(ack, 8) : 0)}");
+
+    sp.Write(OldFrame(0x0207, 0, 20000), 0, OldFrameSize); // CMD_DOWNLOAD_RAW_ADC_SAMPLES_125K: arg0=start, arg1=bytes
+    var all = new List<byte>();
+    var until = DateTime.UtcNow.AddMilliseconds(4000);
+    var buf = new byte[4096];
+    while (DateTime.UtcNow < until)
+    {
+        try { int n = sp.Read(buf, 0, buf.Length); if (n > 0) { all.AddRange(buf[..n]); until = DateTime.UtcNow.AddMilliseconds(400); } }
+        catch (TimeoutException) { if (all.Count > 0) break; }
+    }
+    Console.WriteLine($"download: {all.Count} raw bytes received");
+
+    // Parse 544-byte OLD frames; collect samples from CMD_DOWNLOADED_RAW_ADC_SAMPLES_125K (0x0208).
+    var samples = new List<byte>();
+    int frames = 0;
+    for (int off = 0; off + OldFrameSize <= all.Count; off += OldFrameSize)
+    {
+        ulong fcmd = BitConverter.ToUInt64(all.ToArray(), off);
+        ulong a0 = BitConverter.ToUInt64(all.ToArray(), off + 8);
+        ulong a1 = BitConverter.ToUInt64(all.ToArray(), off + 16);
+        frames++;
+        Console.WriteLine($"  frame {frames}: cmd 0x{fcmd:X}  arg0(offset) {a0}  arg1(len) {a1}");
+        if (fcmd == 0x0208)
+        {
+            int cnt = Math.Min(Math.Min((int)a1, OldFrameSize - 32), 512);
+            for (int i = 0; i < cnt; i++) samples.Add(all[off + 32 + i]);
+        }
+    }
+    Console.WriteLine($"\n{samples.Count} samples from {frames} frames");
+    if (samples.Count > 0)
+    {
+        int mn = 255, mx = 0; double avg = 0;
+        foreach (var s in samples) { mn = Math.Min(mn, s); mx = Math.Max(mx, s); avg += s; }
+        avg /= samples.Count;
+        Console.WriteLine($"min {mn}  max {mx}  mean {avg:F1}");
+        Console.WriteLine("first 64: " + string.Join(" ", samples.Take(64).Select(x => x.ToString("X2"))));
+        // A clean middle slice (past the field/AGC settling), shown as hi/lo around the mean so the bit pattern is visible.
+        var mid = samples.Skip(4000).Take(160).ToArray();
+        Console.WriteLine("mid hex: " + string.Join(" ", mid.Take(64).Select(x => x.ToString("X2"))));
+        Console.WriteLine("mid lvl: " + string.Concat(mid.Select(x => x >= (int)avg ? "#" : ".")));
+        // A long level string so the EM410x frame (or dropouts) is visible.
+        var sa = samples.ToArray();
+        Console.WriteLine("levels 2000..2600:");
+        Console.WriteLine(string.Concat(sa.Skip(2000).Take(600).Select(x => x >= (int)avg ? "#" : ".")));
+        // run-length histogram over the whole capture (what the demod's "shortest run" would pick).
+        var hist = new SortedDictionary<int, int>(); int r2 = 1;
+        for (int i = 1; i < sa.Length; i++) { if ((sa[i] >= avg) == (sa[i - 1] >= avg)) r2++; else { hist[r2] = hist.GetValueOrDefault(r2) + 1; r2 = 1; } }
+        Console.WriteLine("run-length histogram (len:count): " + string.Join(" ", hist.Where(kv => kv.Value >= 3).Select(kv => $"{kv.Key}:{kv.Value}")));
+        var id = DemodEm410x(samples.ToArray());
+        Console.WriteLine(id is ulong v ? $"\n*** EM410x id: {v:X10} ***" : "\nNo EM410x id decoded.");
+    }
     return;
 }
 
@@ -276,6 +380,98 @@ static byte[] NgFrame(ushort cmd, byte[]? data = null)
     int crc = 8 + data.Length;
     f[crc] = 0x61; f[crc + 1] = 0x33;
     return f;
+}
+
+// --- EM410x demod, copied verbatim from the app (ProxmarkUsb.cs) to verify it on a real capture ---
+static ulong? DemodEm410x(byte[] raw)
+{
+    // Skip the field/AGC settling at the start.
+    int skip = Math.Min(200, raw.Length / 10);
+    int n = raw.Length - skip;
+    if (n < 256) return null;
+    var samples = new byte[n];
+    Array.Copy(raw, skip, samples, 0, n);
+
+    double mean = 0; for (int i = 0; i < n; i++) mean += samples[i]; mean /= n;
+    var hi = new bool[n];
+    for (int i = 0; i < n; i++) hi[i] = samples[i] >= mean;
+
+    // Runs of constant level: (level, length).
+    var runLevel = new List<bool>(); var runLen = new List<int>();
+    int run = 1;
+    for (int i = 1; i < n; i++) { if (hi[i] == hi[i - 1]) run++; else { runLevel.Add(hi[i - 1]); runLen.Add(run); run = 1; } }
+    runLevel.Add(hi[n - 1]); runLen.Add(run);
+    if (runLen.Count < 20) return null;
+
+    // Half-bit length from the dominant *short* run cluster (robust to noise, unlike the absolute shortest run).
+    var hist = new Dictionary<int, int>();
+    foreach (var r in runLen) if (r >= 3) hist[r] = hist.GetValueOrDefault(r) + 1;
+    if (hist.Count == 0) return null;
+    int maxCount = hist.Values.Max();
+    int minCommon = hist.Where(kv => kv.Value >= maxCount / 4).Select(kv => kv.Key).DefaultIfEmpty(0).Min();
+    if (minCommon < 3) return null;
+    double num = 0, den = 0;
+    foreach (var kv in hist) if (kv.Value >= maxCount / 4 && kv.Key < minCommon * 1.5) { num += (double)kv.Key * kv.Value; den += kv.Value; }
+    if (den == 0) return null;
+    double half = num / den;
+    if (half < 3) return null;
+
+    // Convert each run to whole half-bits (run≈half → 1, run≈2·half → 2): robust to timing jitter, no drift.
+    var bits = new List<bool>();
+    for (int i = 0; i < runLen.Count; i++)
+    {
+        int c = Math.Max(1, (int)Math.Round(runLen[i] / half));
+        for (int k = 0; k < c; k++) bits.Add(runLevel[i]);
+    }
+
+    Console.WriteLine($"[demod] half={half:F2}  halfbits={bits.Count}");
+    Console.WriteLine("[demod] halfbit levels: " + string.Concat(bits.Take(160).Select(x => x ? "1" : "0")));
+
+    for (int phase = 0; phase < 2; phase++)
+    {
+        var decoded = new List<int>(bits.Count / 2);
+        bool ok = true;
+        for (int i = phase; i + 1 < bits.Count; i += 2)
+        {
+            if (!bits[i] && bits[i + 1]) decoded.Add(0);
+            else if (bits[i] && !bits[i + 1]) decoded.Add(1);
+            else { ok = false; break; }
+        }
+        if (ok && Em410xFromBits(decoded) is { } id) return id;
+    }
+    return null;
+}
+
+static ulong? Em410xFromBits(List<int> b)
+{
+    for (int s = 0; s + 64 <= b.Count; s++)
+    {
+        bool header = true;
+        for (int i = 0; i < 9; i++) if (b[s + i] != 1) { header = false; break; }
+        if (!header) continue;
+
+        ulong id = 0;
+        var cols = new int[4];
+        bool good = true;
+        int p = s + 9;
+        for (int row = 0; row < 10 && good; row++)
+        {
+            int parity = 0;
+            for (int c = 0; c < 4; c++)
+            {
+                int bit = b[p++];
+                parity ^= bit;
+                cols[c] ^= bit;
+                id = (id << 1) | (ulong)bit;
+            }
+            if (b[p++] != parity) good = false;
+        }
+        if (!good) continue;
+        bool colsOk = true;
+        for (int c = 0; c < 4; c++) if (b[p++] != cols[c]) { colsOk = false; break; }
+        if (colsOk && b[p] == 0) return id;
+    }
+    return null;
 }
 
 static ulong ParseU(string s) =>
