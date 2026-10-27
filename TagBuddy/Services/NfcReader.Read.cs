@@ -264,6 +264,7 @@ public sealed partial class NfcReader
             int sectors = classic.SectorCount;
             var lines = new List<string>();
             var found = new List<(int Sector, string Key)>();
+            var sectorKeys = new Dictionary<int, (byte[] Key, bool KeyB)>();
             int opened = 0;
 
             for (int sector = 0; sector < sectors; sector++)
@@ -280,6 +281,7 @@ public sealed partial class NfcReader
 
                 opened++;
                 found.Add((sector, MifareClassicKeys.KeyHex(key.Value.Key)));
+                sectorKeys[sector] = (key.Value.Key, key.Value.Slot == 'B');
                 openedSectors.Add(sector);
                 lines.Add(MifareClassicKeys.SectorHeader(sector, key.Value.Key, key.Value.Slot, key.Value.Name));
                 int first = classic.SectorToBlock(sector);
@@ -292,9 +294,18 @@ public sealed partial class NfcReader
                         var data = classic.ReadBlock(block);
                         if (data is { Length: >= 16 })
                         {
-                            lines.Add(MifareClassicKeys.FormatBlock(block, data[..16]));
-                            blocks[block] = data[..16];
-                            if (b == count - 1) lines.AddRange(MifareClassicKeys.AccessLines(data[..16]));   // the trailer: the sector's rules
+                            var raw = data[..16];
+                            blocks[block] = raw;
+                            // The trailer's key bytes read back as zeros; show the key that actually opened the sector in
+                            // its place (as key A, or key B when the sector opened with key B) so the real key is visible.
+                            byte[] shown = raw;
+                            if (b == count - 1)
+                            {
+                                shown = (byte[])raw.Clone();
+                                Array.Copy(key.Value.Key, 0, shown, key.Value.Slot == 'B' ? 10 : 0, 6);
+                            }
+                            lines.Add(MifareClassicKeys.FormatBlock(block, shown));
+                            if (b == count - 1) lines.AddRange(MifareClassicKeys.AccessLines(raw));   // the trailer: the sector's rules
                         }
                     }
                     catch
@@ -320,7 +331,7 @@ public sealed partial class NfcReader
 
             if (opened > 0)
                 segments = new SegmentRead(new SegmentLayout(TagFamily.Classic, MifareClassicKeys.ChipName(classic.Size), 16,
-                    classic.BlockCount), blocks, closed) { OpenedSectors = openedSectors };
+                    classic.BlockCount), blocks, closed) { OpenedSectors = openedSectors, SectorKeys = sectorKeys };
             return opened > 0 ? lines : null;
         }
         catch (Exception ex)
@@ -359,15 +370,18 @@ public sealed partial class NfcReader
         }
     }
 
-    /// <summary>The first key that opens a sector, as key A or key B, or null. The key the person typed is tried
-    /// first, then the public defaults.</summary>
+    /// <summary>The first key that opens a sector, as key A or key B, or null. The key the person typed is tried first,
+    /// then the public defaults. Every candidate is tried as key A before any is tried as key B, so a sector keeps being
+    /// opened (and shown) by key A whenever a known key A works — a default key B does not take over just because it is
+    /// tried earlier. This is what lets a custom key A written to the sector show up, instead of the sector quietly
+    /// opening with a still-default key B.</summary>
     private static (byte[] Key, char Slot, string Name)? AuthenticateClassicSector(MifareClassic classic, int sector)
     {
-        foreach (var (key, name) in ClassicKeyCandidates())
-        {
+        var candidates = ClassicKeyCandidates().ToList();
+        foreach (var (key, name) in candidates)
             try { if (classic.AuthenticateSectorWithKeyA(sector, key)) return (key, 'A', name); } catch { }
+        foreach (var (key, name) in candidates)
             try { if (classic.AuthenticateSectorWithKeyB(sector, key)) return (key, 'B', name); } catch { }
-        }
         return null;
     }
 

@@ -14,11 +14,14 @@ public sealed class MifareKeyStore
     private readonly string _importedPath;
     private readonly string _rememberedPath;
 
+    private readonly string _usagePath;
+
     public MifareKeyStore(string? directory = null)
     {
         var dir = directory ?? FileSystem.AppDataDirectory;
         _importedPath = Path.Combine(dir, "mifare-imported-keys.txt");
         _rememberedPath = Path.Combine(dir, "mifare-remembered-keys.json");
+        _usagePath = Path.Combine(dir, "mifare-key-usage.json");
     }
 
     /// <summary>The 12-digit uppercase hex keys in arbitrary text: one per line, '#' starts a comment, and spaces,
@@ -114,7 +117,45 @@ public sealed class MifareKeyStore
     public void ClearRemembered()
     {
         try { File.Delete(_rememberedPath); } catch { /* already gone */ }
+        try { File.Delete(_usagePath); } catch { /* already gone */ }
     }
+
+    // ---------------------------------------------------------------- keys used, with when (for the "keys used" list)
+
+    /// <summary>Notes that each key (12-hex) was used just now — found on a read or written to a card — so the "keys
+    /// used" list can show them newest first. A key already there just has its time moved to now.</summary>
+    public void MarkUsed(IEnumerable<string> keys)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var all = LoadUsage();
+        bool changed = false;
+        foreach (var key in keys.Select(k => k.ToUpperInvariant()).Where(k => k.Length == 12))
+        {
+            all[key] = now;
+            changed = true;
+        }
+        if (changed) SaveUsage(all);
+    }
+
+    /// <summary>Every key ever used, with the time it was last used, newest first.</summary>
+    public IReadOnlyList<(string Hex, DateTimeOffset When)> UsedKeys() =>
+        LoadUsage().Select(kv => (kv.Key, DateTimeOffset.FromUnixTimeSeconds(kv.Value)))
+                   .OrderByDescending(x => x.Item2)
+                   .ToList();
+
+    private Dictionary<string, long> LoadUsage()
+    {
+        try
+        {
+            if (File.Exists(_usagePath))
+                return JsonSerializer.Deserialize<Dictionary<string, long>>(File.ReadAllText(_usagePath)) ?? [];
+        }
+        catch { /* unreadable: start fresh */ }
+        return [];
+    }
+
+    private void SaveUsage(Dictionary<string, long> all) =>
+        File.WriteAllText(_usagePath, JsonSerializer.Serialize(all));
 
     private Dictionary<string, List<string>> LoadRemembered()
     {

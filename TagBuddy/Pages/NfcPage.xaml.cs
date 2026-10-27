@@ -487,7 +487,11 @@ public partial class NfcPage : ContentPage
 
         // A MIFARE Classic card: remember the keys that opened its sectors, so this card opens quickly next time.
         if (!fromSaved && Features.MifareKeyTools && NfcReader.ClassicKeysFound.Count > 0)
-            _keyStore.Remember(tag.Id, NfcReader.ClassicKeysFound.Select(k => k.Key));
+        {
+            var keys = NfcReader.ClassicKeysFound.Select(k => k.Key).ToList();
+            _keyStore.Remember(tag.Id, keys);
+            _keyStore.MarkUsed(keys);
+        }
 
         // An NTAG/Ultralight opened with a password (typed, remembered, or the default): remember it for this tag.
         if (!fromSaved) RememberType2Password();
@@ -550,6 +554,7 @@ public partial class NfcPage : ContentPage
         MemoryPanel.IsVisible = tag.HasMemoryDump;
         EditTagButton.IsVisible = tag.CanEdit;
         SaveTagButton.IsVisible = tag.HasMemoryDump && !fromSaved;   // already in Saved when shown from there
+        TagKeysButton.IsVisible = Features.MifareKeyTools && tag.Segments?.Layout.Family == TagFamily.Classic;
         CompareButton.IsVisible = tag.Segments is not null;
         _lastName = fromSaved ? TagTitle.Text.Split('\n')[0].Split("  ·  ")[0] is { Length: > 0 } n ? "saved: " + n : "saved" : "read just now";
         if (tag.RawMemory is { Length: > 0 } memory)
@@ -588,20 +593,118 @@ public partial class NfcPage : ContentPage
             MemoryLabel.Text = string.Empty;
         }
 
-        // Offer to bring a saved copy of this tag up to date when it has changed since it was saved.
-        if (!fromSaved && tag.HasMemoryDump && AppSettings.AskUpdateSavedTag)
+        // A live read: confirm it at the top, so you know it worked and roughly what came back without scrolling.
+        if (!fromSaved) ShowBanner(ReadSummary(tag), ok: true);
+
+        // Compare with what is saved: name the match in the banner, or offer to update a changed saved copy.
+        if (!fromSaved && tag.HasMemoryDump)
             _ = OfferToUpdateSavedTagAsync(tag);
     }
 
-    /// <summary>After reading a tag that is already saved (same serial) but has changed since, offers to update the
-    /// saved copy so it stays current. A saved copy that already matches is never asked about (see OutdatedReadAsync);
-    /// the Settings toggle turns the offer off.</summary>
+    // Serials we have already offered to update this session: a changed tag (e.g. one whose keys you just rewrote)
+    // reads differently each time, so without this it would ask on every read. Asked at most once per tag per run.
+    private readonly HashSet<string> _askedUpdateFor = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A one-line summary of a read, for the top banner so it is seen without scrolling.</summary>
+    private static string ReadSummary(NfcTagInfo tag)
+    {
+        string chip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? "Tag";
+        string what =
+            tag.RawMemory is { Length: > 0 } m ? $"{m.Length} bytes · {m.Length / 4} pages"
+            : tag.Segments is { } s
+                ? $"{s.Data.Count} blocks read" + (s.Blocked.Count > 0 ? $" · {s.Blocked.Count} locked" : "")
+            : tag.HasContent ? "content read"
+            : "serial read";
+        return $"Read {chip}  ·  {tag.Id}\n{what}";
+    }
+
+    private int _bannerGeneration;
+
+    /// <summary>Flashes a result banner at the top (read/write confirmations), gone after a few seconds or on a tap. The
+    /// same message is also kept in the page via <see cref="SetLastResult"/>, so it can be re-read after the banner goes.</summary>
+    private void ShowBanner(string text, bool ok)
+    {
+        BannerLabel.Text = text;
+        BannerLabel.TextColor = Colors.White;
+        Banner.BackgroundColor = ok ? Palette.Accent : Palette.Error;
+        Banner.IsVisible = true;
+        SetLastResult(text);
+        int gen = ++_bannerGeneration;
+        Dispatcher.DispatchDelayed(TimeSpan.FromSeconds(6), () =>
+        {
+            if (gen == _bannerGeneration) Banner.IsVisible = false;
+        });
+    }
+
+    private void OnBannerTapped(object? sender, TappedEventArgs e)
+    {
+        _bannerGeneration++;   // cancels the pending auto-dismiss
+        Banner.IsVisible = false;
+    }
+
+    /// <summary>Keeps the last read/write message in the page (top, collapsed) so it can be scrolled to and expanded
+    /// after the banner has flashed away.</summary>
+    private void SetLastResult(string text)
+    {
+        var oneLine = text.Replace("\n", "  ");
+        LastResultExpander.Title = oneLine.Length > 64 ? oneLine[..64] + "…" : oneLine;
+        LastResultExpander.Text = text;
+        LastResultExpander.Expanded = false;
+        LastResultExpander.IsVisible = true;
+    }
+
+    /// <summary>The keys this card has been opened or written with, newest-used first; tapping one copies its hex. The
+    /// same lookup serves a live read, a saved tag shown again, and the editor while a key is being typed.</summary>
+    private async void OnShowTagKeys(object? sender, EventArgs e)
+    {
+        if (_last?.Id is not { Length: > 0 } uid) return;
+        var when = _keyStore.UsedKeys().ToDictionary(k => k.Hex, k => k.When);
+        var hexes = _keyStore.RememberedFor(uid).Select(MifareClassicKeys.KeyHex).Distinct()
+            .OrderByDescending(h => when.TryGetValue(h, out var w) ? w : DateTimeOffset.MinValue).ToList();
+        if (hexes.Count == 0)
+        {
+            await DisplayAlertAsync("Keys for this tag",
+                "No keys are known for this tag yet. The keys that open or are written to it are remembered here as you use them.", "OK");
+            return;
+        }
+
+        var labels = hexes.Select(h => when.TryGetValue(h, out var w) ? $"{h}  ·  {KeyAgo(w)}" : h).ToArray();
+        var pick = await DisplayActionSheet("Keys for this tag — tap to copy", "Cancel", null, labels);
+        if (pick is null || pick == "Cancel") return;
+        var hex = pick.Split("  ·  ")[0];
+        await Clipboard.Default.SetTextAsync(hex);
+        Notice.Show($"Copied {hex}");
+    }
+
+    private static string KeyAgo(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.UtcNow - when;
+        if (span < TimeSpan.FromMinutes(1)) return "just now";
+        if (span < TimeSpan.FromHours(1)) return $"{(int)span.TotalMinutes} min ago";
+        if (span < TimeSpan.FromDays(1)) return $"{(int)span.TotalHours} h ago";
+        if (span < TimeSpan.FromDays(30)) return $"{(int)span.TotalDays} d ago";
+        return when.ToLocalTime().ToString("d MMM yyyy");
+    }
+
+    /// <summary>After reading a tag, compares it to what is saved: a tag that matches a saved copy is called out in the
+    /// banner by name; one that is saved but has changed offers to update the saved copy (once per tag per session; the
+    /// Settings toggle turns that offer off).</summary>
     private async Task OfferToUpdateSavedTagAsync(NfcTagInfo tag)
     {
         try
         {
-            if (await _saved.OutdatedReadAsync(tag) is not { } item) return;
-            if (_last?.Id != tag.Id) return;   // another tag was read while the files were checked
+            var (kind, item) = await _saved.SavedStatusAsync(tag);
+            if (_last?.Id != tag.Id || item is null) return;   // another tag was read while the files were checked
+
+            if (kind == SavedService.SavedMatch.Same)
+            {
+                ShowBanner($"{ReadSummary(tag)}\nSame as saved \"{item.DisplayName}\"", ok: true);
+                return;
+            }
+
+            if (kind != SavedService.SavedMatch.Changed || !AppSettings.AskUpdateSavedTag) return;
+            if (_askedUpdateFor.Contains(tag.Id)) return;
+            _askedUpdateFor.Add(tag.Id);       // ask only once per tag per session, even if it keeps changing
             if (!await DisplayAlertAsync("Update the saved tag?",
                     $"You have this tag saved as \"{item.DisplayName}\", and it has changed since. Update the saved copy " +
                     "to what you just read?", "Update", "Keep"))
@@ -1047,6 +1150,10 @@ public partial class NfcPage : ContentPage
     {
         Feedback.Tag(ok);
 
+        // The write landed, so the byte/key typing is done: close the keyboard if it is still up, so the result and the
+        // grid are not hidden behind it.
+        if (ok) DismissKeyboard();
+
         // A write that opened a protected NTAG/Ultralight with a password: remember it for this tag.
         RememberType2Password();
 
@@ -1055,6 +1162,9 @@ public partial class NfcPage : ContentPage
         // Keep the result on screen, and silently re-arm so another tag can be written with the same content.
         WriteStatus.Text = ok && WriteType != WriteMode.Segments ? $"{note}  Hold another tag to do it again." : note;
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
+
+        // Mirror it to the top banner so the outcome is seen without scrolling to the bottom of the write panel.
+        ShowBanner((ok ? "Write OK — " : "Write failed — ") + note, ok);
         UseRawButton.IsVisible = !ok && note.Contains(NfcReader.RawBytesTip)
             && WriteType is WriteMode.Auto or WriteMode.Text or WriteMode.Link;
 
@@ -1121,17 +1231,23 @@ public partial class NfcPage : ContentPage
             case TagStep.Undo: _tagRedo.Push(_tagUndo.Pop()); note = "Undone on the tag: " + note; break;
             case TagStep.Redo: _tagUndo.Push(_tagRedo.Pop()); note = "Redone on the tag: " + note; break;
             default:
-                _tagUndo.Push(record!);
                 _tagRedo.Clear();
+                if (record is { KeysOnly: false }) _tagUndo.Push(record);   // a key-only change has no bytes to undo
                 break;
         }
 
         if (record is null) { UpdateTagHistory(); return note; }
         bool expected = _edit?.ExpectedId is { } id && TagEdit.SameId(id, record.TagId);
+        // Remember every key written to a trailer — even a sector that did not re-open to confirm — so the next read
+        // opens it without the key being retyped. The confirmed set still drives clearing the pending edit.
+        if (NfcReader.ClassicKeysWritten is { Count: > 0 } keysWritten)
+        {
+            var written = keysWritten.Select(k => k.Key).ToList();
+            _keyStore.Remember(record.TagId, written);
+            _keyStore.MarkUsed(written);
+        }
         if (NfcReader.ClassicKeysSet is { Count: > 0 } keysSet)
         {
-            // The sectors opened with their new keys: remember them for the tag, and the edit no longer has them pending.
-            _keyStore.Remember(record.TagId, keysSet.Select(k => k.Key));
             if (expected) foreach (var (sector, _) in keysSet) _edit!.SectorChanged(sector);
             UpdateSectorKeyPanel();
         }
@@ -1361,6 +1477,14 @@ public partial class NfcPage : ContentPage
     };
 
     private TagEdit? TypingEdit => _typing == TypingTarget.AllKeys ? _allKeys : _edit;
+
+    /// <summary>Closes the soft keyboard by unfocusing whichever hidden input the byte/key typing uses.</summary>
+    private void DismissKeyboard()
+    {
+        SegmentInput.Unfocus();
+        SectorKeyInput.Unfocus();
+        AllKeysInput.Unfocus();
+    }
 
     private void ResetInput()
     {

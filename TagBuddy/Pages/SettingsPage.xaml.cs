@@ -24,8 +24,18 @@ public partial class SettingsPage : ContentPage
         ShowPreviewHint();
 
         KeySection.IsVisible = Features.MifareKeyTools;
+        HardwareSection.IsVisible = Features.ProxmarkUsb;
         ShowKeyStoreInfo();
         ShowPasswordStoreInfo();
+    }
+
+    private async void OnOpenProxmark(object? sender, EventArgs e)
+    {
+#if ANDROID
+        await Shell.Current.GoToAsync(ProxmarkPage.Route);
+#else
+        await Task.CompletedTask;
+#endif
     }
 
     private readonly MifareKeyStore _keyStore = new();
@@ -57,6 +67,39 @@ public partial class SettingsPage : ContentPage
         KeyStoreInfo.Text = $"Keys that opened a card are remembered to open it quickly next time: {cards} {(cards == 1 ? "card" : "cards")} so far. Imported dictionary: {imported:N0} keys.";
         ForgetKeysButton.IsEnabled = cards > 0;
         ClearImportedButton.IsEnabled = imported > 0;
+        UsedKeysButton.IsEnabled = _keyStore.UsedKeys().Count > 0;
+    }
+
+    /// <summary>Shows every key that has opened or been written to a card, newest first; tapping one copies its hex.</summary>
+    private async void OnShowUsedKeys(object? sender, EventArgs e)
+    {
+        var used = _keyStore.UsedKeys();
+        if (used.Count == 0)
+        {
+            await DisplayAlertAsync("Keys used", "No keys have been used yet. Read or write a MIFARE Classic card and its keys show up here.", "OK");
+            return;
+        }
+
+        const int max = 30;
+        var shown = used.Take(max).ToList();
+        var labels = shown.Select(k => $"{k.Hex}  ·  {Ago(k.When)}").ToArray();
+        var pick = await DisplayActionSheet($"Keys used — tap to copy{(used.Count > max ? $" (newest {max})" : "")}", "Cancel", null, labels);
+        if (pick is null || pick == "Cancel") return;
+
+        var hex = pick.Split("  ·  ")[0];
+        await Clipboard.Default.SetTextAsync(hex);
+        Notice.Show($"Copied {hex}");
+    }
+
+    /// <summary>A short "how long ago" for a time: "just now", "5 min ago", "3 h ago", "2 d ago", else the date.</summary>
+    private static string Ago(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.UtcNow - when;
+        if (span < TimeSpan.FromMinutes(1)) return "just now";
+        if (span < TimeSpan.FromHours(1)) return $"{(int)span.TotalMinutes} min ago";
+        if (span < TimeSpan.FromDays(1)) return $"{(int)span.TotalHours} h ago";
+        if (span < TimeSpan.FromDays(30)) return $"{(int)span.TotalDays} d ago";
+        return when.ToLocalTime().ToString("d MMM yyyy");
     }
 
     private async void OnForgetRememberedKeys(object? sender, EventArgs e)

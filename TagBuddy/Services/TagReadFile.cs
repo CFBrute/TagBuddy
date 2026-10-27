@@ -35,7 +35,12 @@ public sealed class TagReadFile
         public Dictionary<int, byte[]> Data { get; set; } = [];
         public Dictionary<int, string> Blocked { get; set; } = [];
         public List<int> OpenedSectors { get; set; } = [];
+        public Dictionary<int, SectorKey> SectorKeys { get; set; } = [];
     }
+
+    /// <summary>The key that opened a sector, kept so a saved MIFARE Classic tag shows the real key in its trailer (the
+    /// chip returns 00 for keys on a read) and so the key list for the tag survives.</summary>
+    public sealed class SectorKey { public byte[] Key { get; set; } = []; public bool KeyB { get; set; } }
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
 
@@ -60,6 +65,7 @@ public sealed class TagReadFile
             Data = s.Data.ToDictionary(p => p.Key, p => p.Value),
             Blocked = s.Blocked.ToDictionary(p => p.Key, p => p.Value),
             OpenedSectors = s.OpenedSectors.Order().ToList(),
+            SectorKeys = s.SectorKeys.ToDictionary(p => p.Key, p => new SectorKey { Key = p.Value.Key, KeyB = p.Value.KeyB }),
         } : null,
     };
 
@@ -68,7 +74,10 @@ public sealed class TagReadFile
         Records.Select(r => new NfcRecordInfo(r.Kind, r.Text, r.Sealed)).ToList(),
         MemoryDump, RawMemory, ChipName, NeedsPassword, NeedsClassicKey,
         Layout is { } l ? new SegmentRead(new SegmentLayout(l.Family, l.ChipName, l.SegmentSize, l.Count, l.UserEnd), l.Data, l.Blocked)
-            { OpenedSectors = new HashSet<int>(l.OpenedSectors) } : null);
+            {
+                OpenedSectors = new HashSet<int>(l.OpenedSectors),
+                SectorKeys = l.SectorKeys.ToDictionary(p => p.Key, p => (p.Value.Key, p.Value.KeyB)),
+            } : null);
 
     public string ToJson() => JsonSerializer.Serialize(this, Options);
 

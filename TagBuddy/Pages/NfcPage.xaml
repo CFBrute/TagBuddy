@@ -23,6 +23,10 @@
                 </VerticalStackLayout>
             </Grid>
 
+            <!-- The last read/write result, kept here to re-read after the top banner has gone: a collapsed one-line
+                 summary at the top of the page that expands to the full message. -->
+            <controls:InfoExpander x:Name="LastResultExpander" IsVisible="False" FontSize="13" Margin="0,2,0,0" />
+
             <!-- Shown only once a protected tag is noticed (reading or writing); never a thing to set up in advance. -->
             <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"
                                  Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
@@ -148,6 +152,9 @@
                                 IsVisible="False" />
                         <!-- Keeps the tag in Saved as it was read, to view again or edit and write back -->
                         <Button x:Name="SaveTagButton" Text="Save tag as read" Clicked="OnSaveDump" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White" />
+                        <!-- The keys this card has been opened or written with, newest first; tap one to copy it -->
+                        <Button x:Name="TagKeysButton" Text="Keys for this tag…" Clicked="OnShowTagKeys" IsVisible="False"
                                 BackgroundColor="#6B7280" TextColor="White" />
                         <!-- Against a saved read of the same kind of tag, or the next tag held to the phone -->
                         <Button x:Name="CompareButton" Text="Compare with…" Clicked="OnCompare" IsVisible="False"
@@ -342,6 +349,10 @@
                         <Picker x:Name="SectorPicker" FontSize="14" SelectedIndexChanged="OnSectorPicked" />
                     </VerticalStackLayout>
 
+                    <!-- Look up the keys this card has used, to copy one into a key field -->
+                    <Button Text="Keys for this tag…" Clicked="OnShowTagKeys" HorizontalOptions="Start"
+                            BackgroundColor="#6B7280" TextColor="White" Padding="12,4" MinimumHeightRequest="32" FontSize="12" />
+
                     <!-- A key of the person's own for the cursor's sector, offered only for a sector that opened with a default key -->
                     <VerticalStackLayout x:Name="SectorKeyPanel" Spacing="6" IsVisible="False"
                                          Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
@@ -528,6 +539,18 @@
 
         </VerticalStackLayout>
     </ScrollView>
+
+    <!-- A banner pinned to the top for read and write results, so they are seen without scrolling. Tap it to close;
+         it also fades on its own after a few seconds. -->
+    <Border x:Name="Banner" IsVisible="False" VerticalOptions="Start" Margin="10,8,10,0" Padding="14,10" StrokeThickness="0">
+        <Border.StrokeShape>
+            <RoundRectangle CornerRadius="12" />
+        </Border.StrokeShape>
+        <Border.GestureRecognizers>
+            <TapGestureRecognizer Tapped="OnBannerTapped" />
+        </Border.GestureRecognizers>
+        <Label x:Name="BannerLabel" FontSize="14" FontAttributes="Bold" LineBreakMode="WordWrap" />
+    </Border>
 
     <!-- Floating editor tools: the most-used byte-editing buttons, pinned to the bottom so they stay reachable while
          the long grid scrolls. "▾" tucks them away to a small "▴ Tools" handle; tapping it brings them back. Shown
