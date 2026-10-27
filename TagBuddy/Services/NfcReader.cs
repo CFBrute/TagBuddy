@@ -79,8 +79,13 @@ public sealed partial class NfcReader
     public void SetPasswordSearch(IReadOnlyDictionary<string, byte[]> remembered) =>
         _rememberedPasswords = remembered ?? new Dictionary<string, byte[]>();
 
-    private static byte[]? RememberedPasswordFor(string serial) =>
-        _rememberedPasswords.TryGetValue(serial, out var pwd) && pwd is { Length: 4 } ? pwd : null;
+    /// <summary>The remembered password for a tag. The store keys serials as bare hex ("04112233"), while the reader
+    /// formats them with colons ("04:11:22:33"), so the serial is reduced to its hex digits before the lookup.</summary>
+    private static byte[]? RememberedPasswordFor(string serial)
+    {
+        var key = new string(serial.Where(Uri.IsHexDigit).ToArray());
+        return _rememberedPasswords.TryGetValue(key, out var pwd) && pwd is { Length: 4 } ? pwd : null;
+    }
 
     /// <summary>The password that opened the last Type 2 tag read or written, with that tag's serial, when it is one
     /// worth remembering (the person's typed password, a remembered one, or the factory default — never the Amiibo
