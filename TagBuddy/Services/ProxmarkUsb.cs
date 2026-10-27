@@ -205,6 +205,33 @@ public sealed class ProxmarkUsb
     /// the verified bytes on success, or null on failure.</summary>
     public Task<byte[]?> MagicWriteBlockAsync(int blockNo, byte[] block16) => WithLinkAsync(link => MagicWriteBlock(link, blockNo, block16), null);
 
+    /// <summary>Writes several full blocks to a gen1a magic tag through the backdoor (data, trailers/keys, block 0 —
+    /// anything), in one coupling session. Returns true only if every block was written.</summary>
+    public Task<bool> MagicWriteBlocksAsync(IReadOnlyDictionary<int, byte[]> blocks) => WithLinkAsync(link => MagicWriteBlocks(link, blocks), false);
+
+    private bool MagicWriteBlocks(Link link, IReadOnlyDictionary<int, byte[]> blocks)
+    {
+        if (blocks.Count == 0) { Say("Nothing to write."); return false; }
+        if (!WaitForCard(link)) { Say("No tag on the antenna. Hold the tag flat on the coil and try again."); return false; }
+
+        int done = 0;
+        foreach (var (block, data) in blocks.OrderBy(b => b.Key))
+        {
+            if (data.Length != BlockSize) { Say($"blk {block}: not {BlockSize} bytes, skipped."); continue; }
+            Drain(link.Conn, link.In);
+            var request = OldFrame(CmdMagicSetBlock, 0, MagicSingle, (ulong)block, data);
+            if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the write command could not be written");
+
+            var reply = ReadReply(link.Conn, link.In, 2000);
+            ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
+            ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
+            if (cmd == CmdAck && arg0 >= 1) { done++; Say($"blk {block}: written"); }
+            else { Say($"blk {block}: write FAILED (cmd 0x{cmd:X})"); }
+        }
+        Say($"Wrote {done} of {blocks.Count} blocks.");
+        return done == blocks.Count;
+    }
+
     /// <summary>Polls the HF reader until a card couples (the gen1a card's antenna is weak, so a read often misses).</summary>
     private bool WaitForCard(Link link, int tries = 40)
     {

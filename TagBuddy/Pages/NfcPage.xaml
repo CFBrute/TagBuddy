@@ -56,6 +56,12 @@
                             Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                 </HorizontalStackLayout>
 
+                <!-- Write the edits from the segment editor straight to the gen1a magic tag on the antenna. Shown
+                     (up here with the other Proxmark buttons) only while a Classic block write is pending. -->
+                <Button x:Name="ProxmarkWriteButton" Text="Write edits over USB" Clicked="OnProxmarkWrite" IsVisible="False"
+                        BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
+                        HorizontalOptions="Start" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+
                 <controls:InfoExpander x:Name="ProxmarkLog" Title="Connection log" IsVisible="False" FontSize="12" />
             </VerticalStackLayout>
 
