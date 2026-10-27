@@ -425,6 +425,17 @@ public sealed class ProxmarkUsb
 
     // ------------------------------------------------------------------------------------------------ LF (125 kHz)
     //
+    // TODO (handoff — remove this block once the LF path is verified on a device): the LF read and write below have
+    // never run against real hardware. Three things need checking with a Proxmark connected, using the connection
+    // log the buttons print:
+    //   1. Command ids. The constants below (acquire 0x0205, download 0x0207/0x0208, T55xx write 0x0219) are the
+    //      pre-NG values. If "Read LF" reports "Too few samples", the acquire/download ids are wrong for this
+    //      firmware — compare against the device's own pm3_cmd.h and adjust.
+    //   2. Sample format. If samples come back but no id decodes, DemodEm410x's assumptions (unsigned ADC bytes,
+    //      shortest run = one half-bit) need tuning against a real EM410x capture.
+    //   3. T55xx write arg layout. EncodeEm410xT55xx + T55xxWrite assume the OLD arg form (arg0=data, arg1=block,
+    //      arg2=pwd). Some firmware expects a payload struct; confirm a written card reads back before trusting it.
+    //
     // EXPERIMENTAL and unverified on a device. LF is not like HF: the phone cannot reach 125 kHz at all, so every
     // byte here goes through the Proxmark. A read ACQUIREs raw ADC samples into the device's big buffer, downloads
     // them, and demodulates EM410x (the common door-fob format) on the phone. A write clones an EM410x id onto a
