@@ -40,9 +40,13 @@ public sealed class Type2PasswordStore
         Load().TryGetValue(Serial(uid), out var hex) && hex.Length == 8 && TagPassword.TryParse(hex, out var pwd) ? pwd : null;
 
     /// <summary>Every remembered password keyed by serial, as bytes, for arming a read's password search.</summary>
-    public IReadOnlyDictionary<string, byte[]> All() =>
-        Load().Where(p => p.Value.Length == 8 && TagPassword.TryParse(p.Value, out _))
-              .ToDictionary(p => p.Key, p => TagPassword.TryParse(p.Value, out var pwd) ? pwd : [], StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, byte[]> All()
+    {
+        var all = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (serial, hex) in Load())
+            if (hex.Length == 8 && TagPassword.TryParse(hex, out var pwd)) all[serial] = pwd;
+        return all;
+    }
 
     public int CardCount() => Load().Count;
 
