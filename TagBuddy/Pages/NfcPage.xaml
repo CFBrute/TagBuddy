@@ -49,10 +49,19 @@
                     <Button x:Name="ProxmarkInfoButton" Text="Device info" Clicked="OnProxmarkInfo" IsVisible="False"
                             BackgroundColor="#6B7280" TextColor="White"
                             Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkLfReadButton" Text="Read LF (125 kHz)" Clicked="OnProxmarkLfRead" IsVisible="False"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkLfWriteButton" Text="Write LF…" Clicked="OnProxmarkLfWrite" IsVisible="False"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                     <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
                             BackgroundColor="#6B7280" TextColor="White"
                             Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                 </FlexLayout>
+                <Label x:Name="ProxmarkLfResult" FontSize="13" IsVisible="False" />
+                <controls:InfoExpander Title="About LF (125 kHz) read/write"
+                        Text="Experimental. The phone can't reach 125 kHz, so this runs entirely on the Proxmark. Read captures the LF field and tries to decode an EM410x id (the common door-fob format); other formats (HID, Indala, T5577-hosted) may not decode yet. Write clones an EM410x id onto a T5577 rewritable card held on the LF antenna — no password or lock bits are set, so it can always be rewritten. Both are new and may need tuning for your firmware; the connection log shows each step." />
 
                 <!-- Magic (gen1a) UID tools, shown once the link is verified. Block 0 holds the UID. -->
                 <HorizontalStackLayout x:Name="ProxmarkMagicRow" Spacing="8" IsVisible="False">
