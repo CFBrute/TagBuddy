@@ -223,22 +223,16 @@ public sealed class ProxmarkUsb
 
     private bool Probe(Link link)
     {
-        Drain(link.Conn, link.In);   // clear any backlog the previous command left, so this write is accepted
-        var request = OldFrame(CmdVersion);
-        if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0)
-            throw new Java.IO.IOException("the version request could not be written");
-
-        var reply = ReadReply(link.Conn, link.In, 2000);
+        var reply = Command(link, CmdVersion, readTimeoutMs: 2000, what: "version request");
         if (reply.Length == 0)
         {
             Say("No reply. The port is open but the Proxmark sent nothing back — it may need external power over OTG.");
             return false;
         }
 
-        ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
         string text = AsciiRun(reply);
         Say("✓ The Proxmark replied — this phone CAN talk to the device.");
-        Say($"Reply command: 0x{cmd:X}.");
+        Say($"Reply command: 0x{ReplyCmd(reply):X}.");
         if (text.Length > 3) Say($"Text: {text}");
         return true;
     }
@@ -251,11 +245,7 @@ public sealed class ProxmarkUsb
     private bool DeviceInfo(Link link)
     {
         // OLD version: the banner text (firmware name, build, bootrom) lives in the reply's data area.
-        Drain(link.Conn, link.In);
-        var oldReq = OldFrame(CmdVersion);
-        if (link.Conn.BulkTransfer(link.Out, oldReq, oldReq.Length, 1000) < 0)
-            throw new Java.IO.IOException("the version request could not be written");
-        var oldReply = ReadReply(link.Conn, link.In, 2000);
+        var oldReply = Command(link, CmdVersion, readTimeoutMs: 2000, what: "version request");
         if (oldReply.Length == 0)
         {
             Say("No reply to the version request — the port is open but the device sent nothing (it may need external power over OTG).");
@@ -321,15 +311,9 @@ public sealed class ProxmarkUsb
         foreach (var (block, data) in blocks.OrderBy(b => b.Key))
         {
             if (data.Length != BlockSize) { Say($"blk {block}: not {BlockSize} bytes, skipped."); continue; }
-            Drain(link.Conn, link.In);
-            var request = OldFrame(CmdMagicSetBlock, 0, MagicSingle, (ulong)block, data);
-            if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the write command could not be written");
-
-            var reply = ReadReply(link.Conn, link.In, 2000);
-            ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
-            ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
-            if (cmd == CmdAck && arg0 >= 1) { done++; Say($"blk {block}: written"); }
-            else { Say($"blk {block}: write FAILED (cmd 0x{cmd:X})"); }
+            var reply = Command(link, CmdMagicSetBlock, 0, MagicSingle, (ulong)block, data, readTimeoutMs: 2000, what: "write command");
+            if (IsOkAck(reply)) { done++; Say($"blk {block}: written"); }
+            else { Say($"blk {block}: write FAILED (cmd 0x{ReplyCmd(reply):X})"); }
         }
         Say($"Wrote {done} of {blocks.Count} blocks.");
         return done == blocks.Count;
@@ -338,15 +322,8 @@ public sealed class ProxmarkUsb
     /// <summary>Polls the HF reader until a card couples (the gen1a card's antenna is weak, so a read often misses).</summary>
     private bool WaitForCard(Link link, int tries = 40)
     {
-        var request = OldFrame(CmdHf14aReader, Iso14aConnect);
         for (int i = 0; i < tries; i++)
-        {
-            Drain(link.Conn, link.In);
-            if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the read command could not be written");
-            var reply = ReadReply(link.Conn, link.In, 500);
-            ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
-            if (arg0 >= 1) return true;
-        }
+            if (ReplyArg(Command(link, CmdHf14aReader, Iso14aConnect, readTimeoutMs: 500, what: "read command")) >= 1) return true;
         return false;
     }
 
@@ -363,13 +340,8 @@ public sealed class ProxmarkUsb
     private byte[]? MagicReadBlockRaw(Link link, int blockNo, ulong workFlags)
     {
         // CGETBLOCK: arg0 = work flags, arg2 = block number (arg1 unused).
-        var request = OldFrame(CmdMagicGetBlock, workFlags, 0, (ulong)blockNo);
-        if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the read command could not be written");
-
-        var reply = ReadReply(link.Conn, link.In, 1500);
-        ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
-        ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
-        return cmd == CmdAck && arg0 >= 1 && reply.Length >= 32 + BlockSize ? reply[32..(32 + BlockSize)] : null;
+        var reply = Command(link, CmdMagicGetBlock, workFlags, 0, (ulong)blockNo, what: "read command");
+        return IsOkAck(reply) ? ReplyData(reply, BlockSize) : null;
     }
 
     /// <summary>A card read over the Proxmark: its 14443-A identity and, for a magic card, every block.</summary>
@@ -416,15 +388,10 @@ public sealed class ProxmarkUsb
     /// <summary>Polls the HF reader until a card couples, returning its UID/ATQA/SAK (null if none in time).</summary>
     private (byte[] Uid, byte[] Atqa, byte Sak)? ReadIdentity(Link link)
     {
-        var request = OldFrame(CmdHf14aReader, Iso14aConnect);
         for (int i = 0; i < 40; i++)
         {
-            Drain(link.Conn, link.In);
-            if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the read command could not be written");
-            var reply = ReadReply(link.Conn, link.In, 500);
-            ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
-            ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
-            if (cmd == CmdAck && arg0 >= 1 && reply.Length >= 32 + 14)
+            var reply = Command(link, CmdHf14aReader, Iso14aConnect, readTimeoutMs: 500, what: "read command");
+            if (IsOkAck(reply) && reply.Length >= 32 + 14)
             {
                 var d = reply.AsSpan(32);
                 int uidlen = Math.Clamp((int)d[10], 0, 10);
@@ -439,24 +406,17 @@ public sealed class ProxmarkUsb
         if (block16.Length != BlockSize) { Say($"A block is {BlockSize} bytes."); return null; }
         if (!WaitForCard(link)) { Say("No tag on the antenna. Hold the tag flat on the coil and try again."); return null; }
 
-        Drain(link.Conn, link.In);
         // CSETBLOCK: arg0 = needWipe (0), arg1 = work flags, arg2 = block number; data = the 16 bytes.
-        var request = OldFrame(CmdMagicSetBlock, 0, MagicSingle, (ulong)blockNo, block16);
-        if (link.Conn.BulkTransfer(link.Out, request, request.Length, 1000) < 0) throw new Java.IO.IOException("the write command could not be written");
-
-        var reply = ReadReply(link.Conn, link.In, 2000);
-        ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
-        ulong arg0 = reply.Length >= 16 ? BitConverter.ToUInt64(reply, 8) : 0;
-        if (cmd != CmdAck || arg0 < 1)
+        var reply = Command(link, CmdMagicSetBlock, 0, MagicSingle, (ulong)blockNo, block16, readTimeoutMs: 2000, what: "write command");
+        if (!IsOkAck(reply))
         {
             Say(AsciiRun(reply).Contains("wupC1")
                 ? "Write failed: that tag isn't a gen1a magic card."
-                : $"Write failed (cmd 0x{cmd:X}, arg0 {arg0}).");
+                : $"Write failed (cmd 0x{ReplyCmd(reply):X}, arg0 {ReplyArg(reply)}).");
             return null;
         }
 
         // Read the block back so the caller can confirm it took (card is already coupled).
-        Drain(link.Conn, link.In);
         var check = MagicReadBlockRaw(link, blockNo, MagicSingle);
         if (check is null) { Say("Wrote the block but could not read it back to verify."); return null; }
         return check;
@@ -489,10 +449,7 @@ public sealed class ProxmarkUsb
     private LfRead? LfRead(Link link)
     {
         Say("Acquiring 125 kHz samples (hold the LF tag on the Proxmark's LF antenna)…");
-        Drain(link.Conn, link.In);
-        var acq = OldFrame(CmdLfAcquireRaw125k);
-        if (link.Conn.BulkTransfer(link.Out, acq, acq.Length, 1500) < 0) throw new Java.IO.IOException("the acquire command could not be written");
-        ReadReply(link.Conn, link.In, 3000);   // wait for the acquisition to finish (its ack carries the sample count)
+        Command(link, CmdLfAcquireRaw125k, writeTimeoutMs: 1500, readTimeoutMs: 3000, what: "acquire command");   // its ack carries the sample count
 
         var samples = DownloadRaw(link, 20000);
         Say($"Captured {samples.Length} samples.");
@@ -513,18 +470,14 @@ public sealed class ProxmarkUsb
     private byte[] DownloadRaw(Link link, int maxBytes)
     {
         var outp = new List<byte>(maxBytes);
-        Drain(link.Conn, link.In);
-        var req = OldFrame(CmdLfDownloadRaw125k, 0, (ulong)maxBytes);
-        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1000) < 0) throw new Java.IO.IOException("the download command could not be written");
+        Send(link, CmdLfDownloadRaw125k, 0, (ulong)maxBytes, what: "download command");
 
         while (outp.Count < maxBytes)
         {
             var f = ReadReply(link.Conn, link.In, 1500);
-            if (f.Length < 32) break;
-            ulong cmd = BitConverter.ToUInt64(f, 0);
-            if (cmd != CmdLfDownloadedRaw125k) break;   // a non-sample frame (e.g. a final ack): the stream is done
-            ulong len = BitConverter.ToUInt64(f, 16);
-            int n = Math.Min(Math.Min((int)len, f.Length - 32), 512);
+            if (f.Length < 32 || ReplyCmd(f) != CmdLfDownloadedRaw125k) break;   // a non-sample frame (final ack): done
+            // arg1 is this frame's byte count; the samples follow in the data area.
+            int n = Math.Min(Math.Min((int)ReplyArg(f, 1), f.Length - 32), 512);
             if (n <= 0) break;
             for (int i = 0; i < n; i++) outp.Add(f[32 + i]);
         }
@@ -623,14 +576,10 @@ public sealed class ProxmarkUsb
 
     private bool T55xxWrite(Link link, int block, uint data)
     {
-        Drain(link.Conn, link.In);
         // OLD T55xx write: arg0 = data, arg1 = block, arg2 = password (0, and no password flag set).
-        var req = OldFrame(CmdLfT55xxWriteBlock, data, (ulong)block, 0);
-        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1500) < 0) throw new Java.IO.IOException("the T55xx write could not be written");
-        var reply = ReadReply(link.Conn, link.In, 2000);
+        var reply = Command(link, CmdLfT55xxWriteBlock, data, (ulong)block, 0, writeTimeoutMs: 1500, readTimeoutMs: 2000, what: "T55xx write");
         // The firmware does not always ack a T55xx write; treat any reply, or none, as "sent" and rely on a re-read.
-        ulong cmd = reply.Length >= 8 ? BitConverter.ToUInt64(reply, 0) : 0;
-        Say($"blk {block}: sent (reply cmd 0x{cmd:X}).");
+        Say($"blk {block}: sent (reply cmd 0x{ReplyCmd(reply):X}).");
         return true;
     }
 
@@ -765,6 +714,39 @@ public sealed class ProxmarkUsb
         return all.ToArray();
     }
 
+    // --- one place for the drain → write → read → parse dance every command does over the OLD framing ---
+
+    /// <summary>Writes one OLD-framed command (draining any backlog first, so the write is accepted). Throws when the
+    /// write fails, naming the command with <paramref name="what"/>.</summary>
+    private void Send(Link link, ulong cmd, ulong arg0 = 0, ulong arg1 = 0, ulong arg2 = 0, byte[]? data = null,
+                      int timeoutMs = 1000, string what = "command")
+    {
+        Drain(link.Conn, link.In);
+        var req = OldFrame(cmd, arg0, arg1, arg2, data);
+        if (link.Conn.BulkTransfer(link.Out, req, req.Length, timeoutMs) < 0)
+            throw new Java.IO.IOException($"the {what} could not be written");
+    }
+
+    /// <summary>Sends one OLD-framed command and returns its reply (empty when none came in time).</summary>
+    private byte[] Command(Link link, ulong cmd, ulong arg0 = 0, ulong arg1 = 0, ulong arg2 = 0, byte[]? data = null,
+                           int writeTimeoutMs = 1000, int readTimeoutMs = 1500, string what = "command")
+    {
+        Send(link, cmd, arg0, arg1, arg2, data, writeTimeoutMs, what);
+        return ReadReply(link.Conn, link.In, readTimeoutMs);
+    }
+
+    /// <summary>The command word of a reply frame (bytes 0-7), or 0 when the reply is too short.</summary>
+    private static ulong ReplyCmd(byte[] r) => r.Length >= 8 ? BitConverter.ToUInt64(r, 0) : 0;
+
+    /// <summary>Reply arg 0, 1 or 2 (the three 64-bit words after the command), or 0 when the reply is too short.</summary>
+    private static ulong ReplyArg(byte[] r, int index = 0) => r.Length >= 16 + index * 8 ? BitConverter.ToUInt64(r, 8 + index * 8) : 0;
+
+    /// <summary>A reply's data area (from byte 32) of the given length, or null when the reply is too short.</summary>
+    private static byte[]? ReplyData(byte[] r, int length) => r.Length >= 32 + length ? r[32..(32 + length)] : null;
+
+    /// <summary>Whether a reply is an ACK that reports success (arg0 ≥ 1), the shape most OLD commands answer with.</summary>
+    private static bool IsOkAck(byte[] r) => ReplyCmd(r) == CmdAck && ReplyArg(r) >= 1;
+
     /// <summary>Builds a host→device OLD frame: 64-bit command, three 64-bit args, 512 data bytes (544 total, LE).</summary>
     private static byte[] OldFrame(ulong cmd, ulong arg0 = 0, ulong arg1 = 0, ulong arg2 = 0, byte[]? data = null)
     {
@@ -788,8 +770,6 @@ public sealed class ProxmarkUsb
         }
         return best;
     }
-
-    private static string Hex(byte[] b) => string.Join(" ", b.Select(x => x.ToString("X2")));
 
     private sealed class PermissionReceiver(Action<bool> onResult) : BroadcastReceiver
     {
