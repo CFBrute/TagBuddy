@@ -146,6 +146,10 @@ public sealed partial class NfcReader
     /// the card so it opens quickly next time.</summary>
     public static IReadOnlyList<(int Sector, string Key)> ClassicKeysFound { get; private set; } = [];
 
+    /// <summary>Clears the keys from the last read, so a read from another source (the Proxmark, over USB) is not
+    /// credited with the phone reader's stale keys when it is shown.</summary>
+    public static void ClearClassicKeysFound() => ClassicKeysFound = [];
+
     /// <summary>Sets the extra MIFARE Classic keys a read tries beyond the built-in defaults: <paramref name="remembered"/>
     /// always (small), and <paramref name="dictionary"/> only when <paramref name="tryAll"/> is set (large).</summary>
     public void SetClassicKeySearch(IReadOnlyList<byte[]> remembered, IReadOnlyList<byte[]> dictionary, bool tryAll)

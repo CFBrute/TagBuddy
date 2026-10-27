@@ -26,17 +26,12 @@
                       Icon="tab_scan.png"
                       Route="scan"
                       ContentTemplate="{DataTemplate pages:ScanPage}" />
-        <ShellContent Title="NFC"
+        <!-- RF: tags by the phone's own NFC and (when one is plugged in) by a Proxmark3 on USB — HF and LF alike.
+             Its route stays "nfc" so the handoffs from other tabs keep working. -->
+        <ShellContent Title="RF"
                       Icon="tab_nfc.png"
                       Route="nfc"
                       ContentTemplate="{DataTemplate pages:NfcPage}" />
-        <!-- RF: reading over a Proxmark3 on USB (HF + LF). Hidden until one is plugged in; AppShell toggles it. -->
-        <ShellContent Title="RF"
-                      x:Name="RfTab"
-                      Icon="tab_nfc.png"
-                      Route="rf"
-                      IsVisible="False"
-                      ContentTemplate="{DataTemplate pages:ProxmarkPage}" />
         <!-- More has three top tabs: Settings first (used more often), then Help, then About -->
         <Tab x:Name="MoreTab"
              Title="More"
