@@ -30,6 +30,13 @@
                       Icon="tab_nfc.png"
                       Route="nfc"
                       ContentTemplate="{DataTemplate pages:NfcPage}" />
+        <!-- RF: reading over a Proxmark3 on USB (HF + LF). Hidden until one is plugged in; AppShell toggles it. -->
+        <ShellContent Title="RF"
+                      x:Name="RfTab"
+                      Icon="tab_nfc.png"
+                      Route="rf"
+                      IsVisible="False"
+                      ContentTemplate="{DataTemplate pages:ProxmarkPage}" />
         <!-- More has three top tabs: Settings first (used more often), then Help, then About -->
         <Tab x:Name="MoreTab"
              Title="More"

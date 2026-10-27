@@ -29,15 +29,6 @@ public partial class SettingsPage : ContentPage
         ShowPasswordStoreInfo();
     }
 
-    private async void OnOpenProxmark(object? sender, EventArgs e)
-    {
-#if ANDROID
-        await Shell.Current.GoToAsync(ProxmarkPage.Route);
-#else
-        await Task.CompletedTask;
-#endif
-    }
-
     private readonly MifareKeyStore _keyStore = new();
     private readonly Type2PasswordStore _passwordStore = new();
 
