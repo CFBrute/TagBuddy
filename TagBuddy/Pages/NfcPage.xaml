@@ -4,7 +4,7 @@
              xmlns:controls="clr-namespace:TagBuddy.Controls"
              xmlns:pages="clr-namespace:TagBuddy.Pages"
              x:Class="TagBuddy.Pages.NfcPage"
-             Title="NFC">
+             Title="RF">
     <Grid>
     <ScrollView>
         <VerticalStackLayout Padding="20,20,20,80" Spacing="12">
@@ -26,6 +26,38 @@
             <!-- The last read/write result, kept here to re-read after the top banner has gone: a collapsed one-line
                  summary at the top of the page that expands to the full message. -->
             <controls:InfoExpander x:Name="LastResultExpander" IsVisible="False" FontSize="13" Margin="0,2,0,0" />
+
+            <!-- Proxmark on USB: shown only while one is plugged in. For now a connection check; reading cards over it
+                 (HF and the 125 kHz LF band the phone can't reach) comes next, into this same page. -->
+            <VerticalStackLayout x:Name="ProxmarkPanel" Spacing="8" IsVisible="False"
+                                 Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
+                <HorizontalStackLayout Spacing="8">
+                    <BoxView x:Name="ProxmarkDot" WidthRequest="12" HeightRequest="12" CornerRadius="6"
+                             Color="#F59E0B" VerticalOptions="Center" />
+                    <Label Text="Proxmark on USB" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+                <Label x:Name="ProxmarkStatus" FontSize="12" TextColor="Gray" />
+                <HorizontalStackLayout Spacing="8">
+                    <Button x:Name="ProxmarkReadButton" Text="Read tag" Clicked="OnProxmarkRead" IsVisible="False"
+                            BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
+                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                </HorizontalStackLayout>
+
+                <!-- Magic (gen1a) UID tools, shown once the link is verified. Block 0 holds the UID. -->
+                <HorizontalStackLayout x:Name="ProxmarkMagicRow" Spacing="8" IsVisible="False">
+                    <Button x:Name="ProxmarkReadBlock0Button" Text="Read block 0" Clicked="OnProxmarkReadBlock0"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkSetUidButton" Text="Set UID…" Clicked="OnProxmarkSetUid" IsEnabled="False"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                </HorizontalStackLayout>
+
+                <controls:InfoExpander x:Name="ProxmarkLog" Title="Connection log" IsVisible="False" FontSize="12" />
+            </VerticalStackLayout>
 
             <!-- Shown only once a protected tag is noticed (reading or writing); never a thing to set up in advance. -->
             <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"

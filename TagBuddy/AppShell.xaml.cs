@@ -20,9 +20,10 @@ public partial class AppShell : Shell
         NfcReader.Instance.TagDispatched += ShowDispatchedTag;
         Loaded += (_, _) => ShowDispatchedTag();
 
-        // The RF tab appears only while a Proxmark is plugged in. Track attach/detach and the current state.
-        ProxmarkUsb.PresenceChanged += RefreshRfTab;
-        Loaded += (_, _) => RefreshRfTab();
+        // Plugging in a Proxmark jumps to the RF tab (the NFC route), where its panel appears. The page itself
+        // shows/hides that panel; here we only bring the tab forward on a fresh attach.
+        ProxmarkUsb.PresenceChanged += ShowRfOnAttach;
+        Loaded += (_, _) => ShowRfOnAttach();
 #endif
     }
 
@@ -44,23 +45,13 @@ public partial class AppShell : Shell
         catch { /* navigation not possible right now; the tag waits for the next visit to the NFC tab */ }
     }
 
-    /// <summary>Shows the RF tab while a Proxmark is attached and hides it otherwise, re-checking the live USB state
-    /// rather than trusting the event. On a fresh attach it jumps to the tab; on detach it leaves the tab if open.</summary>
-    private void RefreshRfTab() => MainThread.BeginInvokeOnMainThread(async () =>
+    /// <summary>On a fresh Proxmark attach, bring the RF tab (the NFC route) forward so its panel is seen.</summary>
+    private void ShowRfOnAttach() => MainThread.BeginInvokeOnMainThread(async () =>
     {
-        if (!IsLoaded) return;
-        bool present = ProxmarkUsb.IsAttached();
-        RfTab.IsVisible = present;
-
-        if (present && ProxmarkUsb.PendingAttach)
-        {
-            ProxmarkUsb.ClearPending();
-            try { await GoToAsync("//rf"); } catch { /* can't navigate right now; the RF tab is still there to tap */ }
-        }
-        else if (!present && CurrentPage is ProxmarkPage)
-        {
-            try { await GoToAsync("//nfc"); } catch { /* leaving the now-gone tab; it just hides */ }
-        }
+        if (!IsLoaded || !ProxmarkUsb.PendingAttach || !ProxmarkUsb.IsAttached()) return;
+        ProxmarkUsb.ClearPending();
+        if (CurrentPage is NfcPage) return;
+        try { await GoToAsync("//nfc"); } catch { /* can't navigate right now; the RF tab is still there to tap */ }
     });
 #endif
 }

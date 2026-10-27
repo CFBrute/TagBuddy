@@ -116,6 +116,10 @@ public partial class NfcPage : ContentPage
         WriteTypePicker.SelectedIndex = 0;
         SetMode(write: false);
         SetPasswordMode(asText: false);   // hex by default, the way RFID tools show a password
+
+        // The Proxmark panel shows only while one is plugged in; keep it in step as the device comes and goes.
+        ProxmarkUsb.PresenceChanged += RefreshProxmarkPanel;
+        RefreshProxmarkPanel();
     }
 
     /// <summary>Something arrived from Saved: switch to write mode and arm it.</summary>
@@ -217,6 +221,9 @@ public partial class NfcPage : ContentPage
     {
         base.OnAppearing();
 
+        ProxmarkUsb.ClearPending();   // arriving here acts on any pending attach
+        RefreshProxmarkPanel();
+
         if (!_nfc.IsSupported)
         {
             StatusLabel.Text = "This phone has no NFC reader";
@@ -275,6 +282,178 @@ public partial class NfcPage : ContentPage
     }
 
     private void OnOpenSettings(object? sender, EventArgs e) => _nfc.OpenSettings();
+
+    // --- Proxmark on USB: the RF page's other source (shown only while one is plugged in) ---
+
+    private bool _proxmarkChecking;
+    private bool _proxmarkVerified;
+
+    // Status light: orange while checking, green when the link is confirmed, red when it fails.
+    private static readonly Color ProxmarkBusy = Color.FromArgb("#F59E0B");
+    private static readonly Color ProxmarkOk = Color.FromArgb("#22C55E");
+    private static readonly Color ProxmarkBad = Color.FromArgb("#DC2626");
+
+    /// <summary>Shows or hides the Proxmark panel to match whether one is plugged in, and verifies the link once on
+    /// a fresh attach so the status light earns its colour without the person tapping anything.</summary>
+    private void RefreshProxmarkPanel() => MainThread.BeginInvokeOnMainThread(() =>
+    {
+        bool present = ProxmarkUsb.IsAttached();
+        ProxmarkPanel.IsVisible = present;
+        if (!present) { _proxmarkVerified = false; return; }
+        if (!_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true);
+    });
+
+    /// <summary>Asks the Proxmark for its version and colours the status light by the result.</summary>
+    private async Task VerifyProxmarkAsync(bool auto)
+    {
+        if (_proxmarkChecking) return;
+        _proxmarkChecking = true;
+        ProxmarkDot.Color = ProxmarkBusy;
+        ProxmarkStatus.Text = "Checking the link…";
+        ProxmarkProbeButton.IsEnabled = false;
+        ProxmarkLog.Text = "";
+        if (!auto) ProxmarkLog.IsVisible = true;   // a manual check shows the log straight away
+
+        var usb = new ProxmarkUsb();
+        usb.Log += AppendProxmarkLog;
+        bool ok = false;
+        try { ok = await usb.ProbeAsync(); }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally { usb.Log -= AppendProxmarkLog; }
+
+        _proxmarkChecking = false;
+        _proxmarkVerified = ok;
+        ProxmarkDot.Color = ok ? ProxmarkOk : ProxmarkBad;
+        ProxmarkStatus.Text = ok
+            ? "Connected. Hold a 13.56 MHz tag to the Proxmark's antenna and tap Read."
+            : "Detected, but the link check failed — see the log.";
+        ProxmarkReadButton.IsVisible = ok;
+        ProxmarkMagicRow.IsVisible = ok;
+        if (!ok) ProxmarkLog.IsVisible = true;
+        ProxmarkProbeButton.IsEnabled = ProxmarkUsb.IsAttached();
+    }
+
+    private void OnProxmarkProbe(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false);
+
+    /// <summary>Reads the card on the Proxmark's antenna — a full backdoor dump for a gen1a magic card, its identity
+    /// otherwise — and shows it in the normal result view, where it can be saved, edited and compared.</summary>
+    private async void OnProxmarkRead(object? sender, EventArgs e)
+    {
+        ProxmarkReadButton.IsEnabled = false;
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = new ProxmarkUsb();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            var dump = await usb.ReadCardAsync();
+            if (dump is not null)
+            {
+                var tag = dump.IsMagic
+                    ? ProxmarkClassic.FromDump(dump.Uid, dump.Atqa, dump.Sak, dump.Blocks, "Proxmark3 (USB)")
+                    : ProxmarkClassic.IdentityOnly(dump.Uid, dump.Atqa, dump.Sak, "Proxmark3 (USB)");
+                NfcReader.ClearClassicKeysFound();   // don't credit this read with the phone reader's stale keys
+                OnTagRead(tag, fromSaved: false);
+                TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
+            }
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally
+        {
+            usb.Log -= AppendProxmarkLog;
+            ProxmarkReadButton.IsEnabled = ProxmarkUsb.IsAttached();
+        }
+    }
+
+    // The last block 0 read from a magic card, so "Set UID" can keep its SAK/ATQA/manufacturer bytes.
+    private byte[]? _proxmarkBlock0;
+
+    /// <summary>Reads block 0 of a gen1a magic card through the backdoor and shows it decoded.</summary>
+    private async void OnProxmarkReadBlock0(object? sender, EventArgs e)
+    {
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        ProxmarkReadBlock0Button.IsEnabled = false;
+        var usb = new ProxmarkUsb();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            var block = await usb.MagicReadBlockAsync(0);
+            if (block is { Length: 16 })
+            {
+                _proxmarkBlock0 = block;
+                AppendProxmarkLog($"Block 0: {Hex(block)}");
+                AppendProxmarkLog($"UID {Hex(block[..4])}  ·  BCC {block[4]:X2}  ·  SAK {block[5]:X2}  ·  ATQA {Hex(block[6..8])}");
+                ProxmarkSetUidButton.IsEnabled = true;
+            }
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally
+        {
+            usb.Log -= AppendProxmarkLog;
+            ProxmarkReadBlock0Button.IsEnabled = ProxmarkUsb.IsAttached();
+        }
+    }
+
+    /// <summary>Asks for a new 4-byte UID, keeps the rest of block 0, computes the BCC, writes it and verifies.</summary>
+    private async void OnProxmarkSetUid(object? sender, EventArgs e)
+    {
+        if (_proxmarkBlock0 is not { Length: 16 }) { await DisplayAlertAsync("Read block 0 first", "Tap \"Read block 0\" so the rest of the block is kept when the UID changes.", "OK"); return; }
+
+        var entry = await DisplayPromptAsync("Set UID", "A new 4-byte UID (8 hex digits). The check byte is computed for you.",
+            accept: "Next", cancel: "Cancel", placeholder: "e.g. 7636DA47", maxLength: 11, keyboard: Keyboard.Text,
+            initialValue: Hex(_proxmarkBlock0[..4]).Replace(" ", ""));
+        if (string.IsNullOrWhiteSpace(entry)) return;
+
+        var uid = ParseHex(entry);
+        if (uid is not { Length: 4 }) { await DisplayAlertAsync("Not a 4-byte UID", "Enter exactly 8 hex digits, e.g. 7636DA47.", "OK"); return; }
+
+        var block = (byte[])_proxmarkBlock0.Clone();
+        Array.Copy(uid, block, 4);
+        block[4] = ProxmarkUsb.Bcc4(uid);   // BCC = UID0^UID1^UID2^UID3
+
+        bool go = await DisplayAlertAsync("Write block 0?",
+            $"Write UID {Hex(uid)} (BCC {block[4]:X2}) to the tag on the antenna?\n\nFull block 0:\n{Hex(block)}\n\nThis changes the tag's UID. On a gen1a magic tag it can always be rewritten.",
+            "Write", "Cancel");
+        if (!go) return;
+
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        ProxmarkSetUidButton.IsEnabled = false;
+        var usb = new ProxmarkUsb();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            var written = await usb.MagicWriteBlockAsync(0, block);
+            if (written is { Length: 16 })
+            {
+                _proxmarkBlock0 = written;
+                AppendProxmarkLog($"✓ Written and verified. Block 0: {Hex(written)}");
+                AppendProxmarkLog($"UID is now {Hex(written[..4])}.");
+            }
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally
+        {
+            usb.Log -= AppendProxmarkLog;
+            ProxmarkSetUidButton.IsEnabled = ProxmarkUsb.IsAttached();
+        }
+    }
+
+    private static string Hex(byte[] b) => string.Join(" ", b.Select(x => x.ToString("X2")));
+
+    /// <summary>Parses a hex string (spaces and colons allowed) to bytes, or null if it isn't valid pairs.</summary>
+    private static byte[]? ParseHex(string s)
+    {
+        var clean = new string(s.Where(Uri.IsHexDigit).ToArray());
+        if (clean.Length == 0 || clean.Length % 2 != 0) return null;
+        var bytes = new byte[clean.Length / 2];
+        for (int i = 0; i < bytes.Length; i++) bytes[i] = Convert.ToByte(clean.Substring(i * 2, 2), 16);
+        return bytes;
+    }
+
+    private void AppendProxmarkLog(string line) => MainThread.BeginInvokeOnMainThread(() =>
+        ProxmarkLog.Text = string.IsNullOrEmpty(ProxmarkLog.Text) ? line : ProxmarkLog.Text + "\n" + line);
 
     // ---------------------------------------------------------------- tag password
 
