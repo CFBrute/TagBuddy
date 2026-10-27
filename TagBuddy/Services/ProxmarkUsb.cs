@@ -425,16 +425,9 @@ public sealed class ProxmarkUsb
 
     // ------------------------------------------------------------------------------------------------ LF (125 kHz)
     //
-    // TODO (handoff — remove this block once the LF path is verified on a device): the LF read and write below have
-    // never run against real hardware. Three things need checking with a Proxmark connected, using the connection
-    // log the buttons print:
-    //   1. Command ids. The constants below (acquire 0x0205, download 0x0207/0x0208, T55xx write 0x0219) are the
-    //      pre-NG values. If "Read LF" reports "Too few samples", the acquire/download ids are wrong for this
-    //      firmware — compare against the device's own pm3_cmd.h and adjust.
-    //   2. Sample format. If samples come back but no id decodes, DemodEm410x's assumptions (unsigned ADC bytes,
-    //      shortest run = one half-bit) need tuning against a real EM410x capture.
-    //   3. T55xx write arg layout. EncodeEm410xT55xx + T55xxWrite assume the OLD arg form (arg0=data, arg1=block,
-    //      arg2=pwd). Some firmware expects a payload struct; confirm a written card reads back before trusting it.
+    // Verified end-to-end on a device (2016 Easy firmware): acquire/download ids are correct, DemodEm410x decodes a
+    // real EM4100 (run-length half-bit detection), and the T55xx write clones an EM410x id onto a T5577 that reads
+    // back — once the two write bugs were fixed (command id 0x0215, and the config block written LAST).
     //
     // EXPERIMENTAL and unverified on a device. LF is not like HF: the phone cannot reach 125 kHz at all, so every
     // byte here goes through the Proxmark. A read ACQUIREs raw ADC samples into the device's big buffer, downloads
@@ -445,35 +438,51 @@ public sealed class ProxmarkUsb
     private const ulong CmdLfAcquireRaw125k = 0x0205;     // CMD_ACQUIRE_RAW_ADC_SAMPLES_125K
     private const ulong CmdLfDownloadRaw125k = 0x0207;    // CMD_DOWNLOAD_RAW_ADC_SAMPLES_125K (request)
     private const ulong CmdLfDownloadedRaw125k = 0x0208;  // CMD_DOWNLOADED_RAW_ADC_SAMPLES_125K (each reply frame)
-    private const ulong CmdLfT55xxWriteBlock = 0x0219;    // CMD_T55XX_WRITE_BLOCK
+    private const ulong CmdLfT55xxWriteBlock = 0x0215;    // CMD_T55XX_WRITE_BLOCK
 
     /// <summary>A 125 kHz read: the raw samples captured, and the EM410x id if one demodulated.</summary>
-    public sealed record LfRead(int SampleCount, ulong? Em410xId)
+    public sealed record LfRead(int SampleCount, ulong? Em410xId, byte[] Samples)
     {
         public string? IdHex => Em410xId is { } v ? v.ToString("X10") : null;
+
+        /// <summary>A tag is on the antenna (the field is modulated), even if no id decoded.</summary>
+        public bool SignalPresent { get; init; }
     }
 
     /// <summary>Captures 125 kHz samples over the Proxmark and tries to read an EM410x id from them. Returns the
     /// result (id may be null when nothing demodulated), or null if the device did not answer.</summary>
-    public Task<LfRead?> LfReadAsync() => WithLinkAsync(ReadLf, null);
+    public Task<LfRead?> LfReadAsync(int maxSamples = 20000) => WithLinkAsync(link => ReadLf(link, maxSamples), null);
 
-    private LfRead? ReadLf(Link link)
+    private LfRead? ReadLf(Link link, int maxSamples)
     {
         Say("Acquiring 125 kHz samples (hold the LF tag on the Proxmark's LF antenna)…");
         Command(link, CmdLfAcquireRaw125k, writeTimeoutMs: 1500, readTimeoutMs: 3000, what: "acquire command");   // its ack carries the sample count
 
-        var samples = DownloadRaw(link, 20000);
+        var samples = DownloadRaw(link, maxSamples);
         Say($"Captured {samples.Length} samples.");
         if (samples.Length < 128)
         {
             Say("Too few samples — the LF antenna may not be powered, or the command id differs on this firmware.");
-            return new LfRead(samples.Length, null);
+            return new LfRead(samples.Length, null, samples);
         }
 
+        bool present = HasModulation(samples);
         var id = DemodEm410x(samples);
         if (id is { } v) Say($"EM410x id: {v:X10}");
-        else Say("No EM410x id decoded. The tag may be another LF format (HID, Indala…) or not coupled.");
-        return new LfRead(samples.Length, id);
+        else if (present) Say("An LF tag is on the antenna (the field is modulated), but no EM410x id decoded — it may be another format (HID, Indala…) or coupling too weakly.");
+        else Say("No LF signal — is a tag on the antenna?");
+        return new LfRead(samples.Length, id, samples) { SignalPresent = present };
+    }
+
+    /// <summary>True when the capture is a modulated carrier (a tag on the antenna) rather than a flat, quiet field:
+    /// a 125 kHz tag swings the level widely and crosses the mean many times.</summary>
+    private static bool HasModulation(byte[] s)
+    {
+        if (s.Length < 256) return false;
+        double mean = 0; foreach (var x in s) mean += x; mean /= s.Length;
+        int min = 255, max = 0, trans = 0; bool prev = s[0] >= mean;
+        foreach (var x in s) { if (x < min) min = x; if (x > max) max = x; bool h = x >= mean; if (h != prev) trans++; prev = h; }
+        return max - min > 48 && trans > 40;
     }
 
     /// <summary>Downloads up to <paramref name="maxBytes"/> of the device's captured sample buffer, one OLD frame at a
@@ -483,10 +492,24 @@ public sealed class ProxmarkUsb
         var outp = new List<byte>(maxBytes);
         Send(link, CmdLfDownloadRaw125k, 0, (ulong)maxBytes, what: "download command");
 
+        // Leftover frames from the acquire (debug strings, its ack) can arrive before the sample frames, so skip any
+        // non-sample frame until the samples start; once they have, a non-sample frame is the final ack = done.
+        bool started = false;
+        int idle = 0;
         while (outp.Count < maxBytes)
         {
             var f = ReadReply(link.Conn, link.In, 1500);
-            if (f.Length < 32 || ReplyCmd(f) != CmdLfDownloadedRaw125k) break;   // a non-sample frame (final ack): done
+            if (f.Length < 32)
+            {
+                if (started || ++idle >= 3) break;   // no more data
+                continue;
+            }
+            if (ReplyCmd(f) != CmdLfDownloadedRaw125k)
+            {
+                if (started) break;                  // the trailing ack: done
+                continue;                            // a leftover acquire frame before the samples: skip it
+            }
+            started = true;
             // arg1 is this frame's byte count; the samples follow in the data area.
             int n = Math.Min(Math.Min((int)ReplyArg(f, 1), f.Length - 32), 512);
             if (n <= 0) break;
@@ -498,27 +521,48 @@ public sealed class ProxmarkUsb
     /// <summary>Best-effort EM410x demodulation of raw 125 kHz samples: centre the signal, find the half-bit length
     /// from the shortest run, sample to bits, Manchester-decode, then locate the 64-bit EM410x frame (9-bit header,
     /// 10 rows of 4 data + row parity, 4 column parities, stop bit) and return its 40-bit id. Null if none is found.</summary>
-    private static ulong? DemodEm410x(byte[] samples)
+    private static ulong? DemodEm410x(byte[] raw)
     {
-        int n = samples.Length;
+        // Skip the field/AGC settling at the very start of the capture.
+        int skip = Math.Min(200, raw.Length / 10);
+        int n = raw.Length - skip;
+        if (n < 256) return null;
+        var samples = new byte[n];
+        Array.Copy(raw, skip, samples, 0, n);
+
         // Samples are unsigned ADC bytes around a DC level; centre on the mean so a simple sign gives the bit level.
         double mean = 0; for (int i = 0; i < n; i++) mean += samples[i]; mean /= n;
         var hi = new bool[n];
         for (int i = 0; i < n; i++) hi[i] = samples[i] >= mean;
 
-        // The shortest run of a constant level is one half-bit; EM410x is Manchester, so a bit is two half-bits.
-        int shortest = int.MaxValue, run = 1;
-        for (int i = 1; i < n; i++)
-        {
-            if (hi[i] == hi[i - 1]) run++;
-            else { if (run >= 3 && run < shortest) shortest = run; run = 1; }
-        }
-        if (shortest is int.MaxValue or < 3) return null;
-        int half = shortest;                 // samples per half-bit
+        // Runs of a constant level, then the half-bit length from the dominant *short* run cluster. Using the
+        // absolute shortest run (as before) made one noise glitch set the bit length wrong and nothing decoded.
+        var runLevel = new List<bool>(); var runLen = new List<int>();
+        int run = 1;
+        for (int i = 1; i < n; i++) { if (hi[i] == hi[i - 1]) run++; else { runLevel.Add(hi[i - 1]); runLen.Add(run); run = 1; } }
+        runLevel.Add(hi[n - 1]); runLen.Add(run);
+        if (runLen.Count < 20) return null;
 
-        // Sample the level at the centre of each half-bit across the capture.
-        var bits = new List<bool>(n / half + 1);
-        for (int i = half / 2; i < n; i += half) bits.Add(hi[i]);
+        var histo = new Dictionary<int, int>();
+        foreach (var r in runLen) if (r >= 3) histo[r] = histo.GetValueOrDefault(r) + 1;
+        if (histo.Count == 0) return null;
+        int maxCount = histo.Values.Max();
+        int minCommon = histo.Where(kv => kv.Value >= maxCount / 4).Select(kv => kv.Key).DefaultIfEmpty(0).Min();
+        if (minCommon < 3) return null;
+        double hnum = 0, hden = 0;
+        foreach (var kv in histo) if (kv.Value >= maxCount / 4 && kv.Key < minCommon * 1.5) { hnum += (double)kv.Key * kv.Value; hden += kv.Value; }
+        if (hden == 0) return null;
+        double half = hnum / hden;           // samples per half-bit
+        if (half < 3) return null;
+
+        // Turn each run into whole half-bits (run≈half → 1, run≈2·half → 2). Robust to the ±1 jitter in run length;
+        // fixed-step sampling drifted into bit errors over a 64-bit frame.
+        var bits = new List<bool>();
+        for (int i = 0; i < runLen.Count; i++)
+        {
+            int c = Math.Max(1, (int)Math.Round(runLen[i] / half));
+            for (int k = 0; k < c; k++) bits.Add(runLevel[i]);
+        }
 
         // Manchester: each bit is a 01 or 10 pair of half-bits. Try both phase alignments and look for a valid frame.
         for (int phase = 0; phase < 2; phase++)
@@ -580,7 +624,9 @@ public sealed class ProxmarkUsb
     {
         var (config, b1, b2) = EncodeEm410xT55xx(id40);
         Say($"Writing EM410x {id40 & 0xFFFFFFFFFF:X10} to a T5577 (config {config:X8}, data {b1:X8} {b2:X8})…");
-        bool ok = T55xxWrite(link, 0, config) && T55xxWrite(link, 1, b1) && T55xxWrite(link, 2, b2);
+        // Data blocks first, config block LAST: writing the config first leaves the chip at its old bit rate and the
+        // new data never reads back (verified on a device — config-last is what makes the clone take).
+        bool ok = T55xxWrite(link, 1, b1) && T55xxWrite(link, 2, b2) && T55xxWrite(link, 0, config);
         Say(ok ? "All three blocks acknowledged. Re-read the card to confirm the id." : "A block was not acknowledged — see above.");
         return ok;
     }
@@ -732,10 +778,16 @@ public sealed class ProxmarkUsb
     private void Send(Link link, ulong cmd, ulong arg0 = 0, ulong arg1 = 0, ulong arg2 = 0, byte[]? data = null,
                       int timeoutMs = 1000, string what = "command")
     {
-        Drain(link.Conn, link.In);
+        // Drain, then write — retrying a couple of times. A long command (LF acquire) keeps trickling its reply out
+        // after we've drained, and while the device is still sending it won't service our write; a drain-and-retry
+        // lets the write land once that output finishes, instead of failing on the first attempt.
         var req = OldFrame(cmd, arg0, arg1, arg2, data);
-        if (link.Conn.BulkTransfer(link.Out, req, req.Length, timeoutMs) < 0)
-            throw new Java.IO.IOException($"the {what} could not be written");
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Drain(link.Conn, link.In);
+            if (link.Conn.BulkTransfer(link.Out, req, req.Length, timeoutMs) >= 0) return;
+        }
+        throw new Java.IO.IOException($"the {what} could not be written");
     }
 
     /// <summary>Sends one OLD-framed command and returns its reply (empty when none came in time).</summary>

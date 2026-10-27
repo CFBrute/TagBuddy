@@ -263,6 +263,7 @@ public partial class NfcPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        StopLfLive();
         _active = false;
         _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
@@ -337,7 +338,7 @@ public partial class NfcPage : ContentPage
             ProxmarkDot.Color = ProxmarkBusy;
             ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
             ProxmarkReadButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
-            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfResult.IsVisible = false;
+            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = false;
             return;
         }
         if (known && !_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true, allowAny: false);
@@ -377,6 +378,7 @@ public partial class NfcPage : ContentPage
         ProxmarkInfoButton.IsVisible = ok;
         ProxmarkLfReadButton.IsVisible = ok;
         ProxmarkLfWriteButton.IsVisible = ok;
+        ProxmarkLfLiveButton.IsVisible = ok;
         ProxmarkTryForeignButton.IsVisible = !ok && ProxmarkUsb.ForeignUsbPresent();
         if (!ok) ProxmarkLog.IsVisible = true;
         ProxmarkProbeButton.IsEnabled = ProxmarkUsb.IsAttached();
@@ -393,21 +395,80 @@ public partial class NfcPage : ContentPage
     /// radio can never reach. Displayed in the log and, when an id is found, on its own line like a tag's identity.</summary>
     private async void OnProxmarkLfRead(object? sender, EventArgs e)
     {
+        StopLfLive();
         ProxmarkLfReadButton.IsEnabled = false;
-        ProxmarkLfResult.IsVisible = false;
         await WithProxmarkLog(async usb =>
         {
             var read = await usb.LfReadAsync();
-            if (read?.IdHex is { } hex)
-            {
-                ProxmarkLfResult.Text = $"LF tag (EM410x)  ·  id {hex}  ·  via Proxmark";
-                ProxmarkLfResult.IsVisible = true;
-                ProxmarkStatus.Text = $"Read an EM410x LF tag: {hex}.";
-            }
-            else if (read is not null)
-                ProxmarkStatus.Text = "LF captured, but no EM410x id decoded — see the log.";
+            if (read is not null) UpdateLfGraph(read);
         });
         ProxmarkLfReadButton.IsEnabled = true;
+    }
+
+    private CancellationTokenSource? _lfLiveCts;
+    private string? _lfLastIdHint;
+
+    /// <summary>Toggles a live LF feed: capture the coil over and over and redraw the waveform, like an oscilloscope.</summary>
+    private async void OnProxmarkLfLive(object? sender, EventArgs e)
+    {
+        if (_lfLiveCts is not null) { StopLfLive(); return; }
+
+        var cts = _lfLiveCts = new CancellationTokenSource();
+        ProxmarkLfLiveButton.Text = "Stop live";
+        ProxmarkLfReadButton.IsEnabled = ProxmarkLfWriteButton.IsEnabled = false;
+        var usb = new ProxmarkUsb();   // no Log subscription: the live loop must not spam the connection log
+        try
+        {
+            while (!cts.IsCancellationRequested && ProxmarkUsb.IsAttached())
+            {
+                var read = await usb.LfReadAsync(8000);   // fewer samples for a snappier frame rate
+                if (cts.IsCancellationRequested) break;
+                if (read is not null) UpdateLfGraph(read);
+            }
+        }
+        catch { /* link dropped; just stop */ }
+        finally { if (_lfLiveCts == cts) StopLfLive(); }
+    }
+
+    private void StopLfLive()
+    {
+        var cts = _lfLiveCts;
+        _lfLiveCts = null;
+        cts?.Cancel();
+        ProxmarkLfLiveButton.Text = "LF live";
+        ProxmarkLfReadButton.IsEnabled = ProxmarkLfWriteButton.IsEnabled = ProxmarkUsb.IsAttached();
+    }
+
+    /// <summary>Draws the capture and shows the result — an id, or a "tag present"/"no signal" hint — keeping the
+    /// last decoded id on the graph across live frames that don't decode.</summary>
+    private void UpdateLfGraph(ProxmarkUsb.LfRead read)
+    {
+        if (read.IdHex is { } decoded) _lfLastIdHint = decoded;
+
+        _lfWaveform.Samples = read.Samples;
+        _lfWaveform.State = read.IdHex is not null ? Controls.LfWaveform.Status.Decoded
+            : read.SignalPresent ? Controls.LfWaveform.Status.Signal
+            : Controls.LfWaveform.Status.None;
+        _lfWaveform.Hint = read.IdHex is { } h ? $"EM410x {h}"
+            : _lfLastIdHint is { } last ? $"last: {last}"
+            : read.SignalPresent ? "tag present — no id" : "no signal";
+        LfGraph.Drawable = _lfWaveform;
+        LfGraph.IsVisible = true;
+        LfGraph.Invalidate();
+
+        if (read.IdHex is { } hex)
+        {
+            ProxmarkLfResult.Text = $"LF tag (EM410x)  ·  id {hex}  ·  via Proxmark";
+            ProxmarkLfResult.IsVisible = true;
+            ProxmarkStatus.Text = $"Read an EM410x LF tag: {hex}.";
+        }
+        else
+        {
+            ProxmarkLfResult.IsVisible = false;
+            ProxmarkStatus.Text = read.SignalPresent
+                ? "An LF tag is on the antenna, but no EM410x id decoded (another format, or coupling weakly)."
+                : "No LF signal — put a tag on the round LF coil.";
+        }
     }
 
     /// <summary>The "Write LF" button: clone a typed EM410x id onto a T5577 card on the Proxmark's LF antenna.</summary>
@@ -470,6 +531,9 @@ public partial class NfcPage : ContentPage
 
     // The last block 0 read from a magic card, so "Set UID" can keep its SAK/ATQA/manufacturer bytes.
     private byte[]? _proxmarkBlock0;
+
+    // Draws the coil's raw LF samples under the Read LF button.
+    private readonly Controls.LfWaveform _lfWaveform = new();
 
     /// <summary>Reads block 0 of a gen1a magic card through the backdoor and shows it decoded.</summary>
     private async void OnProxmarkReadBlock0(object? sender, EventArgs e)
