@@ -1,6 +1,7 @@
 ﻿using Android.App;
 using Android.Content;
 using Android.Content.PM;
+using Android.Hardware.Usb;
 using Android.Nfc;
 using Android.OS;
 using TagBuddy.Services;
@@ -10,19 +11,28 @@ namespace TagBuddy;
 [Activity(Theme = "@style/TagBuddy.SplashTheme", MainLauncher = true, LaunchMode = LaunchMode.SingleTop, ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation | ConfigChanges.UiMode | ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize | ConfigChanges.Density)]
 // Android opens the app for its own private-text tags (no other app knows the type), even when it is closed.
 [IntentFilter([NfcAdapter.ActionNdefDiscovered], Categories = [Intent.CategoryDefault], DataMimeType = SealedText.MimeType)]
+// And when a Proxmark (USB vendor 0x9AC4, see Resources/xml/proxmark_usb_filter.xml) is plugged in over OTG.
+[IntentFilter([UsbManager.ActionUsbDeviceAttached])]
+[MetaData(UsbManager.ActionUsbDeviceAttached, Resource = "@xml/proxmark_usb_filter")]
 public class MainActivity : MauiAppCompatActivity
 {
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
         // Not after a restart (rotation, low memory): that intent was handled the first time.
-        if (savedInstanceState is null) NfcReader.Instance.HandleIntent(Intent);
+        if (savedInstanceState is null) HandleIntent(Intent);
     }
 
-    /// <summary>The app was already running (single top): a private tag held to the phone arrives here.</summary>
+    /// <summary>The app was already running (single top): a private tag or an attached Proxmark arrives here.</summary>
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
+        HandleIntent(intent);
+    }
+
+    private static void HandleIntent(Intent? intent)
+    {
         NfcReader.Instance.HandleIntent(intent);
+        if (intent?.Action == UsbManager.ActionUsbDeviceAttached) ProxmarkUsb.NoteAttached();
     }
 }

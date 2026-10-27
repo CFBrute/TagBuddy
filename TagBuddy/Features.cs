@@ -12,6 +12,11 @@ public static class Features
     /// sector has no wrong-key lockout, so this is the same kind of operation other Play Store tag tools offer.</summary>
     public static readonly bool MifareKeyTools = true;
 
+    /// <summary>Experimental: connect to a Proxmark3 over USB-OTG and probe it. It opens the Proxmark's own USB
+    /// serial interface and sends its "NG" ping/version command, to find out whether this phone can speak to the
+    /// device at all. Reads the person's own hardware; it is a diagnostic, not a full Proxmark client.</summary>
+    public static readonly bool ProxmarkUsb = true;
+
 #if PLAY_STORE
     public const string Edition = "Play Store";
     public static readonly bool Amiibo = false;
