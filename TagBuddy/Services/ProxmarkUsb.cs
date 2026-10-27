@@ -386,9 +386,9 @@ public sealed class ProxmarkUsb
     }
 
     /// <summary>Polls the HF reader until a card couples, returning its UID/ATQA/SAK (null if none in time).</summary>
-    private (byte[] Uid, byte[] Atqa, byte Sak)? ReadIdentity(Link link)
+    private (byte[] Uid, byte[] Atqa, byte Sak)? ReadIdentity(Link link, int tries = 40)
     {
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < tries; i++)
         {
             var reply = Command(link, CmdHf14aReader, Iso14aConnect, readTimeoutMs: 500, what: "read command");
             if (IsOkAck(reply) && reply.Length >= 32 + 14)
@@ -400,6 +400,11 @@ public sealed class ProxmarkUsb
         }
         return null;
     }
+
+    /// <summary>A quick look for an HF tag on the antenna (one or two tries, no waiting): its UID as a colon-hex
+    /// string, or null when nothing is there. For the auto-reader's polling loop.</summary>
+    public Task<string?> PeekHfAsync() => WithLinkAsync(link =>
+        ReadIdentity(link, tries: 2) is { } id ? string.Join(":", id.Uid.Select(b => b.ToString("X2"))) : null, null);
 
     private byte[]? MagicWriteBlock(Link link, int blockNo, byte[] block16)
     {
