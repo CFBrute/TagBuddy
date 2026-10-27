@@ -46,6 +46,9 @@
                     <Button x:Name="ProxmarkReadButton" Text="Read tag" Clicked="OnProxmarkRead" IsVisible="False"
                             BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
                             Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <Button x:Name="ProxmarkAutoButton" Text="Auto-read" Clicked="OnProxmarkAuto" IsVisible="False"
+                            BackgroundColor="#6B7280" TextColor="White"
+                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                     <Button x:Name="ProxmarkInfoButton" Text="Device info" Clicked="OnProxmarkInfo" IsVisible="False"
                             BackgroundColor="#6B7280" TextColor="White"
                             Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />

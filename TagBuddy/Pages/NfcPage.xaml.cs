@@ -264,6 +264,7 @@ public partial class NfcPage : ContentPage
     {
         base.OnDisappearing();
         StopLfLive();
+        StopProxmarkAuto();
         _active = false;
         _sealGeneration++;
         _nfc.TagRead -= OnTagRead;
@@ -337,7 +338,7 @@ public partial class NfcPage : ContentPage
         {
             ProxmarkDot.Color = ProxmarkBusy;
             ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
-            ProxmarkReadButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
+            ProxmarkReadButton.IsVisible = ProxmarkAutoButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
             ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = false;
             return;
         }
@@ -374,6 +375,7 @@ public partial class NfcPage : ContentPage
                 ? "That USB device did not answer as a Proxmark — see the log."
                 : "Detected, but the link check failed — see the log.";
         ProxmarkReadButton.IsVisible = ok;
+        ProxmarkAutoButton.IsVisible = ok;
         ProxmarkMagicRow.IsVisible = ok;
         ProxmarkInfoButton.IsVisible = ok;
         ProxmarkLfReadButton.IsVisible = ok;
@@ -512,21 +514,80 @@ public partial class NfcPage : ContentPage
     /// otherwise — and shows it in the normal result view, where it can be saved, edited and compared.</summary>
     private async void OnProxmarkRead(object? sender, EventArgs e)
     {
+        StopProxmarkAuto();
         ProxmarkReadButton.IsEnabled = false;
         await WithProxmarkLog(async usb =>
         {
             var dump = await usb.ReadCardAsync();
-            if (dump is not null)
-            {
-                var tag = dump.IsMagic
-                    ? ProxmarkClassic.FromDump(dump.Uid, dump.Atqa, dump.Sak, dump.Blocks, "Proxmark3 (USB)")
-                    : ProxmarkClassic.IdentityOnly(dump.Uid, dump.Atqa, dump.Sak, "Proxmark3 (USB)");
-                NfcReader.ClearClassicKeysFound();   // don't credit this read with the phone reader's stale keys
-                OnTagRead(tag, fromSaved: false);
-                TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
-            }
+            if (dump is not null) ShowProxmarkDump(dump, buzz: false);
         });
         ProxmarkReadButton.IsEnabled = ProxmarkUsb.IsAttached();
+    }
+
+    /// <summary>Shows a Proxmark read in the normal result view (save/edit/compare), optionally with a buzz like a
+    /// phone tap.</summary>
+    private void ShowProxmarkDump(ProxmarkUsb.Dump dump, bool buzz)
+    {
+        var tag = dump.IsMagic
+            ? ProxmarkClassic.FromDump(dump.Uid, dump.Atqa, dump.Sak, dump.Blocks, "Proxmark3 (USB)")
+            : ProxmarkClassic.IdentityOnly(dump.Uid, dump.Atqa, dump.Sak, "Proxmark3 (USB)");
+        NfcReader.ClearClassicKeysFound();   // don't credit this read with the phone reader's stale keys
+        OnTagRead(tag, fromSaved: false);
+        TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
+        if (buzz) Feedback.Tag(ok: true);
+    }
+
+    // --- Auto-reader: poll the Proxmark like the phone's NFC, reading a tag the moment it is presented ---
+
+    private CancellationTokenSource? _proxmarkAutoCts;
+    private string? _autoLastUid;
+
+    /// <summary>Toggles the auto-reader: while on, the Proxmark is polled continuously and a tag is read and shown
+    /// the instant it is presented — and again when it is taken away and brought back, like a phone tap.</summary>
+    private async void OnProxmarkAuto(object? sender, EventArgs e)
+    {
+        if (_proxmarkAutoCts is not null) { StopProxmarkAuto(); return; }
+
+        var cts = _proxmarkAutoCts = new CancellationTokenSource();
+        _autoLastUid = null;
+        ProxmarkAutoButton.Text = "Stop auto";
+        ProxmarkReadButton.IsEnabled = false;
+        ProxmarkStatus.Text = "Waiting for a tag on the antenna…";
+        var usb = new ProxmarkUsb();   // quiet: the poll loop must not fill the connection log
+        try
+        {
+            bool present = false;
+            while (!cts.IsCancellationRequested && ProxmarkUsb.IsAttached())
+            {
+                var uid = await usb.PeekHfAsync();
+                if (cts.IsCancellationRequested) break;
+
+                if (uid is null) { present = false; continue; }   // nothing there; wait for a tag
+                if (present && uid == _autoLastUid) continue;      // same tag still sitting there: don't re-read
+
+                // A new tag (field was empty, or a different UID): read it fully and show it, with a buzz.
+                present = true;
+                _autoLastUid = uid;
+                var dump = await usb.ReadCardAsync();
+                if (cts.IsCancellationRequested) break;
+                if (dump is not null) ShowProxmarkDump(dump, buzz: true);
+                if (!cts.IsCancellationRequested) ProxmarkStatus.Text = "Read a tag. Waiting for the next…";
+            }
+        }
+        catch { /* link dropped; just stop */ }
+        finally { if (_proxmarkAutoCts == cts) StopProxmarkAuto(); }
+    }
+
+    private void StopProxmarkAuto()
+    {
+        var cts = _proxmarkAutoCts;
+        _proxmarkAutoCts = null;
+        cts?.Cancel();
+        if (ProxmarkAutoButton is not null)
+        {
+            ProxmarkAutoButton.Text = "Auto-read";
+            ProxmarkReadButton.IsEnabled = ProxmarkUsb.IsAttached();
+        }
     }
 
     // The last block 0 read from a magic card, so "Set UID" can keep its SAK/ATQA/manufacturer bytes.
