@@ -288,33 +288,61 @@ public partial class NfcPage : ContentPage
     private bool _proxmarkChecking;
     private bool _proxmarkVerified;
 
+    /// <summary>Whether the connected device was reached through the "try any connected USB device" path (not a
+    /// recognised Proxmark vendor id). Every command this session makes must keep allowing it, or it would not
+    /// resolve the device again.</summary>
+    private bool _proxmarkAllowAny;
+
+    /// <summary>A Proxmark client configured for however this session reached the device (a recognised one, or any
+    /// connected USB device the person chose to try).</summary>
+    private ProxmarkUsb NewProxmark()
+    {
+        var usb = new ProxmarkUsb { AllowAnyDevice = _proxmarkAllowAny };
+        return usb;
+    }
+
     // Status light: orange while checking, green when the link is confirmed, red when it fails.
     private static readonly Color ProxmarkBusy = Color.FromArgb("#F59E0B");
     private static readonly Color ProxmarkOk = Color.FromArgb("#22C55E");
     private static readonly Color ProxmarkBad = Color.FromArgb("#DC2626");
 
-    /// <summary>Shows or hides the Proxmark panel to match whether one is plugged in, and verifies the link once on
-    /// a fresh attach so the status light earns its colour without the person tapping anything.</summary>
+    /// <summary>Shows or hides the Proxmark panel to match what is plugged in — a recognised Proxmark, or (so the
+    /// person can still try it) any connected USB device — and verifies a recognised one once on a fresh attach.</summary>
     private void RefreshProxmarkPanel() => MainThread.BeginInvokeOnMainThread(() =>
     {
-        bool present = ProxmarkUsb.IsAttached();
-        ProxmarkPanel.IsVisible = present;
-        if (!present) { _proxmarkVerified = false; return; }
-        if (!_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true);
+        bool known = ProxmarkUsb.IsAttached();
+        bool foreign = !known && ProxmarkUsb.ForeignUsbPresent();
+        ProxmarkPanel.IsVisible = known || foreign;
+        if (!known && !foreign) { _proxmarkVerified = false; _proxmarkAllowAny = false; return; }
+
+        // A connected device that is not a recognised Proxmark: offer to try it rather than check on its own, since
+        // it may not be a Proxmark at all and we should not poke an unknown device without the person asking.
+        ProxmarkTryForeignButton.IsVisible = foreign && !_proxmarkVerified;
+        if (foreign && !_proxmarkVerified)
+        {
+            ProxmarkDot.Color = ProxmarkBusy;
+            ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
+            ProxmarkReadButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
+            return;
+        }
+        if (known && !_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true, allowAny: false);
     });
 
-    /// <summary>Asks the Proxmark for its version and colours the status light by the result.</summary>
-    private async Task VerifyProxmarkAsync(bool auto)
+    /// <summary>Asks the device for its version and colours the status light by the result. <paramref name="allowAny"/>
+    /// lets it open a connected USB device that is not a recognised Proxmark (the "try it anyway" path).</summary>
+    private async Task VerifyProxmarkAsync(bool auto, bool allowAny)
     {
         if (_proxmarkChecking) return;
         _proxmarkChecking = true;
+        _proxmarkAllowAny = allowAny;
         ProxmarkDot.Color = ProxmarkBusy;
         ProxmarkStatus.Text = "Checking the link…";
         ProxmarkProbeButton.IsEnabled = false;
+        ProxmarkTryForeignButton.IsEnabled = false;
         ProxmarkLog.Text = "";
         if (!auto) ProxmarkLog.IsVisible = true;   // a manual check shows the log straight away
 
-        var usb = new ProxmarkUsb();
+        var usb = NewProxmark();
         usb.Log += AppendProxmarkLog;
         bool ok = false;
         try { ok = await usb.ProbeAsync(); }
@@ -325,15 +353,43 @@ public partial class NfcPage : ContentPage
         _proxmarkVerified = ok;
         ProxmarkDot.Color = ok ? ProxmarkOk : ProxmarkBad;
         ProxmarkStatus.Text = ok
-            ? "Connected. Hold a 13.56 MHz tag to the Proxmark's antenna and tap Read."
-            : "Detected, but the link check failed — see the log.";
+            ? "Connected. Hold a 13.56 MHz tag to the antenna and tap Read, or tap Device info."
+            : allowAny
+                ? "That USB device did not answer as a Proxmark — see the log."
+                : "Detected, but the link check failed — see the log.";
         ProxmarkReadButton.IsVisible = ok;
         ProxmarkMagicRow.IsVisible = ok;
+        ProxmarkInfoButton.IsVisible = ok;
+        ProxmarkTryForeignButton.IsVisible = !ok && ProxmarkUsb.ForeignUsbPresent();
         if (!ok) ProxmarkLog.IsVisible = true;
         ProxmarkProbeButton.IsEnabled = ProxmarkUsb.IsAttached();
+        ProxmarkTryForeignButton.IsEnabled = true;
     }
 
-    private void OnProxmarkProbe(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false);
+    private void OnProxmarkProbe(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false, allowAny: _proxmarkAllowAny);
+
+    /// <summary>The "try the connected USB device" button: verify whatever serial-like device is plugged in, even if
+    /// its vendor id is not one we recognise (a Proxmark clone, or an unusual board).</summary>
+    private void OnProxmarkTryForeign(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false, allowAny: true);
+
+    /// <summary>The "Device info" button: show the firmware banner and whether the newer (NG) protocol is supported.</summary>
+    private async void OnProxmarkInfo(object? sender, EventArgs e)
+    {
+        ProxmarkInfoButton.IsEnabled = false;
+        ProxmarkLog.Text = "";
+        ProxmarkLog.IsVisible = true;
+        var usb = NewProxmark();
+        usb.Log += AppendProxmarkLog;
+        try
+        {
+            if (await usb.DeviceInfoAsync())
+                ProxmarkStatus.Text = usb.SpeaksNg
+                    ? "Modern firmware (supports the newer NG protocol). Connected."
+                    : "Older firmware (OLD protocol only, which the app speaks). Connected.";
+        }
+        catch (Exception ex) { AppendProxmarkLog($"Error: {ex.Message}"); }
+        finally { usb.Log -= AppendProxmarkLog; ProxmarkInfoButton.IsEnabled = true; }
+    }
 
     /// <summary>Reads the card on the Proxmark's antenna — a full backdoor dump for a gen1a magic card, its identity
     /// otherwise — and shows it in the normal result view, where it can be saved, edited and compared.</summary>
@@ -342,7 +398,7 @@ public partial class NfcPage : ContentPage
         ProxmarkReadButton.IsEnabled = false;
         ProxmarkLog.Text = "";
         ProxmarkLog.IsVisible = true;
-        var usb = new ProxmarkUsb();
+        var usb = NewProxmark();
         usb.Log += AppendProxmarkLog;
         try
         {
@@ -374,7 +430,7 @@ public partial class NfcPage : ContentPage
         ProxmarkLog.Text = "";
         ProxmarkLog.IsVisible = true;
         ProxmarkReadBlock0Button.IsEnabled = false;
-        var usb = new ProxmarkUsb();
+        var usb = NewProxmark();
         usb.Log += AppendProxmarkLog;
         try
         {
@@ -420,7 +476,7 @@ public partial class NfcPage : ContentPage
         ProxmarkLog.Text = "";
         ProxmarkLog.IsVisible = true;
         ProxmarkSetUidButton.IsEnabled = false;
-        var usb = new ProxmarkUsb();
+        var usb = NewProxmark();
         usb.Log += AppendProxmarkLog;
         try
         {
@@ -480,7 +536,7 @@ public partial class NfcPage : ContentPage
         ProxmarkWriteButton.IsEnabled = false;
         ProxmarkLog.Text = "";
         ProxmarkLog.IsVisible = true;
-        var usb = new ProxmarkUsb();
+        var usb = NewProxmark();
         usb.Log += AppendProxmarkLog;
         try
         {
