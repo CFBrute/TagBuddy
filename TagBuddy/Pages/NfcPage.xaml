@@ -634,6 +634,9 @@
                         <Button x:Name="ProxmarkLfLiveButton" Text="LF live" Clicked="OnProxmarkLfLive" IsVisible="False"
                                 BackgroundColor="#6B7280" TextColor="White"
                                 Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkRecoverButton" Text="Recover a key…" Clicked="OnProxmarkRecover" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
                         <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
                                 BackgroundColor="#6B7280" TextColor="White"
                                 Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />

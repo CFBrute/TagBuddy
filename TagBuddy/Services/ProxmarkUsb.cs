@@ -37,6 +37,11 @@ public sealed class ProxmarkUsb
     private const ulong CmdMagicGetBlock = 0x0606;  // CMD_MIFARE_CGETBLOCK (gen1a backdoor read)
     private const ulong CmdMagicSetBlock = 0x0605;  // CMD_MIFARE_CSETBLOCK (gen1a backdoor write)
 
+    // Authenticated (keyed) MIFARE Classic, verified against Proxmark/proxmark3 master (the OLD protocol). These
+    // need a known key per sector; the firmware sends a DEBUG_PRINT_STRING before the real ACK (see ReadToAck).
+    private const ulong CmdMifareReadBlock = 0x0620;  // CMD_MIFARE_READBL: arg0=block, arg1=keyType(0=A,1=B), key=data[0..5]
+    private const ulong CmdMifareNested = 0x0612;     // CMD_MIFARE_NESTED: collect encrypted nonces for the nested attack
+
     // ISO14A_COMMAND flags (include/mifare.h). OLD firmware takes these as arg0 of the reader command.
     private const ulong Iso14aConnect = 0x0001;
     private const ulong Iso14aNoDisconnect = 0x0002;
@@ -671,6 +676,93 @@ public sealed class ProxmarkUsb
 
         const uint config = 0x00148040;              // EM410x: ASK, Manchester, RF/64, 2 data blocks
         return (config, (uint)(frame >> 32), (uint)(frame & 0xFFFFFFFF));
+    }
+
+    // ------------------------------------------------------------------------------------------------ keyed MIFARE + nested
+    //
+    // EXPERIMENTAL and unverified in the app (proven on the spike, see TODO-proxmark-key-recovery.md). These use a
+    // known key, so they read ordinary (non-magic) Classic cards, and collect the encrypted nonces the Crypto1
+    // nested attack needs. The key RECOVERY itself (Crypto1.Nonce2Key) is not yet confirmed — see Crypto1.cs.
+
+    /// <summary>Reads a window of replies and returns the frame that is the real CMD_ACK, surfacing any
+    /// DEBUG_PRINT_STRING frames the firmware sends first (e.g. "Auth error") through the log.</summary>
+    private byte[]? ReadToAck(Link link, int totalTimeoutMs)
+    {
+        var all = new List<byte>();
+        var buf = new byte[1024];
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < totalTimeoutMs)
+        {
+            int n = link.Conn.BulkTransfer(link.In, buf, buf.Length, 250);
+            if (n > 0) all.AddRange(buf[..n]);
+            for (int off = 0; off + OldFrameSize <= all.Count; off += OldFrameSize)
+                if (BitConverter.ToUInt64(all.ToArray(), off) == CmdAck) goto done;
+        }
+        done:
+        var bytes = all.ToArray();
+        for (int off = 0; off + OldFrameSize <= bytes.Length; off += OldFrameSize)
+        {
+            ulong c = BitConverter.ToUInt64(bytes, off);
+            if (c == CmdDebugPrintString)
+            {
+                ulong len = BitConverter.ToUInt64(bytes, off + 8);
+                var s = new string(bytes.Skip(off + 32).Take((int)Math.Min(len, 64))
+                    .Where(x => x is >= 0x20 and < 0x7F).Select(x => (char)x).ToArray());
+                if (s.Length > 0) Say($"[fw] {s}");
+            }
+            if (c == CmdAck) return bytes.AsSpan(off, OldFrameSize).ToArray();
+        }
+        return null;
+    }
+
+    private static byte[] KeyData(byte[] key6)
+    {
+        var d = new byte[512];
+        Array.Copy(key6, 0, d, 0, Math.Min(6, key6.Length));
+        return d;
+    }
+
+    /// <summary>Reads one block of a real MIFARE Classic card with a known key. Returns the 16 bytes, or null when
+    /// the key does not open the sector or the card moved away.</summary>
+    public Task<byte[]?> MifareReadBlockAsync(int block, bool keyB, byte[] key6) =>
+        WithLinkAsync(link => MifareReadBlock(link, block, keyB, key6), null);
+
+    private byte[]? MifareReadBlock(Link link, int block, bool keyB, byte[] key6)
+    {
+        Drain(link.Conn, link.In);
+        var req = OldFrame(CmdMifareReadBlock, (ulong)block, keyB ? 1UL : 0UL, 0, KeyData(key6));
+        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1000) < 0) throw new Java.IO.IOException("the read command could not be written");
+        var ack = ReadToAck(link, 2000);
+        if (ack is null || ReplyArg(ack) == 0) { Say($"block {block}: key {(keyB ? 'B' : 'A')} did not open it."); return null; }
+        return ReplyData(ack, BlockSize);
+    }
+
+    /// <summary>The encrypted nonces one NESTED call collects, for recovering <see cref="TargetBlock"/>'s key.</summary>
+    public sealed record NestedNonces(uint Cuid, uint Nt0, uint Ks0, uint Nt1, uint Ks1, int TargetBlock, bool TargetKeyB);
+
+    /// <summary>Collects a pair of encrypted nonces for the nested attack: authenticates <paramref name="knownBlock"/>
+    /// with a known key, then asks the card to authenticate <paramref name="targetBlock"/> and captures the nonces it
+    /// sends. <paramref name="calibrate"/> should be true on the first call so the firmware measures the card timing.
+    /// Returns null if the known key did not open its sector.</summary>
+    public Task<NestedNonces?> MifareNestedAsync(int knownBlock, bool knownKeyB, byte[] knownKey, int targetBlock, bool targetKeyB, bool calibrate) =>
+        WithLinkAsync(link => MifareNested(link, knownBlock, knownKeyB, targetBlock, targetKeyB, calibrate, knownKey), null);
+
+    private NestedNonces? MifareNested(Link link, int knownBlock, bool knownKeyB, int targetBlock, bool targetKeyB, bool calibrate, byte[] knownKey)
+    {
+        // ARM arg layout (verified): arg0 = block | keyType<<8 (known), arg1 = target block | keyType<<8, arg2 = calibrate.
+        ulong arg0 = (ulong)knownBlock | (knownKeyB ? 0x100UL : 0UL);
+        ulong arg1 = (ulong)targetBlock | (targetKeyB ? 0x100UL : 0UL);
+        Drain(link.Conn, link.In);
+        var req = OldFrame(CmdMifareNested, arg0, arg1, calibrate ? 1UL : 0UL, KeyData(knownKey));
+        if (link.Conn.BulkTransfer(link.Out, req, req.Length, 1000) < 0) throw new Java.IO.IOException("the nested command could not be written");
+
+        var ack = ReadToAck(link, 4000);
+        if (ack is null) { Say("Nested: no reply (the known key may not open its sector, or the card moved)."); return null; }
+        // Reply data (28 bytes): cuid[0..3], nt0[4..7], ks0[8..11], nt1[12..15], ks1[16..19], timeout[20..23], fixed_nt[24..27].
+        var d = ReplyData(ack, 28);
+        if (d is null) { Say("Nested: reply too short to hold the nonce block."); return null; }
+        uint U(int o) => (uint)(d[o] | d[o + 1] << 8 | d[o + 2] << 16 | d[o + 3] << 24);
+        return new NestedNonces(U(0), U(4), U(8), U(12), U(16), targetBlock, targetKeyB);
     }
 
     /// <summary>An open, claimed, CDC-configured connection to the Proxmark; releasing it on dispose.</summary>

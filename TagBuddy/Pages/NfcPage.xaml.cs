@@ -341,7 +341,7 @@ public partial class NfcPage : ContentPage
             ProxmarkDot.Color = ProxmarkBusy;
             ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
             ProxmarkReadButton.IsVisible = ProxmarkAutoButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
-            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = LfGraphHeader.IsVisible = false;
+            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = LfGraphHeader.IsVisible = ProxmarkRecoverButton.IsVisible = false;
             return;
         }
         if (known && !_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true, allowAny: false);
@@ -383,6 +383,7 @@ public partial class NfcPage : ContentPage
         ProxmarkLfReadButton.IsVisible = ok;
         ProxmarkLfWriteButton.IsVisible = ok;
         ProxmarkLfLiveButton.IsVisible = ok;
+        ProxmarkRecoverButton.IsVisible = ok;
         ProxmarkTryForeignButton.IsVisible = !ok && ProxmarkUsb.ForeignUsbPresent();
         if (!ok) ProxmarkLog.IsVisible = true;
         ProxmarkProbeButton.IsEnabled = ProxmarkUsb.IsAttached();
@@ -507,6 +508,45 @@ public partial class NfcPage : ContentPage
         ProxmarkLfWriteButton.IsEnabled = false;
         await WithProxmarkLog(usb => usb.LfWriteEm410xAsync(id));
         ProxmarkLfWriteButton.IsEnabled = true;
+    }
+
+    /// <summary>The "Recover a key" button: the real (non-dictionary) nested attack. Uses a known key on one sector
+    /// (the factory default on sector 0) to collect the card's own encrypted nonces for a target sector, then runs
+    /// the Crypto1 solver. EXPERIMENTAL: the solver (Crypto1.Nonce2Key) is not yet confirmed, so this currently
+    /// collects and shows the nonces and reports what the solver returns — the nonce collection is the part to
+    /// validate first. The known key defaults to FFFFFFFFFFFF on block 0.</summary>
+    private async void OnProxmarkRecover(object? sender, EventArgs e)
+    {
+        string? input = await DisplayPromptAsync("Recover a key (nested)",
+            "Which sector's key A to recover? Sector 0 must still open with the default key FFFFFFFFFFFF (the known key the attack needs).",
+            accept: "Recover", cancel: "Cancel", placeholder: "sector number, e.g. 1", maxLength: 2, keyboard: Keyboard.Numeric);
+        if (string.IsNullOrWhiteSpace(input) || !int.TryParse(input, out int sector) || sector is < 1 or > 39)
+        {
+            if (!string.IsNullOrWhiteSpace(input)) await DisplayAlertAsync("Not a sector", "Enter a sector number from 1 to 39.", "OK");
+            return;
+        }
+        int targetBlock = sector < 32 ? sector * 4 : 128 + (sector - 32) * 16;
+        byte[] defaultKey = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        ProxmarkRecoverButton.IsEnabled = false;
+        await WithProxmarkLog(async usb =>
+        {
+            AppendProxmarkLog($"Nested: known = block 0 key A (FFFFFFFFFFFF), target = sector {sector} (block {targetBlock}) key A.");
+            var found = new HashSet<ulong>();
+            for (int round = 0; round < 3; round++)
+            {
+                var n = await usb.MifareNestedAsync(0, keyB: false, defaultKey, targetBlock, targetKeyB: false, calibrate: round == 0);
+                if (n is null) { AppendProxmarkLog("No nonces collected — is sector 0 still on the default key?"); break; }
+                AppendProxmarkLog($"round {round}: cuid {n.Cuid:X8}  nt {n.Nt0:X8}/{n.Nt1:X8}  ks {n.Ks0:X8}/{n.Ks1:X8}");
+                foreach (var key in Crypto1.Nonce2Key(n.Cuid, n.Nt0, n.Ks0)) found.Add(key);
+                foreach (var key in Crypto1.Nonce2Key(n.Cuid, n.Nt1, n.Ks1)) found.Add(key);
+            }
+            if (found.Count == 0)
+                AppendProxmarkLog("No key recovered. The nonces are shown above; the Crypto1 solver is not yet confirmed (see Crypto1.cs).");
+            else
+                foreach (var key in found) AppendProxmarkLog($"candidate key A for sector {sector}: {key:X12}");
+        });
+        ProxmarkRecoverButton.IsEnabled = true;
     }
 
     /// <summary>The "Device info" button: show the firmware banner and whether the newer (NG) protocol is supported.</summary>
