@@ -303,6 +303,166 @@ if (cmd == "magicset")
     return;
 }
 
+// ---- MIFARE Classic authenticated commands (verified against Proxmark/proxmark3 master) ----
+// READBL 0x0620 / WRITEBL 0x0622: arg0=blockNo, arg1=keyType (0=A,1=B); key = data[0..5]; (write) 16 bytes = data[10..25].
+// Reply is the proven symmetric 544-byte OLD layout: arg0@8 = isOK, data@32.
+byte[] DefaultKey = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+byte[] ReadbData(byte[] key) { var d = new byte[512]; Array.Copy(key, 0, d, 0, 6); return d; }
+byte[] WritebData(byte[] key, byte[] block16) { var d = new byte[512]; Array.Copy(key, 0, d, 0, 6); Array.Copy(block16, 0, d, 10, 16); return d; }
+
+// The firmware prefixes replies with DEBUG_PRINT_STRING frames (e.g. "READ BLOCK FINISHED") before the real
+// CMD_ACK. Read a whole window, scan every 544-byte frame, and return the CMD_ACK (0x00ff) frame specifically.
+byte[]? ReadAck(int ms)
+{
+    var all = new List<byte>();
+    var buf = new byte[1024];
+    var until = DateTime.UtcNow.AddMilliseconds(ms);
+    while (DateTime.UtcNow < until)
+    {
+        try { int n = sp.Read(buf, 0, buf.Length); if (n > 0) all.AddRange(buf[..n]); }
+        catch (TimeoutException) { }
+        // Peek: if we've already got a CMD_ACK frame, stop early.
+        for (int off = 0; off + OldFrameSize <= all.Count; off += OldFrameSize)
+            if (BitConverter.ToUInt64(all.ToArray(), off) == 0x00ff) goto done;
+    }
+    done:
+    var bytes = all.ToArray();
+    for (int off = 0; off + OldFrameSize <= bytes.Length; off += OldFrameSize)
+    {
+        ulong c = BitConverter.ToUInt64(bytes, off);
+        if (c == 0x0100)   // debug print — surface it, it often explains a failure
+        {
+            ulong len = BitConverter.ToUInt64(bytes, off + 8);
+            string s = new string(bytes.Skip(off + 32).Take((int)Math.Min(len, 64)).Where(x => x is >= 0x20 and < 0x7F).Select(x => (char)x).ToArray());
+            Console.WriteLine($"    [fw] {s}");
+        }
+        if (c == 0x00ff) return bytes.AsSpan(off, OldFrameSize).ToArray();
+    }
+    return null;
+}
+
+// Send one OLD frame, drain first, return the ACK frame (retrying a few times to catch a coupling miss).
+byte[] SendAuth(ulong id, ulong a0, ulong a1, ulong a2, byte[] data, int tries, out ulong isOk)
+{
+    for (int t = 0; t < tries; t++)
+    {
+        Drain(sp, "pre-auth");
+        var f = OldFrame(id, a0, a1, a2, data);
+        sp.Write(f, 0, f.Length);
+        var ack = ReadAck(1500);
+        if (ack is not null)
+        {
+            isOk = BitConverter.ToUInt64(ack, 8);
+            if (isOk != 0) return ack;   // auth+op succeeded
+            // isOK==0: wrong key or a coupling miss. One more try unless this was the last.
+        }
+    }
+    isOk = 0;
+    return [];
+}
+
+// mfread <blk> <A|B> [key12hex]
+if (cmd == "mfread")
+{
+    int blk = (int)ParseU(args[2]);
+    ulong kt = args.Length > 3 && args[3].Equals("B", StringComparison.OrdinalIgnoreCase) ? 1UL : 0UL;
+    byte[] key = args.Length > 4 ? ParseKey(args[4]) : DefaultKey;
+    var r = SendAuth(0x0620, (ulong)blk, kt, 0, ReadbData(key), 4, out ulong ok);
+    Console.WriteLine($"READBL blk {blk} key{(kt == 1 ? "B" : "A")} {Hex(key)}: isOK={ok}");
+    if (ok != 0 && r.Length >= 48) Console.WriteLine("  data: " + Hex(r.AsSpan(32, 16).ToArray()));
+    else { Console.WriteLine("  (no data — wrong key or no coupling)"); DumpOld(r); }
+    return;
+}
+
+// mfdump [A|B] [key12hex] : try to read all 64 blocks (1K) with one key
+if (cmd == "mfdump")
+{
+    ulong kt = args.Length > 2 && args[2].Equals("B", StringComparison.OrdinalIgnoreCase) ? 1UL : 0UL;
+    byte[] key = args.Length > 3 ? ParseKey(args[3]) : DefaultKey;
+    Console.WriteLine($"Dumping 64 blocks with key{(kt == 1 ? "B" : "A")} {Hex(key)} …");
+    int ok = 0;
+    for (int b = 0; b < 64; b++)
+    {
+        var r = SendAuth(0x0620, (ulong)b, kt, 0, ReadbData(key), 4, out ulong isOk);
+        if (isOk != 0 && r.Length >= 48) { ok++; Console.WriteLine($"blk {b,2}: {Hex(r.AsSpan(32, 16).ToArray())}"); }
+        else Console.WriteLine($"blk {b,2}: ---- locked/no-read ----");
+    }
+    Console.WriteLine($"\n{ok}/64 blocks read.");
+    return;
+}
+
+// mfwrite <blk> <A|B> <key12hex> <16 hex bytes> : authenticated write of an arbitrary block (BE CAREFUL with trailers/block0)
+if (cmd == "mfwrite")
+{
+    int blk = (int)ParseU(args[2]);
+    ulong kt = args[3].Equals("B", StringComparison.OrdinalIgnoreCase) ? 1UL : 0UL;
+    byte[] key = ParseKey(args[4]);
+    byte[] block16 = args.Skip(5).Take(16).Select(s => (byte)ParseU(s)).ToArray();
+    if (block16.Length != 16) { Console.WriteLine($"need 16 data bytes, got {block16.Length}"); return; }
+    Console.WriteLine($"WRITEBL blk {blk} key{(kt == 1 ? "B" : "A")} {Hex(key)} <- {Hex(block16)}");
+    var r = SendAuth(0x0622, (ulong)blk, kt, 0, WritebData(key, block16), 4, out ulong ok);
+    Console.WriteLine($"  isOK={ok}");
+    DumpOld(r);
+    return;
+}
+
+// mfwritekey <sector> <authA|authB> <authkey12hex> <newKeyA12hex> <newKeyB12hex>
+// Writes a sector trailer, KEEPING the default access bits FF 07 80 and GPB 69 (keeps the sector fully usable/recoverable).
+if (cmd == "mfwritekey")
+{
+    int sector = (int)ParseU(args[2]);
+    int trailer = sector * 4 + 3;
+    ulong kt = args[3].Equals("B", StringComparison.OrdinalIgnoreCase) ? 1UL : 0UL;
+    byte[] authKey = ParseKey(args[4]);
+    byte[] newA = ParseKey(args[5]);
+    byte[] newB = args.Length > 6 ? ParseKey(args[6]) : DefaultKey;
+    byte[] block16 = [.. newA, 0xFF, 0x07, 0x80, 0x69, .. newB];   // access bits = default transport config
+    Console.WriteLine($"Sector {sector} trailer blk {trailer}: new KeyA {Hex(newA)}, access FF 07 80 69, KeyB {Hex(newB)}");
+    Console.WriteLine($"  authenticating with key{(kt == 1 ? "B" : "A")} {Hex(authKey)}");
+    var r = SendAuth(0x0622, (ulong)trailer, kt, 0, WritebData(authKey, block16), 5, out ulong ok);
+    Console.WriteLine($"  WRITEBL isOK={ok}");
+    if (ok == 0) { DumpOld(r); Console.WriteLine("  write failed — NOT verifying."); return; }
+
+    // Verify: the first data block of the sector should now read with the NEW key A, and FAIL with the old auth key.
+    int dataBlk = sector * 4;
+    var rn = SendAuth(0x0620, (ulong)dataBlk, 0, 0, ReadbData(newA), 4, out ulong okNew);
+    var ro = SendAuth(0x0620, (ulong)dataBlk, 0, 0, ReadbData(authKey), 3, out ulong okOld);
+    Console.WriteLine($"  verify: read blk {dataBlk} with NEW keyA -> isOK={okNew} {(okNew != 0 && rn.Length >= 48 ? Hex(rn.AsSpan(32, 16).ToArray()) : "")}");
+    Console.WriteLine($"  verify: read blk {dataBlk} with OLD key  -> isOK={okOld} (expect 0 if the key really changed)");
+    return;
+}
+
+// mfchk <blk> <A|B> : dictionary recovery — try a list of well-known keys against one block, report which open it.
+// This is the device-side recovery that finds DEFAULT/known keys. It will NOT find a truly custom key (that needs nested/darkside).
+if (cmd == "mfchk")
+{
+    int blk = (int)ParseU(args[2]);
+    ulong kt = args.Length > 3 && args[3].Equals("B", StringComparison.OrdinalIgnoreCase) ? 1UL : 0UL;
+    string[] dict =
+    [
+        "FFFFFFFFFFFF", "000000000000", "A0A1A2A3A4A5", "D3F7D3F7D3F7", "B0B1B2B3B4B5",
+        "4D3A99C351DD", "1A982C7E459A", "AABBCCDDEEFF", "112233445566", "A0B0C0D0E0F0",
+    ];
+    Console.WriteLine($"Dictionary check on blk {blk} key{(kt == 1 ? "B" : "A")} ({dict.Length} keys)…");
+    foreach (var h in dict)
+    {
+        var key = ParseKey(h);
+        SendAuth(0x0620, (ulong)blk, kt, 0, ReadbData(key), 3, out ulong ok);
+        Console.WriteLine($"  {h}: {(ok != 0 ? "*** OPENS ***" : "no")}");
+    }
+    return;
+}
+
+static byte[] ParseKey(string hex)
+{
+    hex = hex.Replace(" ", "").Replace("0x", "");
+    if (hex.Length != 12) throw new ArgumentException($"key must be 12 hex chars, got '{hex}'");
+    var b = new byte[6];
+    for (int i = 0; i < 6; i++) b[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+    return b;
+}
+
 Console.WriteLine($"TX ({frame.Length} bytes): {Hex(frame.AsSpan(0, Math.Min(frame.Length, 16)).ToArray())}{(frame.Length > 16 ? " …" : "")}");
 sp.Write(frame, 0, frame.Length);
 
