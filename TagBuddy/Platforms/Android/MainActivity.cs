@@ -18,20 +18,11 @@ public class MainActivity : MauiAppCompatActivity
 {
     private UsbPlugReceiver? _usbReceiver;
 
-    /// <summary>The finger's position on the physical screen (px), for the current touch and where it went down.
-    /// Every touch passes through here before any view, so it is already current when a gesture handler runs. A
-    /// pan's TotalX/Y is measured in the dragged view's own frame, which moves as we drag it — that feedback is why
-    /// a dragged view lags the finger and jitters. Screen coordinates don't move, so they track the finger exactly.</summary>
-    public static float TouchRawX, TouchRawY, DownRawX, DownRawY;
-
+    /// <summary>Every touch passes through here before any view: note the finger's screen position for
+    /// <see cref="Controls.ScreenTouch"/>, so a drag can follow the finger exactly.</summary>
     public override bool DispatchTouchEvent(Android.Views.MotionEvent? e)
     {
-        if (e is not null)
-        {
-            TouchRawX = e.RawX;
-            TouchRawY = e.RawY;
-            if (e.ActionMasked == Android.Views.MotionEventActions.Down) { DownRawX = e.RawX; DownRawY = e.RawY; }
-        }
+        if (e is not null) Controls.ScreenTouch.Track(e);
         return base.DispatchTouchEvent(e);
     }
 
