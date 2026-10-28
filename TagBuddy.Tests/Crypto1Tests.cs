@@ -66,18 +66,25 @@ public class Crypto1Tests
         }
     }
 
-    /// <summary>The real goal: recover a key the solver was never told, from only its keystream. Skipped until the
-    /// crapto1 state intersection in LfsrRecovery32 is confirmed — un-skip to drive that work. With the current
-    /// bounded placeholder the odd/even tables are too large to pair, so this will not pass yet.</summary>
-    [Fact(Skip = "LfsrRecovery32 is a bounded placeholder; the crapto1 recover() intersection is pending — see Crypto1.cs")]
+    /// <summary>The real goal: recover a key the solver was never told, from only 32 bits of its keystream — the
+    /// proof this is a genuine Crypto1 attack and not a dictionary. Clocks a random key forward to make a keystream
+    /// word, then checks LfsrRecovery32 finds a state that regenerates it and that the key is among the results.</summary>
+    [Fact]
     public void Nested_recovery_finds_a_key_it_was_never_told()
     {
         var rng = new Random(23);
-        ulong key = (((ulong)(uint)rng.Next() << 16) ^ (uint)rng.Next()) & 0xFFFFFFFFFFFF;
-        uint uid = (uint)rng.Next();
-        uint nt = (uint)rng.Next();
+        for (int t = 0; t < 2; t++)
+        {
+            ulong key = (((ulong)(uint)rng.Next() << 20) ^ (uint)rng.Next()) & 0xFFFFFFFFFFFF;
+            uint input = (uint)rng.Next();
 
-        uint ks1 = Crypto1.Word(Crypto1State.FromKey(key), uid ^ nt, false);
-        Assert.Contains(key, Crypto1.Nonce2Key(uid, nt, ks1));
+            uint ks2 = Crypto1.Word(Crypto1State.FromKey(key), input, false);
+
+            // LfsrRecovery32 returns the state after `input` was clocked in; roll each back one word for the key.
+            var states = Crypto1.LfsrRecovery32(ks2, input);
+            Assert.NotEmpty(states);
+            bool found = states.Any(s => { var r = s.Copy(); Crypto1.RollbackWord(r, input, false); return r.ToKey() == key; });
+            Assert.True(found, $"key {key:X12} was not among the recovered states");
+        }
     }
 }

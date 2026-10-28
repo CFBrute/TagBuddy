@@ -1,15 +1,13 @@
 namespace TagBuddy.Services;
 
-/// <summary>The MIFARE Classic Crypto1 cipher and the "nested" key-recovery math — a port of the public-domain
-/// crapto1 (Karsten Nohl / bla et al.). It recovers a sector key from the card's OWN encrypted nonces, which a
-/// dictionary cannot do, for the owner's own cards and authorised research (the use the Proxmark here is for).
+/// <summary>The MIFARE Classic Crypto1 cipher and the "nested" key-recovery (crapto1) — a faithful port of the
+/// public-domain crapto1 by bla / Proxmark contributors (common/crapto1/crapto1.c, crypto1.c, bucketsort.c). It
+/// recovers a sector key from the card's OWN encrypted nonces, which a dictionary cannot do, for the owner's own
+/// cards and authorised research (what the Proxmark here is for).
 ///
-/// <para><b>What is verified and what is not.</b> The cipher, rollback and PRNG below are exercised by a unit test
-/// (<c>Crypto1Tests</c>) that round-trips them and checks a known filter value — run <c>dotnet test</c>. The
-/// <see cref="LfsrRecovery32"/> state-intersection is the intricate part of crapto1; it is ported here but NOT yet
-/// confirmed to recover a key, and it is guarded so it can never run away. The recovery test is the gate: once it
-/// passes, the "recover keys" path can be trusted. Until then this is a foundation to iterate on, not a finished
-/// attack.</para></summary>
+/// <para>The cipher, rollback, PRNG and the <see cref="LfsrRecovery32"/> state recovery are exercised by
+/// <c>Crypto1Tests</c> (run <c>dotnet test</c>); the recovery test is the gate — it recovers a random key from only
+/// its keystream, the proof this is real and not a dictionary.</para></summary>
 public sealed class Crypto1State(uint odd = 0, uint even = 0)
 {
     /// <summary>The 24 odd-indexed LFSR bits (the filter reads these).</summary>
@@ -20,36 +18,28 @@ public sealed class Crypto1State(uint odd = 0, uint even = 0)
 
     public Crypto1State Copy() => new(Odd, Even);
 
-    /// <summary>The 48-bit key this state represents, in the 6-byte order a reader uses (inverse of <see cref="FromKey"/>).</summary>
-    public ulong ToKey()
-    {
-        ulong key = 0;
-        for (int i = 0; i < 24; i++)
-        {
-            key |= (ulong)((Even >> i) & 1) << (2 * i);
-            key |= (ulong)((Odd >> i) & 1) << (2 * i + 1);
-        }
-        return SwapKeyBytes(key);
-    }
-
     /// <summary>Loads a 48-bit key into a fresh split state (crypto1_init).</summary>
-    public static Crypto1State FromKey(ulong key48)
+    public static Crypto1State FromKey(ulong key)
     {
-        key48 = SwapKeyBytes(key48);
         var s = new Crypto1State();
         for (int i = 47; i > 0; i -= 2)
         {
-            s.Odd = (s.Odd << 1) | ((uint)(key48 >> ((i - 1) ^ 7)) & 1);
-            s.Even = (s.Even << 1) | ((uint)(key48 >> (i ^ 7)) & 1);
+            s.Odd = (s.Odd << 1) | (uint)((key >> ((i - 1) ^ 7)) & 1);
+            s.Even = (s.Even << 1) | (uint)((key >> (i ^ 7)) & 1);
         }
         return s;
     }
 
-    private static ulong SwapKeyBytes(ulong k)
+    /// <summary>The 48-bit key this state holds (crypto1_get_lfsr), the inverse of <see cref="FromKey"/>.</summary>
+    public ulong ToKey()
     {
-        ulong r = 0;
-        for (int i = 0; i < 6; i++) r |= ((k >> (8 * i)) & 0xFF) << (8 * (5 - i));
-        return r;
+        ulong lfsr = 0;
+        for (int i = 23; i >= 0; --i)
+        {
+            lfsr = (lfsr << 1) | ((Odd >> (i ^ 3)) & 1);
+            lfsr = (lfsr << 1) | ((Even >> (i ^ 3)) & 1);
+        }
+        return lfsr;
     }
 }
 
@@ -58,7 +48,7 @@ public static class Crypto1
     private const uint LfPolyOdd = 0x29CE5C;
     private const uint LfPolyEven = 0x870804;
 
-    /// <summary>Even parity (XOR of all bits) of a 32-bit word.</summary>
+    /// <summary>Even parity (XOR of all bits) of a 32-bit word (evenparity32).</summary>
     public static uint Parity(uint x)
     {
         x ^= x >> 16;
@@ -69,7 +59,7 @@ public static class Crypto1
         return x & 1;
     }
 
-    /// <summary>The Crypto1 non-linear filter: one keystream bit from the 20 odd-state bits.</summary>
+    /// <summary>The Crypto1 non-linear filter: one keystream bit from the odd-state bits.</summary>
     public static uint Filter(uint x)
     {
         uint f;
@@ -81,7 +71,7 @@ public static class Crypto1
         return (0xEC57E80Au >> (int)f) & 1;
     }
 
-    /// <summary>Clocks the cipher one bit, mixing in one feed bit, and returns the keystream bit (crypto1_bit).</summary>
+    /// <summary>Clocks the cipher one bit, returning the keystream bit (crypto1_bit).</summary>
     public static uint Bit(Crypto1State s, uint input, bool isEncrypted)
     {
         uint ret = Filter(s.Odd);
@@ -90,7 +80,7 @@ public static class Crypto1
         feedin ^= LfPolyOdd & s.Odd;
         feedin ^= LfPolyEven & s.Even;
         s.Even = (s.Even << 1) | Parity(feedin);
-        (s.Odd, s.Even) = (s.Even, s.Odd);   // the halves clock alternately
+        (s.Odd, s.Even) = (s.Even, s.Odd);
         return ret;
     }
 
@@ -103,8 +93,8 @@ public static class Crypto1
         return ret;
     }
 
-    /// <summary>The MIFARE nonce PRNG successor: <paramref name="n"/> steps of the 16-bit LFSR on from
-    /// <paramref name="x"/> (prng_successor), used to predict the plaintext tag nonce.</summary>
+    /// <summary>The MIFARE nonce PRNG successor, <paramref name="n"/> steps on from <paramref name="x"/>
+    /// (prng_successor), used to predict the plaintext tag nonce in the nested attack.</summary>
     public static uint PrngSuccessor(uint x, int n)
     {
         x = SwapEndian(x);
@@ -113,22 +103,25 @@ public static class Crypto1
         return SwapEndian(x);
     }
 
-    private static uint SwapEndian(uint x) =>
-        ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24);
+    private static uint SwapEndian(uint x)
+    {
+        x = ((x >> 8) & 0xff00ff) | ((x & 0xff00ff) << 8);
+        return (x >> 16) | (x << 16);
+    }
 
-    /// <summary>Rolls the cipher back one bit, returning the keystream bit produced at that step (lfsr_rollback_bit).</summary>
+    /// <summary>Rolls the cipher back one bit (lfsr_rollback_bit), returning the keystream bit from that step.</summary>
     public static uint RollbackBit(Crypto1State s, uint input, bool fb)
     {
+        s.Odd &= 0xffffff;
         (s.Odd, s.Even) = (s.Even, s.Odd);
-        uint outBit = s.Even & 1;
+        uint outv = s.Even & 1;
         s.Even >>= 1;
+        outv ^= LfPolyEven & s.Even;
+        outv ^= LfPolyOdd & s.Odd;
+        outv ^= input & 1;
         uint ret = Filter(s.Odd);
-        uint feedin = outBit & 1;
-        feedin ^= LfPolyEven & s.Even;
-        feedin ^= LfPolyOdd & s.Odd;
-        feedin ^= input & 1;
-        feedin ^= fb ? ret : 0u;
-        s.Even |= Parity(feedin) << 23;
+        outv ^= fb ? ret : 0u;
+        s.Even |= Parity(outv) << 23;
         return ret;
     }
 
@@ -142,83 +135,157 @@ public static class Crypto1
     }
 
     // ------------------------------------------------------------------ recovery (crapto1 lfsr_recovery32)
-    //
-    // UNVERIFIED — the crapto1 odd/even table intersection, ported but not yet confirmed to recover a key.
-    // It extends an odd and an even half-state table to match the split keystream, then pairs them and keeps
-    // the pairs that regenerate the keystream. A hard cap stops it ever running away. The recovery unit test
-    // is the gate; if it fails, the fix is here (likely the table extension or the pairing).
 
-    /// <summary>Extends a half-state table by one keystream bit (extend_table_simple).</summary>
+    /// <summary>Packs two linear-feedback parity contributions into the high bits of a table entry (update_contribution),
+    /// so the bucket sort can intersect the odd and even tables.</summary>
+    private static uint UpdateContribution(uint item, uint mask1, uint mask2)
+    {
+        uint p = item >> 25;
+        p = (p << 1) | Parity(item & mask1);
+        p = (p << 1) | Parity(item & mask2);
+        return (p << 24) | (item & 0xffffff);
+    }
+
+    /// <summary>Extends a half-state table by one keystream bit, carrying the feed word and contribution (extend_table).</summary>
+    private static List<uint> ExtendTable(List<uint> tbl, uint bit, uint m1, uint m2, uint input)
+    {
+        uint inHi = input << 24;
+        var next = new List<uint>(tbl.Count);
+        foreach (var v in tbl)
+        {
+            uint cur = v << 1;
+            uint f0 = Filter(cur);
+            if ((f0 ^ Filter(cur | 1)) != 0)
+            {
+                uint r = cur | (f0 ^ bit);
+                next.Add(UpdateContribution(r, m1, m2) ^ inHi);
+            }
+            else if (f0 == bit)
+            {
+                next.Add(UpdateContribution(cur, m1, m2) ^ inHi);
+                next.Add(UpdateContribution(cur | 1, m1, m2) ^ inHi);
+            }
+            // else: neither child matches the keystream bit — drop
+        }
+        return next;
+    }
+
+    /// <summary>Extends a half-state table by one keystream bit, no feed/contribution (extend_table_simple).</summary>
     private static List<uint> ExtendTableSimple(List<uint> tbl, uint bit)
     {
         var next = new List<uint>(tbl.Count);
-        foreach (var s0 in tbl)
+        foreach (var v in tbl)
         {
-            uint s = s0 << 1;
-            uint f0 = Filter(s);
-            if (f0 != Filter(s | 1))
-                next.Add(s | (f0 ^ bit));
+            uint cur = v << 1;
+            uint f0 = Filter(cur);
+            if ((f0 ^ Filter(cur | 1)) != 0)
+                next.Add(cur | (f0 ^ bit));
             else if (f0 == bit)
             {
-                next.Add(s);
-                next.Add(s | 1);
+                next.Add(cur);
+                next.Add(cur | 1);
             }
         }
         return next;
     }
 
-    /// <summary>The maximum half-table size before recovery gives up (keeps it bounded on a phone).</summary>
-    private const int MaxTable = 1 << 21;
+    /// <summary>Groups the even and odd tables into the 256 contribution buckets and returns the buckets where both
+    /// are non-empty — the only odd/even pairs that can combine (bucket_sort_intersect).</summary>
+    private static List<(List<uint> Even, List<uint> Odd)> BucketIntersect(List<uint> even, List<uint> odd)
+    {
+        var eb = new List<uint>?[256];
+        var ob = new List<uint>?[256];
+        foreach (var v in even) (eb[(v >> 24) & 0xff] ??= []).Add(v);
+        foreach (var v in odd) (ob[(v >> 24) & 0xff] ??= []).Add(v);
+        var res = new List<(List<uint>, List<uint>)>();
+        for (int b = 0; b < 256; b++)
+            if (eb[b] is { Count: > 0 } e && ob[b] is { Count: > 0 } o) res.Add((e, o));
+        return res;
+    }
 
-    /// <summary>Every 48-bit state consistent with keystream word <paramref name="ks2"/> and feed word
-    /// <paramref name="input"/> (lfsr_recovery32). Empty if the tables exceed <see cref="MaxTable"/>.</summary>
+    /// <summary>Narrows the odd/even tables four keystream bits at a time, then emits the recovered states
+    /// (recover). <paramref name="rem"/> starts at 11 and ends the recursion at -1.</summary>
+    private static void Recover(List<uint> odd, uint oks, List<uint> even, uint eks, int rem, uint input, List<Crypto1State> outp)
+    {
+        if (rem == -1)
+        {
+            foreach (var e0 in even)
+            {
+                uint e = (e0 << 1) ^ Parity(e0 & LfPolyEven) ^ ((input & 4) != 0 ? 1u : 0u);
+                foreach (var o in odd)
+                    outp.Add(new Crypto1State(odd: e ^ Parity(o & LfPolyOdd), even: o));
+            }
+            return;
+        }
+
+        for (int i = 0; i < 4 && rem-- != 0; i++)
+        {
+            oks >>= 1;
+            eks >>= 1;
+            input >>= 2;
+            odd = ExtendTable(odd, oks & 1, (LfPolyEven << 1) | 1, LfPolyOdd << 1, 0);
+            if (odd.Count == 0) return;
+            even = ExtendTable(even, eks & 1, LfPolyOdd, (LfPolyEven << 1) | 1, input & 3);
+            if (even.Count == 0) return;
+        }
+
+        foreach (var (eb, ob) in BucketIntersect(even, odd))
+            Recover(ob, oks, eb, eks, rem, input, outp);
+    }
+
+    /// <summary>Every 48-bit cipher state that could have produced keystream word <paramref name="ks2"/> while the
+    /// feed word <paramref name="input"/> was clocked in (lfsr_recovery32). The caller checks each against a second
+    /// nonce (or re-encrypts) to keep the real one.</summary>
     public static List<Crypto1State> LfsrRecovery32(uint ks2, uint input)
     {
         uint oks = 0, eks = 0;
-        for (int i = 31; i >= 0; i -= 2) oks = (oks << 1) | ((ks2 >> (24 ^ i)) & 1);
-        for (int i = 30; i >= 0; i -= 2) eks = (eks << 1) | ((ks2 >> (24 ^ i)) & 1);
+        for (int i = 31; i >= 0; i -= 2) oks = (oks << 1) | ((ks2 >> ((i ^ 24) & 31)) & 1);
+        for (int i = 30; i >= 0; i -= 2) eks = (eks << 1) | ((ks2 >> ((i ^ 24) & 31)) & 1);
 
         var odd = new List<uint>();
         var even = new List<uint>();
-        for (uint i = 0; i < (1u << 20); i++)
+        for (uint i = 0; i <= (1u << 20); i++)
         {
-            if (Filter(i) == (oks & 1)) odd.Add(i);
-            if (Filter(i) == (eks & 1)) even.Add(i);
+            uint f = Filter(i);
+            if (f == (oks & 1)) odd.Add(i);
+            if (f == (eks & 1)) even.Add(i);
         }
 
-        for (int b = 1; b < 16; b++)
+        for (int i = 0; i < 4; i++)
         {
-            odd = ExtendTableSimple(odd, (oks >> b) & 1);
-            even = ExtendTableSimple(even, (eks >> b) & 1);
-            if (odd.Count > MaxTable || even.Count > MaxTable) return [];
+            oks >>= 1; odd = ExtendTableSimple(odd, oks & 1);
+            eks >>= 1; even = ExtendTableSimple(even, eks & 1);
         }
 
-        // Pair the halves and keep those that regenerate ks2. Correct by construction; its cost is the product
-        // of the two table sizes, which is why the cap above matters.
-        var states = new List<Crypto1State>();
-        input = ((input >> 16) & 0xFF) | (input & 0xFF00) | ((input & 0xFF) << 16);
-        if ((long)odd.Count * even.Count > (1L << 40)) return [];
-        foreach (var o in odd)
-            foreach (var e in even)
-            {
-                var s = new Crypto1State(o & 0xFFFFFF, e & 0xFFFFFF);
-                if (Word(s.Copy(), input, false) == ks2) states.Add(s);
-            }
-        return states;
+        input = ((input >> 16) & 0xff) | (input << 16) | (input & 0xff00);   // byte swap
+        var outp = new List<Crypto1State>();
+        Recover(odd, oks, even, eks, 11, input << 1, outp);
+        return outp;
     }
 
-    /// <summary>Recovers candidate keys from one nested nonce: <paramref name="uid"/>, the plaintext target nonce
-    /// <paramref name="nt"/> (predicted with <see cref="PrngSuccessor"/>), and the keystream <paramref name="ks1"/>
-    /// the card used on it.</summary>
+    /// <summary>Candidate keys from one nested nonce: <paramref name="uid"/>, the plaintext target nonce
+    /// <paramref name="nt"/> (predict with <see cref="PrngSuccessor"/>), and the keystream <paramref name="ks1"/>
+    /// the card used on it. <see cref="LfsrRecovery32"/> returns the state after the nonce was fed in, so each is
+    /// rolled back one word to the key. One nonce yields tens of thousands of candidates; intersect the sets from
+    /// two or more nonces (<see cref="Intersect"/>) to pin down the real key.</summary>
     public static List<ulong> Nonce2Key(uint uid, uint nt, uint ks1)
     {
-        var keys = new List<ulong>();
+        var keys = new HashSet<ulong>();
         foreach (var s in LfsrRecovery32(ks1, uid ^ nt))
         {
-            var roll = s.Copy();
-            RollbackWord(roll, uid ^ nt, false);
-            keys.Add(roll.ToKey());
+            var r = s.Copy();
+            RollbackWord(r, uid ^ nt, false);
+            keys.Add(r.ToKey());
         }
-        return keys.Distinct().ToList();
+        return [.. keys];
+    }
+
+    /// <summary>The keys common to two candidate sets — the real key survives across nonces while the false
+    /// candidates do not.</summary>
+    public static List<ulong> Intersect(IEnumerable<ulong> a, IEnumerable<ulong> b)
+    {
+        var set = new HashSet<ulong>(a);
+        set.IntersectWith(b);
+        return [.. set];
     }
 }

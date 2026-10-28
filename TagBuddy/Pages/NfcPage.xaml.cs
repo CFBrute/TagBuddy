@@ -532,19 +532,27 @@ public partial class NfcPage : ContentPage
         await WithProxmarkLog(async usb =>
         {
             AppendProxmarkLog($"Nested: known = block 0 key A (FFFFFFFFFFFF), target = sector {sector} (block {targetBlock}) key A.");
-            var found = new HashSet<ulong>();
-            for (int round = 0; round < 3; round++)
+            // Each nonce gives tens of thousands of candidates; the real key is the one common to all of them, so the
+            // candidate sets are INTERSECTED across nonces. (How the encrypted nonce maps to the solver's plaintext
+            // nt + keystream is the device-side part still to be nailed down on hardware — see TODO.)
+            List<ulong>? candidates = null;
+            for (int round = 0; round < 4 && (candidates is null || candidates.Count > 1); round++)
             {
                 var n = await usb.MifareNestedAsync(0, keyB: false, defaultKey, targetBlock, targetKeyB: false, calibrate: round == 0);
                 if (n is null) { AppendProxmarkLog("No nonces collected — is sector 0 still on the default key?"); break; }
                 AppendProxmarkLog($"round {round}: cuid {n.Cuid:X8}  nt {n.Nt0:X8}/{n.Nt1:X8}  ks {n.Ks0:X8}/{n.Ks1:X8}");
-                foreach (var key in Crypto1.Nonce2Key(n.Cuid, n.Nt0, n.Ks0)) found.Add(key);
-                foreach (var key in Crypto1.Nonce2Key(n.Cuid, n.Nt1, n.Ks1)) found.Add(key);
+                foreach (var (nt, ks) in new[] { (n.Nt0, n.Ks0), (n.Nt1, n.Ks1) })
+                {
+                    var set = Crypto1.Nonce2Key(n.Cuid, nt, ks);
+                    candidates = candidates is null ? set : Crypto1.Intersect(candidates, set);
+                }
             }
-            if (found.Count == 0)
-                AppendProxmarkLog("No key recovered. The nonces are shown above; the Crypto1 solver is not yet confirmed (see Crypto1.cs).");
+            if (candidates is null || candidates.Count == 0)
+                AppendProxmarkLog("No key recovered from these nonces. The nonce→key wiring is still experimental (see Crypto1.cs / TODO).");
+            else if (candidates.Count == 1)
+                AppendProxmarkLog($"✓ Recovered key A for sector {sector}: {candidates[0]:X12}");
             else
-                foreach (var key in found) AppendProxmarkLog($"candidate key A for sector {sector}: {key:X12}");
+                AppendProxmarkLog($"{candidates.Count} candidates left for sector {sector} — collect more nonces to narrow to one.");
         });
         ProxmarkRecoverButton.IsEnabled = true;
     }
