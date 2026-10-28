@@ -27,7 +27,7 @@
                  summary at the top of the page that expands to the full message. -->
             <controls:InfoExpander x:Name="LastResultExpander" IsVisible="False" FontSize="13" Margin="0,2,0,0" />
 
-            <!-- The Proxmark/RF controls live in a floating side-drawer overlaid on the page (RfDrawerRoot, below the
+            <!-- The Proxmark/RF controls live in a floating side-drawer overlaid on the page (RfDrawer, below the
                  ScrollView), so they stay put while this content scrolls and can be flicked away to a side handle. -->
             <!-- Shown only once a protected tag is noticed (reading or writing); never a thing to set up in advance. -->
             <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"
@@ -600,19 +600,10 @@
     </VerticalStackLayout>
 
     <!-- RF drawer: the Proxmark controls as a floating side-sheet pinned over the page, so they stay put while the
-         page scrolls. Drag anywhere on it (or the "PM" tab) to slide it in, or off to the right edge where it hides
-         to the tab; a tap on the tab toggles it. It is only as tall as its content. Shown while a Proxmark is in. -->
-    <Grid x:Name="RfDrawerRoot" IsVisible="False" HorizontalOptions="Fill" VerticalOptions="Center"
-          Margin="24,8,0,8" SizeChanged="OnRfDrawerSizeChanged">
-        <Grid.GestureRecognizers>
-            <PanGestureRecognizer PanUpdated="OnRfDrawerPan" />
-        </Grid.GestureRecognizers>
-        <!-- Laid out for the right edge; ApplyRfDockSide mirrors the margins, corners, padding and tab for the left. -->
-        <Border x:Name="RfDrawerSheet" Margin="15,0,0,0" StrokeThickness="0" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#1F2937}">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="14,0,0,14" />
-            </Border.StrokeShape>
-            <VerticalStackLayout x:Name="ProxmarkPanel" Spacing="8" Padding="22,12,12,12">
+         page scrolls; it slides off its edge to the "PM" tab, and can dock on either side. Shown while a Proxmark
+         is in. -->
+    <controls:EdgeDrawer x:Name="RfDrawer" IsVisible="False" TabText="PM" PreferenceKey="rf_drawer">
+            <VerticalStackLayout x:Name="ProxmarkPanel" Spacing="8">
                     <HorizontalStackLayout Spacing="8">
                         <BoxView x:Name="ProxmarkDot" WidthRequest="12" HeightRequest="12" CornerRadius="6"
                                  Color="#F59E0B" VerticalOptions="Center" />
@@ -677,27 +668,6 @@
 
                     <controls:InfoExpander x:Name="ProxmarkLog" Title="Connection log" IsVisible="False" FontSize="12" />
                 </VerticalStackLayout>
-        </Border>
-        <!-- grab tab: a half-circle on the drawer's left edge, vertically centred. Drag anywhere, or tap this to toggle. -->
-        <Border x:Name="RfDrawerHandle" WidthRequest="30" HeightRequest="64" HorizontalOptions="Start" VerticalOptions="Center"
-                StrokeThickness="0" BackgroundColor="{StaticResource Primary}">
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="16,0,0,16" />
-            </Border.StrokeShape>
-            <Border.GestureRecognizers>
-                <TapGestureRecognizer Tapped="OnRfDrawerTap" />
-            </Border.GestureRecognizers>
-            <Label Text="PM" FontSize="12" FontAttributes="Bold" TextColor="{StaticResource PrimaryDarkText}"
-                   HorizontalOptions="Center" VerticalOptions="Center" />
-        </Border>
-        <!-- Catcher plane: while the drawer is closed this sits on top of everything and takes the touch first, so a
-             tap anywhere opens it and a drag still slides it. Hidden while open, so the buttons work normally. -->
-        <Grid x:Name="RfDrawerScrim" BackgroundColor="Transparent">
-            <Grid.GestureRecognizers>
-                <PanGestureRecognizer PanUpdated="OnRfDrawerPan" />
-                <TapGestureRecognizer Tapped="OnRfDrawerScrimTap" />
-            </Grid.GestureRecognizers>
-        </Grid>
-    </Grid>
+    </controls:EdgeDrawer>
     </Grid>
 </ContentPage>
