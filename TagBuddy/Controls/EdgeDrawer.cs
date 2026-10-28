@@ -55,6 +55,7 @@ public sealed class EdgeDrawer : ContentView
     private readonly Label _tabLabel;
     private readonly Grid _scrim;
     private string? _prefKey;
+    private DateTime _openedAt;
 
     // Slid off its edge until only the tab is left: negative when docked left.
     private double _hiddenX = 300;
@@ -93,8 +94,13 @@ public sealed class EdgeDrawer : ContentView
 
         var pan = new PanGestureRecognizer();
         pan.PanUpdated += OnPan;
+        // A double-tap on its background (not on a button inside) shuts it. Ignored right after opening, so a quick
+        // double-tap on the shut drawer doesn't open and then shut it again.
+        var doubleTap = new TapGestureRecognizer { NumberOfTapsRequired = 2 };
+        doubleTap.Tapped += (_, _) => { if (IsOpen && DateTime.UtcNow - _openedAt > TimeSpan.FromMilliseconds(500)) IsOpen = false; };
         var root = new Grid { Children = { _sheet, _tab, _scrim } };
         root.GestureRecognizers.Add(pan);
+        root.GestureRecognizers.Add(doubleTap);
         Content = root;
 
         SizeChanged += OnSizeChanged;
@@ -214,6 +220,7 @@ public sealed class EdgeDrawer : ContentView
 
     private void Animate()
     {
+        if (IsOpen && _scrim.IsVisible) _openedAt = DateTime.UtcNow;   // just opened (the catcher plane was up)
         _scrim.IsVisible = !IsOpen;   // catcher plane only while shut, so what is inside works when open
         // X only; keep the height so opening/shutting doesn't yank it back to the middle.
         _ = this.TranslateTo(IsOpen ? 0 : _hiddenX, TranslationY, 150, Easing.CubicOut);
