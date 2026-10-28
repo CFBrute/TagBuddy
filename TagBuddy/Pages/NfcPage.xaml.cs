@@ -94,6 +94,7 @@ public partial class NfcPage : ContentPage
     {
         InitializeComponent();
         _saved = saved;
+        ApplyRfDockSide();   // the RF drawer docks on the side it was last flipped to
 
         if (!Features.Amiibo)
         {
@@ -128,7 +129,7 @@ public partial class NfcPage : ContentPage
         base.OnNavigatedTo(args);
         // Handed over from another tab (a saved read to show or edit, a dump or text to write): apply it once the page
         // has appeared and laid out. Doing it straight here showed nothing the first time a saved tag was opened after
-        // launch — it rendered only when opened a second time — because the view was built before its first layout.
+        // launch â€” it rendered only when opened a second time â€” because the view was built before its first layout.
         Dispatcher.Dispatch(async () => await ApplyIncomingAsync());
     }
 
@@ -167,7 +168,7 @@ public partial class NfcPage : ContentPage
                 IncomingApply = null;
                 OnTagRead(apply.Target, fromSaved: true);
                 _lastName = apply.TargetName;
-                TagTitle.Text = $"{apply.TargetName}\nTag {apply.Target.Id}  ·  {string.Join(", ", apply.Target.Technologies)}";
+                TagTitle.Text = $"{apply.TargetName}\nTag {apply.Target.Id}  Â·  {string.Join(", ", apply.Target.Technologies)}";
                 OnEditTag(this, EventArgs.Empty);
                 if (_edit is { } edit)
                 {
@@ -214,7 +215,7 @@ public partial class NfcPage : ContentPage
     private void ShowSavedRead(NfcTagInfo tag, SavedItem item)
     {
         OnTagRead(tag, fromSaved: true);
-        TagTitle.Text = $"{item.DisplayName}  ·  saved {item.CreatedAt:yyyy-MM-dd HH:mm}\nTag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
+        TagTitle.Text = $"{item.DisplayName}  Â·  saved {item.CreatedAt:yyyy-MM-dd HH:mm}\nTag {tag.Id}  Â·  {string.Join(", ", tag.Technologies)}";
     }
 
     protected override void OnAppearing()
@@ -322,13 +323,179 @@ public partial class NfcPage : ContentPage
     private static readonly Color ProxmarkOk = Color.FromArgb("#22C55E");
     private static readonly Color ProxmarkBad = Color.FromArgb("#DC2626");
 
-    /// <summary>Shows or hides the Proxmark panel to match what is plugged in — a recognised Proxmark, or (so the
-    /// person can still try it) any connected USB device — and verifies a recognised one once on a fresh attach.</summary>
+    /// <summary>Shows or hides the Proxmark panel to match what is plugged in â€” a recognised Proxmark, or (so the
+    /// person can still try it) any connected USB device â€” and verifies a recognised one once on a fresh attach.</summary>
+    // RF drawer: the floating Proxmark side-sheet is at X=0 when open, and slid off its edge (leaving just the PM
+    // tab, flush with the screen edge) when hidden. The sheet is near full width, so the hidden offset is computed
+    // from its laid-out width. It docks on the right or the left: pulling it past fully open by SideSwitch flips it
+    // to the other side. _rfHiddenX is negative when docked left.
+    private double _rfHiddenX = 300;
+    private double _rfDrawerStart;
+    private bool _rfDrawerOpen;
+    private bool _rfDockLeft = Preferences.Get(DockLeftKey, false);
+    private bool _dragFlipped;
+    private const double SideSwitch = 60;
+    private const string DockLeftKey = "rf_drawer_left";
+    // A drag follows one main direction (1 = horizontal open/close, 2 = vertical reposition), picked after
+    // AxisPick of travel. It can change mid-drag, but only once the finger has gone AxisSwitch the other way since
+    // the current direction took over â€” so it sticks to up/down unless clearly pushed sideways, and vice versa. On
+    // release it snaps open/closed by the sideways travel. The vertical offset is remembered.
+    private int _dragAxis;
+    private double _dragStartY, _dragOrigX, _axisAnchorX, _axisAnchorY;
+    private const double AxisPick = 8, AxisSwitch = 40;
+    private bool _drawerYLoaded;
+    private const string DrawerYKey = "rf_drawer_y";
+
+    private double MaxDrawerY()
+    {
+        double container = PageRoot.Height, drawer = RfDrawerRoot.Height;
+        return container > 0 && drawer > 0 ? Math.Max(0, (container - drawer) / 2 - 2) : 0;   // reach ~to the top
+    }
+
+    /// <summary>How far the finger has moved on the screen since it went down, in page units. Read from the raw
+    /// screen coordinates (see <see cref="MainActivity.DispatchTouchEvent"/>), not the pan's TotalX/Y, so the drawer
+    /// moves exactly with the finger instead of lagging and shaking.</summary>
+    private static (double X, double Y) FingerTravel()
+    {
+        double density = DeviceDisplay.MainDisplayInfo.Density;
+        if (density <= 0) density = 1;
+        return ((MainActivity.TouchRawX - MainActivity.DownRawX) / density,
+                (MainActivity.TouchRawY - MainActivity.DownRawY) / density);
+    }
+
+    /// <summary>Lays the drawer out for the side it docks on: the right-edge layout from the XAML, or its mirror.</summary>
+    private void ApplyRfDockSide()
+    {
+        bool left = _rfDockLeft;
+        RfDrawerRoot.Margin = left ? new Thickness(0, 8, 24, 8) : new Thickness(24, 8, 0, 8);
+        RfDrawerSheet.Margin = left ? new Thickness(0, 0, 15, 0) : new Thickness(15, 0, 0, 0);
+        RfDrawerSheet.StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = left ? new CornerRadius(0, 14, 14, 0) : new CornerRadius(14, 0, 0, 14) };
+        ProxmarkPanel.Padding = left ? new Thickness(12, 12, 22, 12) : new Thickness(22, 12, 12, 12);
+        RfDrawerHandle.HorizontalOptions = left ? LayoutOptions.End : LayoutOptions.Start;
+        RfDrawerHandle.StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = left ? new CornerRadius(0, 16, 16, 0) : new CornerRadius(16, 0, 0, 16) };
+        UpdateRfHiddenX();
+    }
+
+    /// <summary>Hidden = slid off its edge until only the tab is left, its outer side touching the screen edge.</summary>
+    private void UpdateRfHiddenX()
+    {
+        double travel = Math.Max(40, RfDrawerRoot.Width - RfDrawerHandle.WidthRequest);
+        _rfHiddenX = _rfDockLeft ? -travel : travel;
+    }
+
+    private void OnRfDrawerSizeChanged(object? sender, EventArgs e)
+    {
+        if (RfDrawerRoot.Width <= 0) return;
+        UpdateRfHiddenX();
+        RfDrawerRoot.TranslationX = _rfDrawerOpen ? 0 : _rfHiddenX;
+        RfDrawerScrim.IsVisible = !_rfDrawerOpen;
+
+        // Restore the remembered vertical position (once), then keep it within the space now available.
+        double maxY = MaxDrawerY();
+        if (!_drawerYLoaded && maxY > 0) { RfDrawerRoot.TranslationY = Math.Clamp(Preferences.Get(DrawerYKey, 0.0), -maxY, maxY); _drawerYLoaded = true; }
+        else RfDrawerRoot.TranslationY = Math.Clamp(RfDrawerRoot.TranslationY, -maxY, maxY);
+    }
+
+    /// <summary>Drag anywhere on the drawer to slide it in (toward X=0) or off to the right edge. Commits on a small
+    /// movement (gives early); only a tiny jitter snaps back to where it was.</summary>
+    private void OnRfDrawerPan(object? sender, PanUpdatedEventArgs e)
+    {
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _dragAxis = 0;
+                _dragFlipped = false;
+                _rfDrawerStart = _dragOrigX = RfDrawerRoot.TranslationX;
+                _dragStartY = RfDrawerRoot.TranslationY;
+                break;
+            case GestureStatus.Running:
+                // The drawer sits where it was, plus the finger's exact screen travel â€” so the spot that was grabbed
+                // stays under the finger along the main direction.
+                if (_dragFlipped) break;   // just switched sides: the rest of this drag is spent
+                var (dx, dy) = FingerTravel();
+                if (_dragAxis == 0)   // not picked yet: take the direction the drag clearly favours
+                {
+                    if (Math.Abs(dx) < AxisPick && Math.Abs(dy) < AxisPick) break;
+                    _dragAxis = Math.Abs(dx) >= Math.Abs(dy) ? 1 : 2;
+                    (_axisAnchorX, _axisAnchorY) = (dx, dy);
+                }
+                else if (_dragAxis == 2 && Math.Abs(dx - _axisAnchorX) > AxisSwitch)   // pushed clearly sideways
+                {
+                    _dragAxis = 1;
+                    _rfDrawerStart = RfDrawerRoot.TranslationX - dx;   // carry on from here, no jump
+                    (_axisAnchorX, _axisAnchorY) = (dx, dy);
+                }
+                else if (_dragAxis == 1 && Math.Abs(dy - _axisAnchorY) > AxisSwitch)   // pushed clearly up/down
+                {
+                    _dragAxis = 2;
+                    _dragStartY = RfDrawerRoot.TranslationY - dy;
+                    (_axisAnchorX, _axisAnchorY) = (dx, dy);
+                }
+                if (_dragAxis == 1)
+                {
+                    // Between hidden and open, plus up to SideSwitch past open; pulled that far, it flips sides.
+                    double side = Math.Sign(_rfHiddenX), x = _rfDrawerStart + dx;
+                    if (-x * side >= SideSwitch) { FlipRfDockSide(); break; }
+                    RfDrawerRoot.TranslationX = Math.Clamp(x, Math.Min(-side * SideSwitch, _rfHiddenX), Math.Max(-side * SideSwitch, _rfHiddenX));
+                }
+                else
+                    RfDrawerRoot.TranslationY = Math.Clamp(_dragStartY + dy, -MaxDrawerY(), MaxDrawerY());
+                break;
+            default:   // Completed / Canceled
+                Preferences.Set(DrawerYKey, RfDrawerRoot.TranslationY);   // remember where it was put
+                if (_dragFlipped) break;
+                // decide open/closed by the sideways travel over the whole drag, with a small commit threshold
+                double moved = (RfDrawerRoot.TranslationX - _dragOrigX) * Math.Sign(_rfHiddenX);   // + = toward hidden
+                const double commit = 20;
+                if (moved > commit) _rfDrawerOpen = false;        // dragged toward hidden
+                else if (moved < -commit) _rfDrawerOpen = true;   // dragged toward open
+                AnimateDrawer();
+                break;
+        }
+    }
+
+    /// <summary>Pulled past fully open: the drawer jumps to dock on the other side, open, with the tab moved over.</summary>
+    private void FlipRfDockSide()
+    {
+        _dragFlipped = true;
+        _rfDockLeft = !_rfDockLeft;
+        Preferences.Set(DockLeftKey, _rfDockLeft);
+        _rfDrawerOpen = true;
+        ApplyRfDockSide();
+        RfDrawerRoot.TranslationX = 0;
+        RfDrawerScrim.IsVisible = false;
+        try { HapticFeedback.Default.Perform(HapticFeedbackType.Click); } catch { /* no haptics */ }
+    }
+
+    /// <summary>Tapping the PM tab toggles the drawer open/closed (a click fallback for the drag).</summary>
+    private void OnRfDrawerTap(object? sender, TappedEventArgs e)
+    {
+        _rfDrawerOpen = !_rfDrawerOpen;
+        AnimateDrawer();
+    }
+
+    private void AnimateDrawer()
+    {
+        RfDrawerScrim.IsVisible = !_rfDrawerOpen;   // catcher plane only while closed, so the buttons work when open
+        // Animate X only; keep the current vertical position so opening/closing doesn't yank it back to the middle.
+        _ = RfDrawerRoot.TranslateTo(_rfDrawerOpen ? 0 : _rfHiddenX, RfDrawerRoot.TranslationY, 150, Easing.CubicOut);
+    }
+
+    /// <summary>The catcher plane is only up while closed, so any tap on it just opens the drawer.</summary>
+    private void OnRfDrawerScrimTap(object? sender, TappedEventArgs e)
+    {
+        _rfDrawerOpen = true;
+        AnimateDrawer();
+    }
+
     private void RefreshProxmarkPanel() => MainThread.BeginInvokeOnMainThread(() =>
     {
         bool known = ProxmarkUsb.IsAttached();
         bool foreign = !known && ProxmarkUsb.ForeignUsbPresent();
-        ProxmarkPanel.IsVisible = known || foreign;
+        bool show = known || foreign;
+        if (show && !RfDrawerRoot.IsVisible) _rfDrawerOpen = true;   // a freshly plugged-in Proxmark opens the drawer
+        RfDrawerRoot.IsVisible = show;
+        if (!show) _rfDrawerOpen = false;   // unplugged: next time it appears it starts open again (just above)
         if (!known && !foreign) { _proxmarkVerified = false; _proxmarkAllowAny = false; return; }
 
         // A connected device that is not a recognised Proxmark: offer to try it rather than check on its own, since
@@ -339,7 +506,7 @@ public partial class NfcPage : ContentPage
             ProxmarkDot.Color = ProxmarkBusy;
             ProxmarkStatus.Text = "A USB device is connected but isn't a recognised Proxmark. You can try talking to it anyway.";
             ProxmarkReadButton.IsVisible = ProxmarkAutoButton.IsVisible = ProxmarkMagicRow.IsVisible = ProxmarkInfoButton.IsVisible = false;
-            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = false;
+            ProxmarkLfReadButton.IsVisible = ProxmarkLfWriteButton.IsVisible = ProxmarkLfLiveButton.IsVisible = ProxmarkLfResult.IsVisible = LfGraph.IsVisible = LfGraphHeader.IsVisible = false;
             return;
         }
         if (known && !_proxmarkVerified && !_proxmarkChecking) _ = VerifyProxmarkAsync(auto: true, allowAny: false);
@@ -353,7 +520,7 @@ public partial class NfcPage : ContentPage
         _proxmarkChecking = true;
         _proxmarkAllowAny = allowAny;
         ProxmarkDot.Color = ProxmarkBusy;
-        ProxmarkStatus.Text = "Checking the link…";
+        ProxmarkStatus.Text = "Checking the linkâ€¦";
         ProxmarkProbeButton.IsEnabled = false;
         ProxmarkTryForeignButton.IsEnabled = false;
         ProxmarkLog.Text = "";
@@ -372,8 +539,8 @@ public partial class NfcPage : ContentPage
         ProxmarkStatus.Text = ok
             ? "Connected. Hold a 13.56 MHz tag to the antenna and tap Read, or tap Device info."
             : allowAny
-                ? "That USB device did not answer as a Proxmark — see the log."
-                : "Detected, but the link check failed — see the log.";
+                ? "That USB device did not answer as a Proxmark â€” see the log."
+                : "Detected, but the link check failed â€” see the log.";
         ProxmarkReadButton.IsVisible = ok;
         ProxmarkAutoButton.IsVisible = ok;
         ProxmarkMagicRow.IsVisible = ok;
@@ -393,7 +560,7 @@ public partial class NfcPage : ContentPage
     /// its vendor id is not one we recognise (a Proxmark clone, or an unusual board).</summary>
     private void OnProxmarkTryForeign(object? sender, EventArgs e) => _ = VerifyProxmarkAsync(auto: false, allowAny: true);
 
-    /// <summary>The "Read LF" button: capture 125 kHz and show the EM410x id if one decodes — the data the phone's own
+    /// <summary>The "Read LF" button: capture 125 kHz and show the EM410x id if one decodes â€” the data the phone's own
     /// radio can never reach. Displayed in the log and, when an id is found, on its own line like a tag's identity.</summary>
     private async void OnProxmarkLfRead(object? sender, EventArgs e)
     {
@@ -441,8 +608,18 @@ public partial class NfcPage : ContentPage
         ProxmarkLfReadButton.IsEnabled = ProxmarkLfWriteButton.IsEnabled = ProxmarkUsb.IsAttached();
     }
 
-    /// <summary>Draws the capture and shows the result — an id, or a "tag present"/"no signal" hint — keeping the
+    /// <summary>Draws the capture and shows the result â€” an id, or a "tag present"/"no signal" hint â€” keeping the
     /// last decoded id on the graph across live frames that don't decode.</summary>
+    private bool _lfGraphCollapsed;
+
+    /// <summary>The coil-signal graph's disclosure chevron: collapse/expand the waveform without losing it.</summary>
+    private void OnLfGraphToggle(object? sender, TappedEventArgs e)
+    {
+        _lfGraphCollapsed = !_lfGraphCollapsed;
+        LfGraph.IsVisible = !_lfGraphCollapsed;
+        LfGraphHeader.Text = _lfGraphCollapsed ? "Coil signal  â–¸" : "Coil signal  â–¾";
+    }
+
     private void UpdateLfGraph(ProxmarkUsb.LfRead read)
     {
         if (read.IdHex is { } decoded) _lfLastIdHint = decoded;
@@ -453,14 +630,15 @@ public partial class NfcPage : ContentPage
             : Controls.LfWaveform.Status.None;
         _lfWaveform.Hint = read.IdHex is { } h ? $"EM410x {h}"
             : _lfLastIdHint is { } last ? $"last: {last}"
-            : read.SignalPresent ? "tag present — no id" : "no signal";
+            : read.SignalPresent ? "tag present â€” no id" : "no signal";
         LfGraph.Drawable = _lfWaveform;
-        LfGraph.IsVisible = true;
+        LfGraphHeader.IsVisible = true;
+        LfGraph.IsVisible = !_lfGraphCollapsed;
         LfGraph.Invalidate();
 
         if (read.IdHex is { } hex)
         {
-            ProxmarkLfResult.Text = $"LF tag (EM410x)  ·  id {hex}  ·  via Proxmark";
+            ProxmarkLfResult.Text = $"LF tag (EM410x)  Â·  id {hex}  Â·  via Proxmark";
             ProxmarkLfResult.IsVisible = true;
             ProxmarkStatus.Text = $"Read an EM410x LF tag: {hex}.";
         }
@@ -469,7 +647,7 @@ public partial class NfcPage : ContentPage
             ProxmarkLfResult.IsVisible = false;
             ProxmarkStatus.Text = read.SignalPresent
                 ? "An LF tag is on the antenna, but no EM410x id decoded (another format, or coupling weakly)."
-                : "No LF signal — put a tag on the round LF coil.";
+                : "No LF signal â€” put a tag on the round LF coil.";
         }
     }
 
@@ -510,8 +688,8 @@ public partial class NfcPage : ContentPage
         ProxmarkInfoButton.IsEnabled = true;
     }
 
-    /// <summary>Reads the card on the Proxmark's antenna — a full backdoor dump for a gen1a magic card, its identity
-    /// otherwise — and shows it in the normal result view, where it can be saved, edited and compared.</summary>
+    /// <summary>Reads the card on the Proxmark's antenna â€” a full backdoor dump for a gen1a magic card, its identity
+    /// otherwise â€” and shows it in the normal result view, where it can be saved, edited and compared.</summary>
     private async void OnProxmarkRead(object? sender, EventArgs e)
     {
         StopProxmarkAuto();
@@ -533,7 +711,7 @@ public partial class NfcPage : ContentPage
             : ProxmarkClassic.IdentityOnly(dump.Uid, dump.Atqa, dump.Sak, "Proxmark3 (USB)");
         NfcReader.ClearClassicKeysFound();   // don't credit this read with the phone reader's stale keys
         OnTagRead(tag, fromSaved: false);
-        TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
+        TagTitle.Text = $"Tag {tag.Id}  Â·  {string.Join(", ", tag.Technologies)}  Â·  via Proxmark";
         if (buzz) Feedback.Tag(ok: true);
     }
 
@@ -543,7 +721,7 @@ public partial class NfcPage : ContentPage
     private string? _autoLastUid;
 
     /// <summary>Toggles the auto-reader: while on, the Proxmark is polled continuously and a tag is read and shown
-    /// the instant it is presented — and again when it is taken away and brought back, like a phone tap.</summary>
+    /// the instant it is presented â€” and again when it is taken away and brought back, like a phone tap.</summary>
     private async void OnProxmarkAuto(object? sender, EventArgs e)
     {
         if (_proxmarkAutoCts is not null) { StopProxmarkAuto(); return; }
@@ -552,7 +730,7 @@ public partial class NfcPage : ContentPage
         _autoLastUid = null;
         ProxmarkAutoButton.Text = "Stop auto";
         ProxmarkReadButton.IsEnabled = false;
-        ProxmarkStatus.Text = "Waiting for a tag on the antenna…";
+        ProxmarkStatus.Text = "Waiting for a tag on the antennaâ€¦";
         var usb = new ProxmarkUsb();   // quiet: the poll loop must not fill the connection log
         try
         {
@@ -571,7 +749,7 @@ public partial class NfcPage : ContentPage
                 var dump = await usb.ReadCardAsync();
                 if (cts.IsCancellationRequested) break;
                 if (dump is not null) ShowProxmarkDump(dump, buzz: true);
-                if (!cts.IsCancellationRequested) ProxmarkStatus.Text = "Read a tag. Waiting for the next…";
+                if (!cts.IsCancellationRequested) ProxmarkStatus.Text = "Read a tag. Waiting for the nextâ€¦";
             }
         }
         catch { /* link dropped; just stop */ }
@@ -607,7 +785,7 @@ public partial class NfcPage : ContentPage
             {
                 _proxmarkBlock0 = block;
                 AppendProxmarkLog($"Block 0: {Hex(block)}");
-                AppendProxmarkLog($"UID {Hex(block[..4])}  ·  BCC {block[4]:X2}  ·  SAK {block[5]:X2}  ·  ATQA {Hex(block[6..8])}");
+                AppendProxmarkLog($"UID {Hex(block[..4])}  Â·  BCC {block[4]:X2}  Â·  SAK {block[5]:X2}  Â·  ATQA {Hex(block[6..8])}");
                 ProxmarkSetUidButton.IsEnabled = true;
             }
         });
@@ -643,7 +821,7 @@ public partial class NfcPage : ContentPage
             if (written is { Length: 16 })
             {
                 _proxmarkBlock0 = written;
-                AppendProxmarkLog($"✓ Written and verified. Block 0: {Hex(written)}");
+                AppendProxmarkLog($"âœ“ Written and verified. Block 0: {Hex(written)}");
                 AppendProxmarkLog($"UID is now {Hex(written[..4])}.");
             }
         });
@@ -700,10 +878,10 @@ public partial class NfcPage : ContentPage
                     NfcReader.ClearClassicKeysFound();
                     SetMode(write: false);
                     OnTagRead(tag, fromSaved: false);
-                    TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}  ·  via Proxmark";
+                    TagTitle.Text = $"Tag {tag.Id}  Â·  {string.Join(", ", tag.Technologies)}  Â·  via Proxmark";
                 }
             }
-            else Notice.Show("Some blocks did not write — see the log");
+            else Notice.Show("Some blocks did not write â€” see the log");
         });
         ProxmarkWriteButton.IsEnabled = true;
     }
@@ -775,7 +953,7 @@ public partial class NfcPage : ContentPage
         _tryDefaultOnce = true;
         _nfc.SetTryDefaultOnce(true);
         Notice.Show("Hold the tag against the phone again");
-        StatusLabel.Text = "Hold the tag again to try the factory default password (FFFFFFFF) once…";
+        StatusLabel.Text = "Hold the tag again to try the factory default password (FFFFFFFF) onceâ€¦";
     }
 
     // ---------------------------------------------------------------- MIFARE Classic key
@@ -831,7 +1009,7 @@ public partial class NfcPage : ContentPage
         _tryAllKeys = true;
         ApplyClassicKey();
         Notice.Show("Hold the card against the phone again");
-        StatusLabel.Text = $"Hold the card again to try all {_keyStore.ImportedCount():N0} default keys on the locked sectors…";
+        StatusLabel.Text = $"Hold the card again to try all {_keyStore.ImportedCount():N0} default keys on the locked sectorsâ€¦";
     }
 
     private async void OnImportKeys(object? sender, EventArgs e)
@@ -943,7 +1121,7 @@ public partial class NfcPage : ContentPage
         ClassicKeyPanel.IsVisible = tag.NeedsClassicKey;
         if (tag.NeedsClassicKey) ShowKeyDictionaryTools();
 
-        TagTitle.Text = $"Tag {tag.Id}  ·  {string.Join(", ", tag.Technologies)}";
+        TagTitle.Text = $"Tag {tag.Id}  Â·  {string.Join(", ", tag.Technologies)}";
 
         // No NDEF content: bytes written raw by this app (or anything else wordy) still count as content.
         _rawText = null;
@@ -992,7 +1170,7 @@ public partial class NfcPage : ContentPage
         SaveTagButton.IsVisible = tag.HasMemoryDump && !fromSaved;   // already in Saved when shown from there
         TagKeysButton.IsVisible = Features.MifareKeyTools && tag.Segments?.Layout.Family == TagFamily.Classic;
         CompareButton.IsVisible = tag.Segments is not null;
-        _lastName = fromSaved ? TagTitle.Text.Split('\n')[0].Split("  ·  ")[0] is { Length: > 0 } n ? "saved: " + n : "saved" : "read just now";
+        _lastName = fromSaved ? TagTitle.Text.Split('\n')[0].Split("  Â·  ")[0] is { Length: > 0 } n ? "saved: " + n : "saved" : "read just now";
         if (tag.RawMemory is { Length: > 0 } memory)
         {
             // Type 2 tag: the full page memory, shown with its map, saveable as a backup.
@@ -1046,12 +1224,12 @@ public partial class NfcPage : ContentPage
     {
         string chip = tag.ChipName ?? tag.Segments?.Layout.ChipName ?? "Tag";
         string what =
-            tag.RawMemory is { Length: > 0 } m ? $"{m.Length} bytes · {m.Length / 4} pages"
+            tag.RawMemory is { Length: > 0 } m ? $"{m.Length} bytes Â· {m.Length / 4} pages"
             : tag.Segments is { } s
-                ? $"{s.Data.Count} blocks read" + (s.Blocked.Count > 0 ? $" · {s.Blocked.Count} locked" : "")
+                ? $"{s.Data.Count} blocks read" + (s.Blocked.Count > 0 ? $" Â· {s.Blocked.Count} locked" : "")
             : tag.HasContent ? "content read"
             : "serial read";
-        return $"Read {chip}  ·  {tag.Id}\n{what}";
+        return $"Read {chip}  Â·  {tag.Id}\n{what}";
     }
 
     private int _bannerGeneration;
@@ -1083,7 +1261,7 @@ public partial class NfcPage : ContentPage
     private void SetLastResult(string text)
     {
         var oneLine = text.Replace("\n", "  ");
-        LastResultExpander.Title = oneLine.Length > 64 ? oneLine[..64] + "…" : oneLine;
+        LastResultExpander.Title = oneLine.Length > 64 ? oneLine[..64] + "â€¦" : oneLine;
         LastResultExpander.Text = text;
         LastResultExpander.Expanded = false;
         LastResultExpander.IsVisible = true;
@@ -1104,10 +1282,10 @@ public partial class NfcPage : ContentPage
             return;
         }
 
-        var labels = hexes.Select(h => when.TryGetValue(h, out var w) ? $"{h}  ·  {KeyAgo(w)}" : h).ToArray();
-        var pick = await DisplayActionSheet("Keys for this tag — tap to copy", "Cancel", null, labels);
+        var labels = hexes.Select(h => when.TryGetValue(h, out var w) ? $"{h}  Â·  {KeyAgo(w)}" : h).ToArray();
+        var pick = await DisplayActionSheet("Keys for this tag â€” tap to copy", "Cancel", null, labels);
         if (pick is null || pick == "Cancel") return;
-        var hex = pick.Split("  ·  ")[0];
+        var hex = pick.Split("  Â·  ")[0];
         await Clipboard.Default.SetTextAsync(hex);
         Notice.Show($"Copied {hex}");
     }
@@ -1264,7 +1442,7 @@ public partial class NfcPage : ContentPage
             await _saved.LoadAsync();
             var candidates = _saved.Dumps.Where(d => d.HasRead).OrderByDescending(d => d.SortTime).ToList();
             const string next = "The next tag held to the phone";
-            var labels = candidates.Select(c => $"{c.DisplayName}  ·  {c.Subtitle}").Prepend(next).ToArray();
+            var labels = candidates.Select(c => $"{c.DisplayName}  Â·  {c.Subtitle}").Prepend(next).ToArray();
             var choice = await DisplayActionSheetAsync($"Compare this {segments.Layout.ChipName} with", "Cancel", null, labels);
             if (choice is null || choice == "Cancel") return;
 
@@ -1603,7 +1781,7 @@ public partial class NfcPage : ContentPage
         WriteStatus.TextColor = ok ? Palette.Accent : Palette.Error;
 
         // Mirror it to the top banner so the outcome is seen without scrolling to the bottom of the write panel.
-        ShowBanner((ok ? "Write OK — " : "Write failed — ") + note, ok);
+        ShowBanner((ok ? "Write OK â€” " : "Write failed â€” ") + note, ok);
         UseRawButton.IsVisible = !ok && note.Contains(NfcReader.RawBytesTip)
             && WriteType is WriteMode.Auto or WriteMode.Text or WriteMode.Link;
 
@@ -1634,7 +1812,7 @@ public partial class NfcPage : ContentPage
             return;
         }
 
-        var labels = candidates.Select(i => $"{i.DisplayName}  ·  {i.FormatLabel}").ToArray();
+        var labels = candidates.Select(i => $"{i.DisplayName}  Â·  {i.FormatLabel}").ToArray();
         var choice = await DisplayActionSheetAsync("Load from Saved", "Cancel", null, labels);
         if (choice is null || choice == "Cancel") return;
 
@@ -1677,7 +1855,7 @@ public partial class NfcPage : ContentPage
 
         if (record is null) { UpdateTagHistory(); return note; }
         bool expected = _edit?.ExpectedId is { } id && TagEdit.SameId(id, record.TagId);
-        // Remember every key written to a trailer — even a sector that did not re-open to confirm — so the next read
+        // Remember every key written to a trailer â€” even a sector that did not re-open to confirm â€” so the next read
         // opens it without the key being retyped. The confirmed set still drives clearing the pending edit.
         if (NfcReader.ClassicKeysWritten is { Count: > 0 } keysWritten)
         {
@@ -1851,7 +2029,7 @@ public partial class NfcPage : ContentPage
             $"Typing writes over the bytes and runs on into the next {noun}; backspace puts a byte back as it was. Grey rows are never written. " +
             (edit.FromRead
                 ? "The bytes are as the tag held them when it was read; only the ones you change are written."
-                : "·· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
+                : "Â·Â· is a byte not set: the tag keeps its own byte there, and only the bytes you type are written.") +
             $" \"{(noun == "page" ? "Page" : "Block")} to 00\" clears the cursor's {noun}, \"All to 00\" every {noun} shown. " +
             "Undo and Redo go back or forward one keystroke at a time; \"Reset byte\" puts the byte under the cursor back as the tag had it and steps left, " +
             "so it walks back over a change wherever the cursor is put. \"Revert\" drops every change.";
@@ -2021,7 +2199,7 @@ public partial class NfcPage : ContentPage
         UpdateSegmentTools();
     }
 
-    /// <summary>A long press on the grid: copy the selected run — or, with nothing selected, the block pressed.</summary>
+    /// <summary>A long press on the grid: copy the selected run â€” or, with nothing selected, the block pressed.</summary>
     private async void OnGridLongPressed((int Segment, int Index) cell)
     {
         if (_edit is not { Length: > 0 } edit) return;
@@ -2076,7 +2254,7 @@ public partial class NfcPage : ContentPage
 
     /// <summary>The rule pickers' choices, in picker order: data rules and trailer rules from <see cref="MifareClassicKeys"/>.</summary>
     private static readonly string[] DataRuleItems = MifareClassicKeys.DataRules.Select(r => r.Text).ToArray();
-    private static readonly string[] TrailerRuleItems = MifareClassicKeys.TrailerRules.Select(r => r.Permanent ? "⚠ " + r.Text : r.Text).ToArray();
+    private static readonly string[] TrailerRuleItems = MifareClassicKeys.TrailerRules.Select(r => r.Permanent ? "âš  " + r.Text : r.Text).ToArray();
 
     /// <summary>Shows the sector box for the cursor's sector when its key is known: the new key, the rules of its blocks
     /// and of its keys (as read, or as chosen), and every sector with a change waiting.</summary>
@@ -2104,7 +2282,7 @@ public partial class NfcPage : ContentPage
                 SectorPicker.ItemsSource = changeable.Select(s => $"Sector {s}").ToList();
             SectorPicker.SelectedIndex = changeable.IndexOf(sector);
             if (AllBlocksPicker.ItemsSource is null) AllBlocksPicker.ItemsSource = DataRuleItems;
-            if (AllSectorsPicker.ItemsSource is null) { AllSectorsPicker.ItemsSource = DataRuleItems; AllSectorsPicker.Title = "Set every sector's data blocks to…"; }
+            if (AllSectorsPicker.ItemsSource is null) { AllSectorsPicker.ItemsSource = DataRuleItems; AllSectorsPicker.Title = "Set every sector's data blocks toâ€¦"; }
 
             SectorKeyPanel.IsVisible = can || edit.Sectors.Count > 0;
             if (SectorKeyPanel.IsVisible)
@@ -2243,7 +2421,7 @@ public partial class NfcPage : ContentPage
         AllKeysClearButton.IsEnabled = _allKeys.HasChanges;
         AllKeysHint.Text = AllKeyPartial(0) || AllKeyPartial(1)
             ? "A key is six bytes: finish it, or clear it to leave that key as it is."
-            : $"Tap a byte and type key A and/or key B (hex, or tap the text side for characters); a key left as ·· stays as each sector has it. " +
+            : $"Tap a byte and type key A and/or key B (hex, or tap the text side for characters); a key left as Â·Â· stays as each sector has it. " +
               $"Sets them on every sector that opened and whose rules let its keys change ({sectors}); each sector's key rows and trailer show them, " +
               "and Undo in the Edit tab takes them back in one step.";
     }
@@ -2262,7 +2440,7 @@ public partial class NfcPage : ContentPage
         }.Where(k => k is not null));
         bool sure = await DisplayAlertAsync("Set keys on every sector?",
             $"Set {keys} on every opened sector whose keys can change ({sectors})? The phone remembers new keys for this tag " +
-            "— keep a copy, or the sectors cannot be opened on another phone. Nothing is written until you hold the tag.",
+            "â€” keep a copy, or the sectors cannot be opened on another phone. Nothing is written until you hold the tag.",
             "Set keys", "Cancel");
         if (!sure) return;
         edit.SetAllSectorsKeys(keyA, keyB);
@@ -2285,7 +2463,7 @@ public partial class NfcPage : ContentPage
         if (e.Value && !edit.AllowBlockZero)
         {
             bool sure = await DisplayAlertAsync("Edit block 0 (the UID)?",
-                "Block 0 holds the card's serial number (UID) and is never written on a normal card — the write simply " +
+                "Block 0 holds the card's serial number (UID) and is never written on a normal card â€” the write simply " +
                 "fails. Only a magic/clone card lets it be rewritten. A wrong check byte (BCC) can make the card unreadable " +
                 "to some readers. Unlock it only if you know this is a magic card.", "Unlock block 0", "Cancel");
             if (!sure)
@@ -2463,7 +2641,7 @@ public partial class NfcPage : ContentPage
             return null;
         }
 
-        var labels = dumps.Select(d => $"{d.DisplayName}  ·  {d.DumpSize} B").ToArray();
+        var labels = dumps.Select(d => $"{d.DisplayName}  Â·  {d.DumpSize} B").ToArray();
         var choice = await DisplayActionSheetAsync(title, "Cancel", null, labels);
         if (choice is null || choice == "Cancel") return null;
         int index = Array.IndexOf(labels, choice);

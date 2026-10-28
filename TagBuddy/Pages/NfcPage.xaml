@@ -4,8 +4,8 @@
              xmlns:controls="clr-namespace:TagBuddy.Controls"
              xmlns:pages="clr-namespace:TagBuddy.Pages"
              x:Class="TagBuddy.Pages.NfcPage"
-             Title="RF">
-    <Grid>
+             Title="Radio Frequency">
+    <Grid x:Name="PageRoot">
     <ScrollView>
         <VerticalStackLayout Padding="20,20,20,80" Spacing="12">
 
@@ -27,69 +27,8 @@
                  summary at the top of the page that expands to the full message. -->
             <controls:InfoExpander x:Name="LastResultExpander" IsVisible="False" FontSize="13" Margin="0,2,0,0" />
 
-            <!-- Proxmark on USB: shown only while one is plugged in. For now a connection check; reading cards over it
-                 (HF and the 125 kHz LF band the phone can't reach) comes next, into this same page. -->
-            <VerticalStackLayout x:Name="ProxmarkPanel" Spacing="8" IsVisible="False"
-                                 Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
-                <HorizontalStackLayout Spacing="8">
-                    <BoxView x:Name="ProxmarkDot" WidthRequest="12" HeightRequest="12" CornerRadius="6"
-                             Color="#F59E0B" VerticalOptions="Center" />
-                    <Label Text="Proxmark on USB" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
-                </HorizontalStackLayout>
-                <Label x:Name="ProxmarkStatus" FontSize="12" TextColor="Gray" />
-                <!-- Offered when a USB device is connected that is not a recognised Proxmark (a clone, or an unusual
-                     descriptor): the person can still try talking to it. -->
-                <Button x:Name="ProxmarkTryForeignButton" Text="Try the connected USB device" Clicked="OnProxmarkTryForeign" IsVisible="False"
-                        BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
-                        Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                <FlexLayout Wrap="Wrap" JustifyContent="Start" AlignItems="Center">
-                    <Button x:Name="ProxmarkReadButton" Text="Read tag" Clicked="OnProxmarkRead" IsVisible="False"
-                            BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkAutoButton" Text="Auto-read" Clicked="OnProxmarkAuto" IsVisible="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkInfoButton" Text="Device info" Clicked="OnProxmarkInfo" IsVisible="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkLfReadButton" Text="Read LF (125 kHz)" Clicked="OnProxmarkLfRead" IsVisible="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkLfWriteButton" Text="Write LF…" Clicked="OnProxmarkLfWrite" IsVisible="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkLfLiveButton" Text="LF live" Clicked="OnProxmarkLfLive" IsVisible="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                </FlexLayout>
-                <Label x:Name="ProxmarkLfResult" FontSize="13" IsVisible="False" />
-                <!-- The coil's raw 125 kHz signal after an LF read: a square wave = a tag coupling, flat = nothing. -->
-                <GraphicsView x:Name="LfGraph" HeightRequest="90" IsVisible="False" Margin="0,4,0,0" />
-                <controls:InfoExpander Title="About LF (125 kHz) read/write"
-                        Text="Experimental. The phone can't reach 125 kHz, so this runs entirely on the Proxmark. Read captures the LF field and tries to decode an EM410x id (the common door-fob format); other formats (HID, Indala, T5577-hosted) may not decode yet. Write clones an EM410x id onto a T5577 rewritable card held on the LF antenna — no password or lock bits are set, so it can always be rewritten. Both are new and may need tuning for your firmware; the connection log shows each step." />
-
-                <!-- Magic (gen1a) UID tools, shown once the link is verified. Block 0 holds the UID. -->
-                <HorizontalStackLayout x:Name="ProxmarkMagicRow" Spacing="8" IsVisible="False">
-                    <Button x:Name="ProxmarkReadBlock0Button" Text="Read block 0" Clicked="OnProxmarkReadBlock0"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                    <Button x:Name="ProxmarkSetUidButton" Text="Set UID…" Clicked="OnProxmarkSetUid" IsEnabled="False"
-                            BackgroundColor="#6B7280" TextColor="White"
-                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-                </HorizontalStackLayout>
-
-                <!-- Write the edits from the segment editor straight to the gen1a magic tag on the antenna. Shown
-                     (up here with the other Proxmark buttons) only while a Classic block write is pending. -->
-                <Button x:Name="ProxmarkWriteButton" Text="Write edits over USB" Clicked="OnProxmarkWrite" IsVisible="False"
-                        BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
-                        HorizontalOptions="Start" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
-
-                <controls:InfoExpander x:Name="ProxmarkLog" Title="Connection log" IsVisible="False" FontSize="12" />
-            </VerticalStackLayout>
-
+            <!-- The Proxmark/RF controls live in a floating side-drawer overlaid on the page (RfDrawerRoot, below the
+                 ScrollView), so they stay put while this content scrolls and can be flicked away to a side handle. -->
             <!-- Shown only once a protected tag is noticed (reading or writing); never a thing to set up in advance. -->
             <VerticalStackLayout x:Name="PasswordPanel" Spacing="8" IsVisible="False"
                                  Padding="12" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#2A2A2A}">
@@ -659,5 +598,106 @@
                 HorizontalOptions="End" BackgroundColor="#6B7280" TextColor="White"
                 Padding="12,4" MinimumHeightRequest="36" FontSize="13" />
     </VerticalStackLayout>
+
+    <!-- RF drawer: the Proxmark controls as a floating side-sheet pinned over the page, so they stay put while the
+         page scrolls. Drag anywhere on it (or the "PM" tab) to slide it in, or off to the right edge where it hides
+         to the tab; a tap on the tab toggles it. It is only as tall as its content. Shown while a Proxmark is in. -->
+    <Grid x:Name="RfDrawerRoot" IsVisible="False" HorizontalOptions="Fill" VerticalOptions="Center"
+          Margin="24,8,0,8" SizeChanged="OnRfDrawerSizeChanged">
+        <Grid.GestureRecognizers>
+            <PanGestureRecognizer PanUpdated="OnRfDrawerPan" />
+        </Grid.GestureRecognizers>
+        <!-- Laid out for the right edge; ApplyRfDockSide mirrors the margins, corners, padding and tab for the left. -->
+        <Border x:Name="RfDrawerSheet" Margin="15,0,0,0" StrokeThickness="0" BackgroundColor="{AppThemeBinding Light=#F3F4F6, Dark=#1F2937}">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="14,0,0,14" />
+            </Border.StrokeShape>
+            <VerticalStackLayout x:Name="ProxmarkPanel" Spacing="8" Padding="22,12,12,12">
+                    <HorizontalStackLayout Spacing="8">
+                        <BoxView x:Name="ProxmarkDot" WidthRequest="12" HeightRequest="12" CornerRadius="6"
+                                 Color="#F59E0B" VerticalOptions="Center" />
+                        <Label Text="Proxmark on USB" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+                    <Label x:Name="ProxmarkStatus" FontSize="12" TextColor="Gray" />
+                    <!-- Offered when a USB device is connected that is not a recognised Proxmark (a clone, or an unusual
+                         descriptor): the person can still try talking to it. -->
+                    <Button x:Name="ProxmarkTryForeignButton" Text="Try the connected USB device" Clicked="OnProxmarkTryForeign" IsVisible="False"
+                            BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                            Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    <FlexLayout Wrap="Wrap" JustifyContent="Start" AlignItems="Center">
+                        <Button x:Name="ProxmarkReadButton" Text="Read tag" Clicked="OnProxmarkRead" IsVisible="False"
+                                BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkAutoButton" Text="Auto-read" Clicked="OnProxmarkAuto" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkInfoButton" Text="Device info" Clicked="OnProxmarkInfo" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkLfReadButton" Text="Read LF (125 kHz)" Clicked="OnProxmarkLfRead" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkLfWriteButton" Text="Write LF…" Clicked="OnProxmarkLfWrite" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkLfLiveButton" Text="LF live" Clicked="OnProxmarkLfLive" IsVisible="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkProbeButton" Text="Check link" Clicked="OnProxmarkProbe"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Margin="0,0,8,8" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    </FlexLayout>
+                    <Label x:Name="ProxmarkLfResult" FontSize="13" IsVisible="False" />
+                    <!-- The coil's raw 125 kHz signal after an LF read: a square wave = a tag coupling, flat = nothing.
+                         A tap on the header collapses it (a disclosure chevron, like the InfoExpanders). -->
+                    <Label x:Name="LfGraphHeader" Text="Coil signal  ▾" FontSize="12" TextColor="Gray" IsVisible="False" Margin="0,4,0,0">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnLfGraphToggle" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                    <GraphicsView x:Name="LfGraph" HeightRequest="90" IsVisible="False" Margin="0,2,0,0" />
+                    <controls:InfoExpander Title="About LF (125 kHz) read/write"
+                            Text="Experimental. The phone can't reach 125 kHz, so this runs entirely on the Proxmark. Read captures the LF field and tries to decode an EM410x id (the common door-fob format); other formats (HID, Indala, T5577-hosted) may not decode yet. Write clones an EM410x id onto a T5577 rewritable card held on the LF antenna — no password or lock bits are set, so it can always be rewritten. Both are new and may need tuning for your firmware; the connection log shows each step." />
+
+                    <!-- Magic (gen1a) UID tools, shown once the link is verified. Block 0 holds the UID. -->
+                    <HorizontalStackLayout x:Name="ProxmarkMagicRow" Spacing="8" IsVisible="False">
+                        <Button x:Name="ProxmarkReadBlock0Button" Text="Read block 0" Clicked="OnProxmarkReadBlock0"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                        <Button x:Name="ProxmarkSetUidButton" Text="Set UID…" Clicked="OnProxmarkSetUid" IsEnabled="False"
+                                BackgroundColor="#6B7280" TextColor="White"
+                                Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+                    </HorizontalStackLayout>
+
+                    <!-- Write the edits from the segment editor straight to the gen1a magic tag on the antenna. Shown
+                         only while a Classic block write is pending. -->
+                    <Button x:Name="ProxmarkWriteButton" Text="Write edits over USB" Clicked="OnProxmarkWrite" IsVisible="False"
+                            BackgroundColor="{StaticResource Primary}" TextColor="{StaticResource PrimaryDarkText}"
+                            HorizontalOptions="Start" Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+
+                    <controls:InfoExpander x:Name="ProxmarkLog" Title="Connection log" IsVisible="False" FontSize="12" />
+                </VerticalStackLayout>
+        </Border>
+        <!-- grab tab: a half-circle on the drawer's left edge, vertically centred. Drag anywhere, or tap this to toggle. -->
+        <Border x:Name="RfDrawerHandle" WidthRequest="30" HeightRequest="64" HorizontalOptions="Start" VerticalOptions="Center"
+                StrokeThickness="0" BackgroundColor="{StaticResource Primary}">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="16,0,0,16" />
+            </Border.StrokeShape>
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnRfDrawerTap" />
+            </Border.GestureRecognizers>
+            <Label Text="PM" FontSize="12" FontAttributes="Bold" TextColor="{StaticResource PrimaryDarkText}"
+                   HorizontalOptions="Center" VerticalOptions="Center" />
+        </Border>
+        <!-- Catcher plane: while the drawer is closed this sits on top of everything and takes the touch first, so a
+             tap anywhere opens it and a drag still slides it. Hidden while open, so the buttons work normally. -->
+        <Grid x:Name="RfDrawerScrim" BackgroundColor="Transparent">
+            <Grid.GestureRecognizers>
+                <PanGestureRecognizer PanUpdated="OnRfDrawerPan" />
+                <TapGestureRecognizer Tapped="OnRfDrawerScrimTap" />
+            </Grid.GestureRecognizers>
+        </Grid>
+    </Grid>
     </Grid>
 </ContentPage>
