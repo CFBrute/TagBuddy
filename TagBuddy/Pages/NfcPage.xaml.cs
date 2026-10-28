@@ -511,10 +511,11 @@ public partial class NfcPage : ContentPage
     }
 
     /// <summary>The "Recover a key" button: the real (non-dictionary) nested attack. Uses a known key on one sector
-    /// (the factory default on sector 0) to collect the card's own encrypted nonces for a target sector, then runs
-    /// the Crypto1 solver. EXPERIMENTAL: the solver (Crypto1.Nonce2Key) is not yet confirmed, so this currently
-    /// collects and shows the nonces and reports what the solver returns — the nonce collection is the part to
-    /// validate first. The known key defaults to FFFFFFFFFFFF on block 0.</summary>
+    /// (the factory default on sector 0) to collect the card's own encrypted nonces for a target sector, feeds them to
+    /// the Crypto1 solver exactly as the Proxmark client does (lfsr_recovery32(ks, nt_enc ^ uid) then rollback, then
+    /// intersect the two nonce lists), and proves each surviving candidate by reading the target block with it. The
+    /// known key defaults to FFFFFFFFFFFF on block 0. Still to confirm on hardware: the OLD-firmware nested reply
+    /// matches the field layout assumed here.</summary>
     private async void OnProxmarkRecover(object? sender, EventArgs e)
     {
         string? input = await DisplayPromptAsync("Recover a key (nested)",
@@ -548,11 +549,25 @@ public partial class NfcPage : ContentPage
                 }
             }
             if (candidates is null || candidates.Count == 0)
-                AppendProxmarkLog("No key recovered from these nonces. The nonce→key wiring is still experimental (see Crypto1.cs / TODO).");
-            else if (candidates.Count == 1)
-                AppendProxmarkLog($"✓ Recovered key A for sector {sector}: {candidates[0]:X12}");
-            else
-                AppendProxmarkLog($"{candidates.Count} candidates left for sector {sector} — collect more nonces to narrow to one.");
+            {
+                AppendProxmarkLog("No key recovered from these nonces. If sector 0 is on the default key, collect again; otherwise the nonce format may differ on this firmware (see TODO).");
+                return;
+            }
+            AppendProxmarkLog($"{candidates.Count} candidate key{(candidates.Count == 1 ? "" : "s")} left — verifying against sector {sector} by reading block {targetBlock}…");
+
+            // Prove it on the card: the real key reads the target block. Try the few best candidates.
+            foreach (var cand in candidates.Take(16))
+            {
+                byte[] key6 = [(byte)(cand >> 40), (byte)(cand >> 32), (byte)(cand >> 24), (byte)(cand >> 16), (byte)(cand >> 8), (byte)cand];
+                if (await usb.MifareReadBlockAsync(targetBlock, keyB: false, key6) is not null)
+                {
+                    AppendProxmarkLog($"✓ Recovered and verified key A for sector {sector}: {cand:X12}");
+                    return;
+                }
+            }
+            AppendProxmarkLog(candidates.Count <= 16
+                ? "None of the candidates read the block — the nonces may not be from this sector's key, or the known key was wrong."
+                : $"{candidates.Count} candidates — too many to verify by reading. Collect more nonces to narrow them first.");
         });
         ProxmarkRecoverButton.IsEnabled = true;
     }
