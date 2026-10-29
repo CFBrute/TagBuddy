@@ -1,4 +1,5 @@
 using TagBuddy.Pages;
+using Proxmark3;
 using TagBuddy.Services;
 
 namespace TagBuddy;

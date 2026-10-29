@@ -1,0 +1,320 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>ProxmarkUsb</name>
+    </assembly>
+    <members>
+        <member name="T:Proxmark3.Em410x">
+            <summary>The EM410x format, the common 125 kHz access tag: a 40-bit id sent over and over as a 64-bit frame — a
+            9-bit all-ones header, ten rows of 4 id bits each followed by an even row parity, four column parities, and a
+            stop bit of 0 — Manchester-coded by ASK at RF/64. Encodes an id into that frame (to clone it onto a T5577) and
+            demodulates the frame out of raw ADC samples captured from the coil.</summary>
+        </member>
+        <member name="F:Proxmark3.Em410x.T55xxConfig">
+            <summary>The T5577 config word for an EM410x clone: ASK, Manchester, RF/64, two data blocks.</summary>
+        </member>
+        <member name="M:Proxmark3.Em410x.Frame(System.UInt64)">
+            <summary>The 64-bit EM410x frame for a 40-bit id (bits above 40 are ignored).</summary>
+        </member>
+        <member name="M:Proxmark3.Em410x.T55xxBlocks(System.UInt64)">
+            <summary>What to write to a T5577 to make it an EM410x tag with this id: the config word, then the frame split
+            across data blocks 1 and 2.</summary>
+        </member>
+        <member name="M:Proxmark3.Em410x.Demodulate(System.Byte[])">
+            <summary>Best-effort demodulation of raw 125 kHz samples: centre the signal, find the half-bit length from the
+            dominant short-run cluster, turn runs into half-bits, Manchester-decode, then locate a valid frame and return
+            its 40-bit id. Null if none is found.</summary>
+        </member>
+        <member name="M:Proxmark3.Em410x.FromBits(System.Collections.Generic.List{System.Int32})">
+            <summary>Finds the frame in a run of decoded bits and returns its 40-bit id, checking the row and column
+            parities and the stop bit. Null when no valid frame is present.</summary>
+        </member>
+        <member name="T:Proxmark3.LfSamples">
+            <summary>A look at a raw 125 kHz capture without decoding it.</summary>
+        </member>
+        <member name="M:Proxmark3.LfSamples.HasModulation(System.Byte[])">
+            <summary>True when the capture is a modulated carrier (a tag on the antenna) rather than a flat, quiet field:
+            a 125 kHz tag swings the level widely and crosses the mean many times.</summary>
+        </member>
+        <member name="T:Proxmark3.ProxmarkFrame">
+             <summary>The Proxmark3's wire framing as pure byte work, with no USB in it: the OLD 544-byte command and reply
+             frames every firmware speaks, and the newer "NG" framing, used only to learn whether a firmware is a modern build.
+             From the Proxmark3 source, <c>include/pm3_cmd.h</c>.</summary>
+            
+             <remarks>
+             <para>OLD: a fixed 544-byte frame — a 64-bit command, then three 64-bit args, then 512 data bytes, all
+             little-endian, with no magic. A reply has the same shape. The app uses this framing for every operation: a 2016
+             Proxmark3 Easy speaks only OLD, and newer firmware (Iceman/RRG) still accepts it.</para>
+             <para>NG: a host→device command is an 8-byte preamble — magic <c>0x61334D50</c> ("PM3a", little-endian so the
+             bytes read 50 4D 33 61), then a 16-bit field holding a 15-bit length with the top bit set to mean "NG", then the
+             16-bit command — followed by the data and a 2-byte postamble. Over USB the link is reliable, so the postamble
+             carries the magic <c>0x3361</c> ("a3") in place of a real CRC and the device does not check it. A device→host
+             response mirrors this with magic <c>0x62334D50</c> ("PM3b"); seeing that header back is the proof the firmware
+             understands NG.</para>
+             </remarks>
+        </member>
+        <member name="T:Proxmark3.ProxmarkFrame.Cmd">
+            <summary>Command ids (the pre-NG values, which OLD framing uses).</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.Ack">
+            <summary>CMD_ACK: the reply most commands end with; arg0 ≥ 1 means success.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.Version">
+            <summary>CMD_VERSION: the firmware banner, in the reply's data area.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.Hf14aReader">
+            <summary>CMD_READER_ISO_14443a: select an HF card; the reply's data area is its identity.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.MagicSetBlock">
+            <summary>CMD_MIFARE_CSETBLOCK: write a block of a gen1a magic card.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.MagicGetBlock">
+            <summary>CMD_MIFARE_CGETBLOCK: read a block of a gen1a magic card.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.LfAcquireRaw125k">
+            <summary>CMD_ACQUIRE_RAW_ADC_SAMPLES_125K: capture 125 kHz samples into the device's buffer.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.LfDownloadRaw125k">
+            <summary>CMD_DOWNLOAD_RAW_ADC_SAMPLES_125K: ask for the captured samples.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.LfDownloadedRaw125k">
+            <summary>CMD_DOWNLOADED_RAW_ADC_SAMPLES_125K: each reply frame carrying a slice of the samples.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.Cmd.LfT55xxWriteBlock">
+            <summary>CMD_T55XX_WRITE_BLOCK: write one 32-bit block of a T55xx card.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.OldFrameSize">
+            <summary>An OLD frame: command (8) + three args (24) + data (512).</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.OldDataOffset">
+            <summary>Where an OLD frame's data area starts (after the command and three args).</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkFrame.OldDataSize">
+            <summary>The most data an OLD frame carries.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.OldFrame(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.Byte[])">
+            <summary>Builds a host→device OLD frame: 64-bit command, three 64-bit args, 512 data bytes (544 total, LE).
+            Data beyond 512 bytes is dropped.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.NgFrame(System.UInt16,System.Byte[])">
+            <summary>Builds a host→device NG frame: 4-byte "PM3a" magic, a 15-bit length with the NG bit set, the 16-bit
+            command, the data, and a 2-byte postamble magic (the link is reliable over USB, so no real CRC is needed).</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.ReplyCmd(System.Byte[])">
+            <summary>The command word of a reply frame (bytes 0-7), or 0 when the reply is too short.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.ReplyArg(System.Byte[],System.Int32)">
+            <summary>Reply arg 0, 1 or 2 (the three 64-bit words after the command), or 0 when the reply is too short.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.ReplyData(System.Byte[],System.Int32)">
+            <summary>A reply's data area of the given length, or null when the reply is too short.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.IsOkAck(System.Byte[])">
+            <summary>Whether a reply is an ACK that reports success (arg0 ≥ 1), the shape most OLD commands answer with.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.HasNgMagic(System.Byte[])">
+            <summary>Whether a reply carries the NG response magic "PM3b" (0x62334D50, bytes 50 4D 33 62), the proof that
+            the device understood the NG framing.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkFrame.AsciiRun(System.Byte[])">
+            <summary>The longest run of printable ASCII in the bytes (the firmware banner lives in a reply's data area).</summary>
+        </member>
+        <member name="T:Proxmark3.ProxmarkUsb">
+             <summary>A Proxmark3 attached over USB-OTG, driven through Android's USB-Host API. The Proxmark enumerates as a
+             USB-CDC serial device; the app opens that serial interface once, keeps it open while the device is attached, and
+             speaks the Proxmark's OLD command framing over it (<see cref="T:Proxmark3.ProxmarkFrame"/>).</summary>
+            
+             <remarks>
+             <para>This file is the client's core — the log, which device to use, running an operation on the shared link —
+             plus the two link checks (probe, device info). The operations sit beside it: MIFARE Classic gen1a magic cards in
+             <c>ProxmarkUsb.Hf.cs</c>; 125 kHz capture, EM410x reading and T5577 cloning in <c>ProxmarkUsb.Lf.cs</c>. Finding
+             the device and tracking plug/unplug is <c>ProxmarkUsb.Presence.cs</c>; the USB connection and the permission
+             prompt, <c>ProxmarkUsb.Link.cs</c>.</para>
+             <para>An instance is cheap and holds only how the caller wants to reach the device (<see cref="P:Proxmark3.ProxmarkUsb.AllowAnyDevice"/>)
+             and where its progress goes (<see cref="E:Proxmark3.ProxmarkUsb.Log"/>); the connection itself is shared by all instances.</para>
+             </remarks>
+            <summary>HF (13.56 MHz): MIFARE Classic over the Proxmark's reader. A card's 14443-A identity always; its blocks
+            only for a gen1a magic card, whose special command set reads and writes any block with no key — enough for a full
+            dump, a block edit, or a new UID in block 0.</summary>
+            <summary>LF (125 kHz), which the phone's own radio cannot reach at all, so every byte here goes through the
+            Proxmark. A read ACQUIREs raw ADC samples into the device's big buffer, downloads them, and demodulates EM410x
+            (<see cref="T:Proxmark3.Em410x"/>) on the phone. A write clones an EM410x id onto a T5577 (the common rewritable LF card).
+            Verified end-to-end on a 2016 Easy firmware: the acquire/download command ids are right, a real EM4100 decodes,
+            and a T5577 clone reads back — provided the config block is written LAST.</summary>
+            <summary>The USB connection: one CDC serial link, opened the first time an operation needs it and kept open
+            (shared, under a lock) until the device is unplugged — opening and closing it per command left the write endpoint
+            dead after the first use. Also the one-time USB permission prompt, and the drain → write → read dance every OLD
+            command makes over the link.</summary>
+            <summary>Which USB device is the Proxmark, and whether one is plugged in right now. MainActivity reports the
+            attach and detach intents here; the shell and the RF page follow <see cref="E:Proxmark3.ProxmarkUsb.PresenceChanged"/>.</summary>
+        </member>
+        <member name="E:Proxmark3.ProxmarkUsb.Log">
+            <summary>Raised step by step as an operation runs, so the page can show progress. Lines may arrive on a
+            background thread.</summary>
+        </member>
+        <member name="P:Proxmark3.ProxmarkUsb.AllowAnyDevice">
+            <summary>When set, an operation may open a connected USB device that is not a recognised Proxmark (see
+            <see cref="M:Proxmark3.ProxmarkUsb.AnyUsbCandidate"/>). Off by default, so only known Proxmarks are touched without the person asking.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.ResolveDevice">
+            <summary>The device an operation should use: a recognised Proxmark, or (when <see cref="P:Proxmark3.ProxmarkUsb.AllowAnyDevice"/> is
+            set) any serial-like USB device that is connected.</summary>
+        </member>
+        <member name="P:Proxmark3.ProxmarkUsb.SpeaksNg">
+            <summary>Whether the device answered the newer "NG" framing on the last <see cref="M:Proxmark3.ProxmarkUsb.DeviceInfoAsync"/>. When
+            true the firmware is a modern build (Iceman/RRG); the OLD framing is still used for operations, since newer
+            firmware accepts it too.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.WithLinkAsync``1(System.Func{Proxmark3.ProxmarkUsb.Link,``0},``0)">
+            <summary>Runs <paramref name="action"/> on the shared link to the attached Proxmark, on a worker thread under
+            the link's lock: resolves the device, asks USB permission if needed and opens the link the first time.
+            Returns <paramref name="onFail"/> when the link can't open; a hard USB failure drops the link so the next
+            call reopens it.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.ProbeAsync">
+            <summary>Asks the Proxmark for its version over the shared link, reporting through <see cref="E:Proxmark3.ProxmarkUsb.Log"/>. Returns
+            true when the device replied (the link works).</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.DeviceInfoAsync">
+            <summary>Asks the device for its firmware version (OLD framing, which every firmware accepts) and then tries the
+            newer "NG" framing too, to learn whether this is a modern (Iceman/RRG) build. Reports both through the log and
+            sets <see cref="P:Proxmark3.ProxmarkUsb.SpeaksNg"/>. Returns true when the device answered at all.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkUsb.Iso14aConnect">
+            <summary>ISO14A_COMMAND flag (include/mifare.h), arg0 of the reader command: select a card, field kept on.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkUsb.MagicSingle">
+            <summary>A single standalone magic operation: field on, wake, do it, halt, field off.</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkUsb.BlockSize">
+            <summary>Block 0 is 16 bytes: a 4-byte UID card holds UID(4) + BCC(1) + SAK(1) + ATQA(2) + manufacturer(8),
+            where BCC is the XOR of the four UID bytes.</summary>
+        </member>
+        <member name="T:Proxmark3.ProxmarkUsb.Dump">
+            <summary>A card read over the Proxmark: its 14443-A identity and, for a magic card, every block.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Dump.#ctor(System.Byte[],System.Byte[],System.Byte,System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.Byte[]})">
+            <summary>A card read over the Proxmark: its 14443-A identity and, for a magic card, every block.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.ReadCardAsync">
+            <summary>Reads the card on the antenna: its identity always, and (if it's a gen1a magic card) a full block
+            dump — no keys needed. Returns null if nothing coupled.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.ReadIdentity(Proxmark3.ProxmarkUsb.Link,System.Int32)">
+            <summary>Polls the HF reader until a card couples, returning its UID/ATQA/SAK (null if none in time).</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.PeekHfAsync">
+            <summary>A quick look for an HF tag on the antenna (one or two tries, no waiting): its UID as a colon-hex
+            string, or null when nothing is there. For the auto-reader's polling loop.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.WaitForCard(Proxmark3.ProxmarkUsb.Link,System.Int32)">
+            <summary>Polls the HF reader until a card couples (the gen1a card's antenna is weak, so a read often misses).</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.MagicReadBlockAsync(System.Int32)">
+            <summary>Reads a block of a gen1a magic card (block 0 is the UID block). Returns the 16 bytes, or null if the
+            card isn't a gen1a magic card or no card coupled.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.MagicReadBlockRaw(Proxmark3.ProxmarkUsb.Link,System.Int32,System.UInt64)">
+            <summary>One CGETBLOCK, assuming the card is already coupled. <paramref name="workFlags"/> is MagicSingle for a
+            standalone read, or a field-on sequence for a dump. Returns the 16 block bytes, or null on any failure.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.MagicWriteBlockAsync(System.Int32,System.Byte[])">
+            <summary>Writes 16 bytes to a block of a gen1a magic card, then reads it back to verify. Returns the verified
+            bytes on success, or null on failure.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.MagicWriteBlocksAsync(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.Byte[]})">
+            <summary>Writes several full blocks to a gen1a magic tag (data, trailers/keys, block 0 — anything), in one
+            coupling session. Returns true only if every block was written.</summary>
+        </member>
+        <member name="T:Proxmark3.ProxmarkUsb.LfRead">
+            <summary>A 125 kHz read: the raw samples captured, and the EM410x id if one demodulated.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.LfRead.#ctor(System.Int32,System.Nullable{System.UInt64},System.Byte[])">
+            <summary>A 125 kHz read: the raw samples captured, and the EM410x id if one demodulated.</summary>
+        </member>
+        <member name="P:Proxmark3.ProxmarkUsb.LfRead.SignalPresent">
+            <summary>A tag is on the antenna (the field is modulated), even if no id decoded.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.LfReadAsync(System.Int32)">
+            <summary>Captures 125 kHz samples over the Proxmark and tries to read an EM410x id from them. Returns the
+            result (id may be null when nothing demodulated), or null if the device did not answer.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.DownloadRaw(Proxmark3.ProxmarkUsb.Link,System.Int32)">
+            <summary>Downloads up to <paramref name="maxBytes"/> of the device's captured sample buffer, one OLD frame at a
+            time (each carries an offset, a length and up to 512 bytes of samples).</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.LfWriteEm410xAsync(System.UInt64)">
+            <summary>Clones an EM410x id onto a T5577 card on the LF antenna: writes the two data blocks that hold the
+            encoded id, then the EM config block. No password and no lock bits are set, so the card can always be
+            rewritten. Returns true if every block was acknowledged.</summary>
+        </member>
+        <member name="P:Proxmark3.ProxmarkUsb.PermissionAction">
+            <summary>The broadcast the USB permission dialog answers on, namespaced to whichever app hosts this library.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Open(Android.Hardware.Usb.UsbManager,Android.Hardware.Usb.UsbDevice)">
+            <summary>Opens the device, finds and claims the CDC serial interface, raises DTR/RTS and drains any startup
+            chatter. Returns null (after logging why) if any step fails.</summary>
+        </member>
+        <member name="T:Proxmark3.ProxmarkUsb.Link">
+            <summary>An open, claimed, CDC-configured connection to the Proxmark, with the bulk reads and writes every
+            command is made of. Releases the interfaces on dispose.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.#ctor(Android.Hardware.Usb.UsbDeviceConnection,Android.Hardware.Usb.UsbEndpoint,Android.Hardware.Usb.UsbEndpoint,Android.Hardware.Usb.UsbInterface,Android.Hardware.Usb.UsbInterface)">
+            <summary>An open, claimed, CDC-configured connection to the Proxmark, with the bulk reads and writes every
+            command is made of. Releases the interfaces on dispose.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.Write(System.Byte[],System.Int32)">
+            <summary>Writes one frame to the bulk OUT endpoint; false if the write did not go through in time.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.Drain">
+            <summary>Reads and discards everything the device still has queued, until the bus is quiet. A command
+            such as version makes the Proxmark send many packets; if they are left unread its USB TX buffer stays full
+            and it stops servicing our writes, so the next command's write times out. Draining first keeps the link
+            healthy.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.ReadReply(System.Int32)">
+            <summary>Reads from the bulk IN endpoint, accumulating until a lull or a full OLD frame, up to the timeout.
+            Empty when nothing came in time.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.Send(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.Byte[],System.Int32,System.String)">
+            <summary>Writes one OLD-framed command (draining any backlog first, so the write is accepted). Throws when
+            the write fails, naming the command with <paramref name="what"/>.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Link.Command(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.Byte[],System.Int32,System.Int32,System.String)">
+            <summary>Sends one OLD-framed command and returns its reply (empty when none came in time).</summary>
+        </member>
+        <member name="F:Proxmark3.ProxmarkUsb.VendorIds">
+            <summary>Vendor ids a Proxmark3 enumerates with: 0x9AC4 (proxmark.org / RDV4 / the community firmware's
+            signed descriptor) and 0x2D2D (the Proxmark3 Easy, product 0x504D = "PM"). Kept in step with
+            Platforms/Android/Resources/xml/proxmark_usb_filter.xml, which makes Android offer the app on attach.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.Attached">
+            <summary>A Proxmark (any device from its vendor) currently attached, or null.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.IsAttached">
+            <summary>True when something that looks like a Proxmark is plugged in right now.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.AnyUsbCandidate">
+            <summary>Any connected USB device that looks like it could be a serial port (has a bulk IN/OUT pair), preferring
+            a real Proxmark by vendor id. Used by the "try the connected device anyway" path, for a Proxmark clone or a
+            board that enumerates under a vendor id we do not list.</summary>
+        </member>
+        <member name="M:Proxmark3.ProxmarkUsb.ForeignUsbPresent">
+            <summary>A USB device is connected that we did not recognise as a Proxmark by its vendor id, but which could be
+            one (a clone, or an unusual descriptor). The page offers to try talking to it.</summary>
+        </member>
+        <member name="E:Proxmark3.ProxmarkUsb.PresenceChanged">
+            <summary>Raised when a Proxmark is plugged in or unplugged, so the shell can show or hide the RF tab. The
+            handler should re-check <see cref="M:Proxmark3.ProxmarkUsb.IsAttached"/> rather than trust the event, since events can be missed.</summary>
+        </member>
+        <member name="P:Proxmark3.ProxmarkUsb.PendingAttach">
+            <summary>Set when an attach arrived before the shell could act on it, so the RF tab can be opened on show.</summary>
+        </member>
+        <member name="T:Proxmark3.Resource">
+            <summary>
+            Android Resource Designer class.
+            Exposes the Android Resource designer assembly into the project Namespace.
+            </summary>
+        </member>
+    </members>
+</doc>

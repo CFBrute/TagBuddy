@@ -4,6 +4,7 @@ using Android.Content.PM;
 using Android.Hardware.Usb;
 using Android.Nfc;
 using Android.OS;
+using Proxmark3;
 using TagBuddy.Services;
 
 namespace TagBuddy;

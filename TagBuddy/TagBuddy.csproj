@@ -102,4 +102,14 @@
 		<PackageReference Include="ZXing.Net.Maui.Controls" Version="0.10.4" />
 	</ItemGroup>
 
+	<!-- The Proxmark3 USB client is its own library (C:\dotnet\ProxmarkUsb, strong-named), used as a prebuilt DLL
+	     committed under ..\lib rather than as a project reference, so this app builds from a clean clone and the
+	     library can move elsewhere. To update: build it (dotnet build -c Release) and copy
+	     lib\net10.0-android\ProxmarkUsb.dll (+ .xml) here. -->
+	<ItemGroup>
+		<Reference Include="ProxmarkUsb">
+			<HintPath>..\lib\ProxmarkUsb.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
 </Project>

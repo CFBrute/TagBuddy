@@ -2,6 +2,7 @@ using System.Text;
 using Android.Nfc;
 using TagBuddy.Controls;
 using TagBuddy.Models;
+using Proxmark3;
 using TagBuddy.Services;
 
 namespace TagBuddy.Pages;

@@ -12,9 +12,10 @@ public static class Features
     /// sector has no wrong-key lockout, so this is the same kind of operation other Play Store tag tools offer.</summary>
     public static readonly bool MifareKeyTools = true;
 
-    /// <summary>Experimental: connect to a Proxmark3 over USB-OTG and probe it. It opens the Proxmark's own USB
-    /// serial interface and sends its "NG" ping/version command, to find out whether this phone can speak to the
-    /// device at all. Reads the person's own hardware; it is a diagnostic, not a full Proxmark client.</summary>
+    /// <summary>Experimental: a Proxmark3 plugged in over USB-OTG as the RF tab's other reader. The app opens the
+    /// Proxmark's own USB serial interface and speaks its command protocol: it reads MIFARE Classic gen1a magic
+    /// cards in full and writes them back, and captures 125 kHz to read an EM410x tag or clone one onto a T5577 —
+    /// what the phone's own radio can't reach. Reads and writes the person's own hardware and tags.</summary>
     public static readonly bool ProxmarkUsb = true;
 
 #if PLAY_STORE

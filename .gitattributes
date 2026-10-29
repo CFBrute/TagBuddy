@@ -14,3 +14,6 @@
 *.aab binary
 *.keystore binary
 *.jks binary
+
+# Prebuilt libraries under lib/ (see TagBuddy.csproj).
+*.dll binary
