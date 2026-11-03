@@ -382,6 +382,7 @@ public static class HelpContent
                     "Hold still for a second, and tap the square to focus.",
                     "Turn on the torch in a dark place; avoid glare from lamps on glossy prints.",
                     "A code on another phone's screen reads better when that screen is bright.",
+                    "A barcode in an email or web page in dark mode has no white around it, which scanners need. The app allows for that; if it still will not read, show the page in light mode.",
                     "Very small or damaged prints may not be readable by any phone.")),
             new HelpMore("Nothing happens when I hold a tag",
                 new HelpList(false,

@@ -78,4 +78,72 @@ public class DecodeRoundTripTests
         Array.Fill(gray, (byte)255);
         Assert.Null(GrayDecoder.Decode(gray, 300, 300));
     }
+
+    /// <summary>A barcode as an email in dark mode shows it: the bars in a white box cut tight around them (no
+    /// quiet zone), on a dark page. The page is wide enough on each side to hold a quiet zone, which is what a
+    /// reader would want to see there. <paramref name="onEnd"/> stands the barcode up.</summary>
+    private static (byte[] Gray, int Width, int Height) DrawOnDarkPage(BitMatrix matrix, int module = 4, bool onEnd = false)
+    {
+        const int pageMargin = 120, boxMargin = 2, codeHeight = 120;
+        const byte page = 45, box = 230, bar = 15;
+        int bars = matrix.Width * module;
+        int width = bars + 2 * (boxMargin + pageMargin), height = codeHeight + 2 * (boxMargin + pageMargin);
+        var gray = new byte[width * height];
+        Array.Fill(gray, page);
+        for (int y = pageMargin; y < height - pageMargin; y++)
+            for (int x = pageMargin; x < width - pageMargin; x++)
+            {
+                int bx = x - pageMargin - boxMargin, by = y - pageMargin - boxMargin;
+                bool inBars = bx >= 0 && bx < bars && by >= 0 && by < codeHeight;
+                gray[y * width + x] = inBars && matrix[bx / module, 0] ? bar : box;
+            }
+        return onEnd ? (GrayDecoder.Transpose(gray, width, height), height, width) : (gray, width, height);
+    }
+
+    [Theory]
+    [InlineData("Code128", "23943727", false)]
+    [InlineData("Code128", "23943727", true)]
+    [InlineData("Ean13", "4006381333931", false)]
+    [InlineData("Itf", "12345678", false)]
+    [InlineData("Code39", "ABC-123", true)]
+    public void A_barcode_on_a_dark_page_without_a_quiet_zone_is_read(string formatKey, string value, bool onEnd)
+    {
+        var format = BarcodeTypes.Get(formatKey);
+        // Margin 0: the encoder's own quiet zone would defeat the point.
+        var matrix = new ZXing.MultiFormatWriter().encode(value, format.CoreFormat, 0, 0,
+            new Dictionary<ZXing.EncodeHintType, object> { [ZXing.EncodeHintType.MARGIN] = 0 });
+
+        var (gray, width, height) = DrawOnDarkPage(matrix, onEnd: onEnd);
+        var result = GrayDecoder.Decode(gray, width, height);
+
+        Assert.NotNull(result);
+        Assert.Equal(format.Key, BarcodeTypes.FromZxing(ScanResult.From(result!).Format)?.Key);
+        Assert.Equal(value, result!.Text);
+    }
+
+    [Fact]
+    public void Whitening_the_dark_surround_keeps_the_bars()
+    {
+        // One row: page | box with bars | long dark gap | box | page. Two rows, the second without contrast.
+        const byte D = 20, W = 240;
+        byte[] row = [D, D, D, W, D, W, W, D, D, W, D, D, D, D, D, D, W, D, W, D, D, D];
+        int width = row.Length;
+        var gray = new byte[width * 2];
+        row.CopyTo(gray, 0);
+        Array.Fill(gray, (byte)50, width, width);
+
+        var light = GrayDecoder.WhitenDarkSurround(gray, width, 2);
+
+        // Edges and the run longer than width / 8 (= 2) are white; bars of one and two pixels stay.
+        byte[] expected = [255, 255, 255, W, D, W, W, D, D, W, 255, 255, 255, 255, 255, 255, W, D, W, 255, 255, 255];
+        Assert.Equal(expected, light.Take(width));
+        Assert.All(light.Skip(width), v => Assert.Equal(50, v));
+    }
+
+    [Fact]
+    public void Transposing_turns_rows_into_columns()
+    {
+        byte[] gray = [1, 2, 3, 4, 5, 6];   // 3 wide, 2 high
+        Assert.Equal(new byte[] { 1, 4, 2, 5, 3, 6 }, GrayDecoder.Transpose(gray, 3, 2));
+    }
 }

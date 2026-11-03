@@ -9,7 +9,7 @@ namespace TagBuddy.Services;
 /// detection when <see cref="Pages.ScanPage.CentreFirstDecoding"/> is on.
 ///
 /// Most frames are decoded only in a centre square (a little larger than the square drawn on screen), which is
-/// a fraction of the pixels and where the person holds the code. Every fourth frame looks at the whole picture
+/// a fraction of the pixels and where the person holds the code. Every eighth frame looks at the whole picture
 /// at half size, so a code outside the square still reads. After five seconds without a result the centre
 /// passes try harder.
 ///
@@ -37,19 +37,16 @@ public sealed class FrameDecoder
     private static readonly TimeSpan SeenThrottle = TimeSpan.FromMilliseconds(250);
 
     /// <summary>The same formats the scan page asks the library for.</summary>
-    private static readonly List<ZXing.BarcodeFormat> Formats =
-    [
-        ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.CODE_93,
-        ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
-        ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.CODABAR, ZXing.BarcodeFormat.QR_CODE,
-        ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.AZTEC, ZXing.BarcodeFormat.PDF_417,
-    ];
+    private static readonly List<ZXing.BarcodeFormat> Formats = GrayDecoder.AllFormats;
 
     // One reader per option set: changing a reader's options makes it rebuild its decoders.
     private readonly BarcodeReaderGeneric _fast;
     private readonly BarcodeReaderGeneric _inverted;
     private readonly BarcodeReaderGeneric _harder;
     private readonly BarcodeReaderGeneric _harderInverted;
+    // Linear formats only, without rotation, for the passes that paint a dark surround white (see below).
+    private readonly BarcodeReaderGeneric _linear;
+    private readonly BarcodeReaderGeneric _linearHarder;
 
     private readonly DateTime _started = DateTime.UtcNow;
     private int _busy;
@@ -68,15 +65,23 @@ public sealed class FrameDecoder
         _inverted = CreateReader(tryHarder: false, tryInverted: true);
         _harder = CreateReader(tryHarder: true, tryInverted: false);
         _harderInverted = CreateReader(tryHarder: true, tryInverted: true);
+        _linear = CreateReader(tryHarder: false, tryInverted: false, linearOnly: true);
+        _linearHarder = CreateReader(tryHarder: true, tryInverted: false, linearOnly: true);
     }
 
-    private BarcodeReaderGeneric CreateReader(bool tryHarder, bool tryInverted)
+    private BarcodeReaderGeneric CreateReader(bool tryHarder, bool tryInverted, bool linearOnly = false)
     {
         var reader = new BarcodeReaderGeneric
         {
-            AutoRotate = true,
+            // The whitened passes only make sense along the rows, so they do not rotate: the other way round is
+            // a pass of its own.
+            AutoRotate = !linearOnly,
             // ReturnCodabarStartEnd: keep a Codabar's A-D start and stop letters (see GrayDecoder).
-            Options = { TryHarder = tryHarder, TryInverted = tryInverted, PossibleFormats = Formats, ReturnCodabarStartEnd = true },
+            Options =
+            {
+                TryHarder = tryHarder, TryInverted = tryInverted, ReturnCodabarStartEnd = true,
+                PossibleFormats = linearOnly ? GrayDecoder.LinearFormats : Formats,
+            },
         };
         reader.ResultPointFound += _ => _points++;
         return reader;
@@ -131,31 +136,36 @@ public sealed class FrameDecoder
             var normal = harder ? _harder : _fast;
             var inverted = harder ? _harderInverted : _inverted;
 
-            // A six-frame cycle over the centre square, with one look at the whole picture. Measured on photos
+            // An eight-frame cycle over the centre square, with one look at the whole picture. Measured on photos
             // of a dense QR code shown on a screen and a laser-etched Data Matrix: the half-size, lightly
             // blurred pass reads both in a few milliseconds, where the raw frame reads neither (pixel-grid
             // moire and noise), and both were light-on-dark, so the inverted reader runs on every other pass.
-            // The raw passes stay for small codes that need every pixel.
-            switch (n % 6)
+            // The raw passes stay for small codes that need every pixel. The last two passes paint a dark
+            // surround white, for a barcode in an email or on a web page in dark mode, whose white box is cut
+            // so tight that the dark page leaves no quiet zone (see GrayDecoder.WhitenDarkSurround): once along
+            // the rows and once down the columns, for a barcode standing on end.
+            switch (n % 8)
             {
                 case 3:
                     // The whole picture at half size: codes outside the square still read.
                     Copy(buffer, stride, bytesPerPixel, 0, 0, width, height);
                     var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, width, height);
-                    result = Decode((n / 6) % 2 == 0 ? normal : inverted, GrayDecoder.BoxBlur(half, hw, hh, 1), hw, hh);
+                    result = Decode((n / 8) % 2 == 0 ? normal : inverted, GrayDecoder.BoxBlur(half, hw, hh, 1), hw, hh);
                     break;
 
                 default:
                     int side = (int)Math.Round(CropFraction * Math.Min(width, height));
                     int left = (width - side) / 2, top = (height - side) / 2;
                     Copy(buffer, stride, bytesPerPixel, left, top, side, side);
-                    result = (n % 6) switch
+                    result = (n % 8) switch
                     {
                         0 => DecodeHalfBlurred(normal, side),
                         1 => DecodeHalfBlurred(inverted, side),
                         2 => Decode(normal, _buffer, side, side),
                         4 => Decode(inverted, _buffer, side, side),
-                        _ => Decode(normal, GrayDecoder.BoxBlur(_buffer, side, side, 2), side, side),
+                        5 => Decode(normal, GrayDecoder.BoxBlur(_buffer, side, side, 2), side, side),
+                        6 => DecodeWithoutDarkSurround(harder ? _linearHarder : _linear, side, transpose: false, blur: (int)(n / 8 % 2)),
+                        _ => DecodeWithoutDarkSurround(harder ? _linearHarder : _linear, side, transpose: true, blur: (int)(n / 8 % 2)),
                     };
                     break;
             }
@@ -207,6 +217,18 @@ public sealed class FrameDecoder
     {
         var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, side, side);
         return Decode(reader, GrayDecoder.BoxBlur(half, hw, hh, 1), hw, hh);
+    }
+
+    /// <summary>The centre square at half size with its dark surround painted white (along the rows, or down
+    /// the columns when <paramref name="transpose"/> is set): a barcode shown on a dark page. Every other
+    /// cycle adds a light blur, which a screen's moiré needs and a thin code cannot take.</summary>
+    private Result? DecodeWithoutDarkSurround(BarcodeReaderGeneric reader, int side, bool transpose, int blur)
+    {
+        var (half, hw, hh) = GrayDecoder.Downscale2x(_buffer, side, side);
+        if (transpose) (half, hw, hh) = (GrayDecoder.Transpose(half, hw, hh), hh, hw);
+        var light = GrayDecoder.WhitenDarkSurround(half, hw, hh);
+        if (blur > 0) light = GrayDecoder.BoxBlur(light, hw, hh, blur);
+        return Decode(reader, light, hw, hh);
     }
 
     private Result? Decode(BarcodeReaderGeneric reader, byte[] luminance, int width, int height)
