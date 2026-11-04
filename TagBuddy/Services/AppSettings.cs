@@ -10,6 +10,16 @@ public static class AppSettings
     private const string NfcSoundKey = "nfc-sound";
     private const string AutoTryDefaultKey = "nfc-auto-default";
     private const string UpdateSavedTagKey = "nfc-update-saved";
+    private const string KeepScanPhotosKey = "keep-scan-photos";
+
+    /// <summary>Whether a code saved straight after scanning keeps the picture it was read from: the camera frame,
+    /// or the picture picked with "From image". Off by default: the pictures take space and may show more than the
+    /// code. Turning it off keeps the pictures already stored; Settings can delete them.</summary>
+    public static bool KeepScanPhotos
+    {
+        get => Preferences.Default.Get(KeepScanPhotosKey, false);
+        set => Preferences.Default.Set(KeepScanPhotosKey, value);
+    }
 
     /// <summary>Whether, after reading a tag that is already saved (same serial) but has changed since, the app offers
     /// to update the saved copy. On by default; off never asks. A saved copy that already matches is never asked about.</summary>

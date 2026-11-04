@@ -18,8 +18,12 @@ namespace TagBuddy.Services;
 /// <see cref="Unusable"/>, and the scan page then switches back to the library's own detection.</summary>
 public sealed class FrameDecoder
 {
-    /// <summary>A code was read. Raised on the camera thread.</summary>
-    public event Action<ScanResult>? Decoded;
+    /// <summary>A code was read. Raised on the camera thread, with the frame it was read in as a JPEG when
+    /// <see cref="KeepPhoto"/> is set (null when it is not, or the frame could not be encoded).</summary>
+    public event Action<ScanResult, byte[]?>? Decoded;
+
+    /// <summary>Whether a read comes with its frame as a picture, for keeping with the saved code.</summary>
+    public bool KeepPhoto { get; set; }
 
     /// <summary>Finder patterns or barcode ends were found but nothing decoded yet. Raised on the camera thread,
     /// at most every 250 ms.</summary>
@@ -176,7 +180,8 @@ public sealed class FrameDecoder
 
             if (result is not null)
             {
-                Decoded?.Invoke(ScanResult.From(result));
+                var photo = KeepPhoto ? ScanPhoto.FromFrame(buffer, width, height, stride, bytesPerPixel) : null;
+                Decoded?.Invoke(ScanResult.From(result), photo);
             }
             else if (_points >= 3 && DateTime.UtcNow - _lastSeen > SeenThrottle)
             {

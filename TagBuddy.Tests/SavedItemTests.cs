@@ -45,7 +45,7 @@ public class SavedItemTests
     [Fact]
     public void Json_round_trips()
     {
-        var item = new SavedItem { Name = "Home", Kind = SavedKind.Text, Value = "hello", Caption = "" };
+        var item = new SavedItem { Name = "Home", Kind = SavedKind.Text, Value = "hello", Caption = "", ScanPhoto = "abc.jpg" };
         var back = JsonSerializer.Deserialize<SavedItem>(JsonSerializer.Serialize(item))!;
 
         Assert.Equal(item.Id, back.Id);
@@ -53,5 +53,15 @@ public class SavedItemTests
         Assert.Equal(SavedKind.Text, back.Kind);
         Assert.Equal("hello", back.Value);
         Assert.Equal("", back.Caption);
+        Assert.Equal("abc.jpg", back.ScanPhoto);
+        Assert.True(back.HasScanPhoto);
+    }
+
+    [Fact]
+    public void Items_saved_before_pictures_were_kept_have_none()
+    {
+        var item = JsonSerializer.Deserialize<SavedItem>("""{"Value":"x"}""")!;
+        Assert.False(item.HasScanPhoto);
+        Assert.Equal("", item.ScanPhoto);
     }
 }

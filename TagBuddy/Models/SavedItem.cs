@@ -201,6 +201,15 @@ public class SavedItem : System.ComponentModel.INotifyPropertyChanged
     public int CaptionMaxTextWidthPx(int codeWidthPx) =>
         (int)Math.Round(Math.Clamp(CaptionWidthScale, MinCaptionWidthScale, MaxCaptionWidthScale) * codeWidthPx);
 
+    // ---------------------------------------------------------------- scanned picture
+
+    /// <summary>Codes and text saved right after a scan, when Settings says to keep the picture: the JPEG file name
+    /// inside the scan-photos folder, holding the camera frame or the picked picture the code was read from.
+    /// Empty when there is none.</summary>
+    public string ScanPhoto { get; set; } = string.Empty;
+
+    [JsonIgnore] public bool HasScanPhoto => ScanPhoto.Length > 0;
+
     // ---------------------------------------------------------------- tag dumps
 
     /// <summary>Dumps only: the .bin file name inside the dumps folder.</summary>
