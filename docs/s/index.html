@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Tag Buddy item</title>
+<style>
+  :root { --bg: #ffffff; --text: #1f2937; --muted: #6b7280; --accent: #c7780b; --card: #f3f4f6; --on-accent: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121212; --text: #f3f4f6; --muted: #9ca3af; --accent: #f5a623; --card: #1f1f1f; --on-accent: #121212; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 32px 16px; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  p { color: var(--muted); }
+  a { color: var(--accent); }
+  .card { background: var(--card); border-radius: 12px; padding: 16px; margin: 20px 0; overflow-wrap: anywhere; }
+  .kind { color: var(--muted); font-size: 0.875rem; margin: 0 0 4px; }
+  .name { color: var(--text); font-weight: 600; font-size: 1.125rem; margin: 0 0 8px; }
+  .content { color: var(--text); white-space: pre-wrap; margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9375rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .button { display: inline-block; border: 0; border-radius: 999px; padding: 12px 22px; font: inherit; font-weight: 600;
+            text-decoration: none; cursor: pointer; background: var(--accent); color: var(--on-accent); }
+  .button.secondary { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tag Buddy</h1>
+
+  <!-- Filled in by the script below from the part of the address after "#", which the browser never sends to
+       the server: the item goes from phone to phone only. -->
+  <div id="item" hidden>
+    <p>Someone sent you this from Tag Buddy.</p>
+    <div class="card">
+      <p class="kind" id="kind"></p>
+      <p class="name" id="name" hidden></p>
+      <p class="content" id="content"></p>
+    </div>
+    <div class="actions">
+      <a class="button" id="open" hidden>Open in Tag Buddy</a>
+      <button class="button secondary" id="copy" type="button" hidden>Copy content</button>
+    </div>
+    <p id="noapp" hidden>Tag Buddy does not seem to be installed on this phone, so the item cannot be saved here.
+      You can still copy what it contains.</p>
+    <p id="notandroid" hidden>Tag Buddy is an Android app. Open this link on an Android phone that has it to save the item.</p>
+  </div>
+
+  <div id="empty" hidden>
+    <p>This page opens codes, notes and tag backups sent from the Tag Buddy app. The link you followed holds no item.</p>
+  </div>
+
+  <div id="broken" hidden>
+    <p>This link is incomplete or damaged, or it comes from a newer version of Tag Buddy.
+      Ask for it again, and check that the whole link was copied.</p>
+  </div>
+
+  <p><a href="../">About Tag Buddy</a> · <a href="../privacy.html">Privacy policy</a></p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var PACKAGE = "com.barcodebuddy.app";
+  var FORMATS = {
+    QrCode: "QR code", Code128: "Code 128 barcode", Code39: "Code 39 barcode", Code93: "Code 93 barcode",
+    Ean13: "EAN-13 barcode", Ean8: "EAN-8 barcode", UpcA: "UPC-A barcode", Itf: "ITF barcode", Codabar: "Codabar barcode"
+  };
+
+  function show(id) { document.getElementById(id).hidden = false; }
+
+  function fromBase64Url(text) {
+    var base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    var binary = atob(base64), bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // "1." and raw-deflated JSON in base64url, as the app writes it (ShareLink.Encode).
+  async function decode(payload) {
+    if (payload.indexOf("1.") !== 0) throw new Error("unknown version");
+    var stream = new Blob([fromBase64Url(payload.slice(2))]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return JSON.parse(await new Response(stream).text());
+  }
+
+  function describe(item) {
+    if (item.k === "code") return { kind: FORMATS[item.f] || "Code", content: item.t || "", copy: item.t };
+    if (item.k === "text") return { kind: "Text note", content: item.t || "", copy: item.t };
+    if (item.k === "dump") {
+      var bytes = item.b ? Math.floor(item.b.replace(/=+$/, "").length * 3 / 4) : 0;
+      var lines = [(item.ch || "NFC tag") + " backup", bytes.toLocaleString() + " bytes of tag memory"];
+      if (item.s) lines.push("Serial " + item.s);
+      return { kind: "Tag backup", content: lines.join("\n"), copy: null };
+    }
+    throw new Error("unknown kind");
+  }
+
+  async function main() {
+    var payload = location.hash.slice(1);
+    if (!payload) { show("empty"); return; }
+
+    var item, view;
+    try { item = await decode(payload); view = describe(item); }
+    catch (e) { show("broken"); return; }
+
+    document.getElementById("kind").textContent = view.kind;
+    document.getElementById("content").textContent = view.content;
+    if (item.n) { var name = document.getElementById("name"); name.textContent = item.n; name.hidden = false; }
+    show("item");
+
+    var android = /Android/i.test(navigator.userAgent);
+    var cameBack = new URLSearchParams(location.search).has("noapp");
+    if (android && !cameBack) {
+      // Chrome opens the app with this; when the app is missing it comes back here with ?noapp.
+      var fallback = location.origin + location.pathname + "?noapp#" + payload;
+      var open = document.getElementById("open");
+      open.href = "intent://import?d=" + payload + "#Intent;scheme=tagbuddy;package=" + PACKAGE +
+                  ";S.browser_fallback_url=" + encodeURIComponent(fallback) + ";end";
+      open.hidden = false;
+    }
+    if (cameBack) show("noapp");
+    if (!android) show("notandroid");
+
+    if (view.copy && navigator.clipboard) {
+      var copy = document.getElementById("copy");
+      copy.hidden = false;
+      copy.addEventListener("click", async function () {
+        try { await navigator.clipboard.writeText(view.copy); copy.textContent = "Copied"; }
+        catch (e) { copy.textContent = "Could not copy"; }
+      });
+    }
+  }
+
+  main();
+})();
+</script>
+</body>
+</html>

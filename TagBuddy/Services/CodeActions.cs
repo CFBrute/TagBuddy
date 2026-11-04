@@ -81,7 +81,9 @@ public static class CodeActions
 
     /// <summary>Asks for an optional name and keeps the code in Saved, unless the same code is there already.</summary>
     /// <param name="scanPhoto">The picture the code was just scanned from, when Settings says to keep it; null otherwise.</param>
-    public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage, byte[]? scanPhoto = null)
+    /// <param name="initialName">A name to start the name box with (the sender's name for a shared code).</param>
+    public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage,
+        byte[]? scanPhoto = null, string? initialName = null)
     {
         // The same code may be saved already, with the same picture (nothing to do) or a different one (text under
         // the image, QR options): then saving this one too is a choice, since both are worth keeping.
@@ -102,7 +104,7 @@ public static class CodeActions
         }
 
         var name = await page.DisplayPromptAsync("Save", "Give it a name (optional):",
-            accept: "Save", cancel: "Cancel", placeholder: item.Value, maxLength: 60);
+            accept: "Save", cancel: "Cancel", placeholder: item.Value, maxLength: 60, initialValue: initialName ?? "");
         if (name is null) return;
 
         if (await GroupForNewAsync(page, saved) is not { } group) return;
@@ -118,7 +120,8 @@ public static class CodeActions
 
     /// <summary>Asks for an optional name and keeps the text in Saved as a text note, unless it is there already.
     /// From there it can become a QR code, a barcode, or be written to a tag.</summary>
-    public static async Task SaveTextAsync(Page page, SavedService saved, string text, string prompt = "Give it a name (optional):", byte[]? scanPhoto = null)
+    public static async Task SaveTextAsync(Page page, SavedService saved, string text, string prompt = "Give it a name (optional):",
+        byte[]? scanPhoto = null, string? initialName = null)
     {
         if (saved.ContainsText(text))
         {
@@ -127,12 +130,115 @@ public static class CodeActions
         }
 
         var name = await page.DisplayPromptAsync("Save as text", prompt,
-            accept: "Save", cancel: "Cancel", placeholder: text, maxLength: 60);
+            accept: "Save", cancel: "Cancel", placeholder: text, maxLength: 60, initialValue: initialName ?? "");
         if (name is null) return;
 
         if (await GroupForNewAsync(page, saved) is not { } group) return;
         var item = await saved.AddTextAsync(name, text, group, scanPhoto);
         Notice.Show(SavedNotice("Saved as text", group, item.HasScanPhoto));
+    }
+
+    // ---------------------------------------------------------------- share links
+
+    /// <summary>Sends a saved item to another Tag Buddy as a share link (<see cref="ShareLink"/>), through the Android
+    /// share sheet: any messaging app, mail, or a note to oneself.</summary>
+    public static async Task ShareLinkAsync(Page page, SavedService saved, SavedItem item)
+    {
+        string? link;
+        bool readLeftOut = false;
+        try
+        {
+            if (item.IsDump)
+            {
+                var memory = await saved.ReadDumpAsync(item);
+                var read = await saved.ReadJsonAsync(item);
+                link = ShareLink.CreateForDump(item, memory, read, out readLeftOut);
+                if (link is null)
+                {
+                    await page.DisplayAlertAsync("Too big to send",
+                        $"This tag's memory is {memory.Length:N0} bytes; a link carries up to {ShareLink.MaxDumpBytes:N0}. Use \"Share .bin file\" instead.", "OK");
+                    return;
+                }
+            }
+            else
+            {
+                link = ShareLink.Create(item);
+            }
+        }
+        catch (Exception ex)
+        {
+            await page.DisplayAlertAsync("Could not share", ex.Message, "OK");
+            return;
+        }
+
+        // A MIFARE Classic read keeps the keys that opened the card; whoever gets the link gets them too.
+        if (item.IsDump && !readLeftOut && await saved.ReadJsonAsync(item) is { } json
+            && TagReadFile.FromJson(json)?.Layout?.SectorKeys is { Count: > 0 } keys
+            && !await page.DisplayAlertAsync("Send the card's keys?",
+                $"This card was read with keys for {keys.Count} {(keys.Count == 1 ? "sector" : "sectors")}, and the link includes them, " +
+                "so the other phone can edit and write the card. Anyone who gets the link can use those keys on this card.",
+                "Send", "Cancel"))
+            return;
+
+        if (readLeftOut && !await page.DisplayAlertAsync("Send the memory only?",
+                "Everything read from this tag does not fit in a link. The memory goes, and can be written to a tag; " +
+                "the other phone cannot show it \"as read\" or edit it the same way.", "Send", "Cancel"))
+            return;
+
+        try
+        {
+            await Share.Default.RequestAsync(new ShareTextRequest
+            {
+                Title = "Send to another Tag Buddy",
+                Text = $"\"{item.DisplayName}\" from Tag Buddy. Open the link on a phone with Tag Buddy to save it:\n{link}",
+            });
+        }
+        catch (Exception ex)
+        {
+            await page.DisplayAlertAsync("Could not share", ex.Message, "OK");
+        }
+    }
+
+    /// <summary>The save dialog for an item that arrived in a share link: says what it is, then asks for a name
+    /// (starting with the sender's) and a group the same way saving anything else does.</summary>
+    public static async Task SaveSharedAsync(Page page, SavedService saved, SharedItem shared)
+    {
+        await saved.LoadAsync();
+        var (what, content) = Describe(shared);
+        var named = string.IsNullOrWhiteSpace(shared.Name) ? "" : $"\"{shared.Name}\"\n";
+        if (!await page.DisplayAlertAsync("Received from Tag Buddy", $"{named}{what}\n\n{content}\n\nSave it in Saved?", "Save…", "Cancel"))
+            return;
+
+        if (shared.IsCode)
+        {
+            await SaveCodeAsync(page, saved, shared.ToSavedItem(), "You already have this code.", initialName: shared.Name);
+            return;
+        }
+        if (shared.IsText)
+        {
+            await SaveTextAsync(page, saved, shared.Value!, initialName: shared.Name);
+            return;
+        }
+
+        var name = await page.DisplayPromptAsync("Save", "Give it a name (optional):",
+            accept: "Save", cancel: "Cancel", placeholder: $"{shared.DumpChip} {shared.DumpSerial}".Trim(), maxLength: 60,
+            initialValue: shared.Name ?? "");
+        if (name is null) return;
+        if (await GroupForNewAsync(page, saved) is not { } group) return;
+        await saved.AddSharedDumpAsync(name, shared.DumpSerial ?? "", shared.DumpChip ?? "", shared.DumpBytes, shared.ReadJson, group);
+        Notice.Show(SavedNotice("Saved", group, false));
+    }
+
+    /// <summary>What a received item is, and a short look at its content, for the first question.</summary>
+    internal static (string What, string Content) Describe(SharedItem shared)
+    {
+        static string Short(string s) => s.Length <= 200 ? s : s[..200] + "…";
+        if (shared.IsCode) return (BarcodeTypes.LabelFor(shared.Format!), Short(shared.Value!));
+        if (shared.IsText) return ("Text note", Short(shared.Value!));
+        var chip = string.IsNullOrEmpty(shared.DumpChip) ? "Tag" : shared.DumpChip;
+        var serial = string.IsNullOrEmpty(shared.DumpSerial) ? "" : $", serial {shared.DumpSerial}";
+        var read = shared.ReadJson is null ? "" : ", with everything that was read from it";
+        return ($"{chip} backup", $"{shared.DumpBytes.Length:N0} bytes{serial}{read}.");
     }
 
     /// <summary>Shares a tag dump as a .bin file through the Android share sheet.</summary>

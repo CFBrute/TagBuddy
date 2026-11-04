@@ -16,6 +16,11 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(DiffPage.Route, typeof(DiffPage));
         Routing.RegisterRoute(HelpTopicPage.Route, typeof(HelpTopicPage));
 
+        // A share link from another Tag Buddy: open Saved and offer to save what it holds. The link can arrive
+        // before the shell has loaded when it started the app.
+        IncomingShare.Arrived += () => MainThread.BeginInvokeOnMainThread(ShowIncomingShare);
+        Loaded += (_, _) => ShowIncomingShare();
+
 #if ANDROID
         // A private tag Android handed the app: go to the NFC tab, which shows it with the passphrase box. The tag
         // can arrive before the shell has loaded when it started the app.
@@ -37,6 +42,38 @@ public partial class AppShell : Shell
         if (CurrentItem?.CurrentItem == MoreTab || MoreTab.Navigation.NavigationStack.Count <= 1) return;
         try { await MoreTab.Navigation.PopToRootAsync(false); }
         catch { /* the tab is not shown; it is tidied on the next visit instead */ }
+    }
+
+    private bool _showingShare;
+
+    private async void ShowIncomingShare()
+    {
+        if (_showingShare || !IsLoaded || !IncomingShare.HasPending) return;
+        _showingShare = true;
+        try
+        {
+            var (item, damaged) = IncomingShare.Take();
+            await GoToAsync("//saved");
+            if (CurrentPage is not { } page) return;
+            if (damaged)
+            {
+                await page.DisplayAlertAsync("Link not readable",
+                    "This Tag Buddy link is incomplete or damaged, or it comes from a newer version of the app. Ask for it again, and check that the whole link was copied.", "OK");
+                return;
+            }
+            if (item is not null && IPlatformApplication.Current?.Services.GetService<SavedService>() is { } saved)
+                await CodeActions.SaveSharedAsync(page, saved, item);
+        }
+        catch
+        {
+            // Navigation or a dialog was not possible right now; the link can be opened again.
+        }
+        finally
+        {
+            _showingShare = false;
+        }
+        // Another link may have come in while this one was shown.
+        if (IncomingShare.HasPending) ShowIncomingShare();
     }
 
 #if ANDROID

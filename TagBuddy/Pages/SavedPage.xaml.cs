@@ -331,6 +331,10 @@ public partial class SavedPage : ContentPage
                 await ScanPhotoPage.ShowAsync(item);
                 break;
 
+            case SavedAction.SendToTagBuddy:
+                await CodeActions.ShareLinkAsync(this, _saved, item);
+                break;
+
             case SavedAction.ToBarcode:
                 await AppNavigation.ToBarcodeGeneratorAsync(item.Value,
                     item.IsCode && !item.IsQr ? item.Format : BarcodeTypes.Linear[0].Key);

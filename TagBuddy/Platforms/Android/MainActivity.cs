@@ -14,6 +14,15 @@ namespace TagBuddy;
 [IntentFilter([NfcAdapter.ActionNdefDiscovered], Categories = [Intent.CategoryDefault], DataMimeType = SealedText.MimeType)]
 // And when a Proxmark (USB vendor 0x9AC4, see Resources/xml/proxmark_usb_filter.xml) is plugged in over OTG.
 [IntentFilter([UsbManager.ActionUsbDeviceAttached])]
+// A saved item sent from another Tag Buddy (ShareLink): the share page's "Open in Tag Buddy" button hands it over as
+// tagbuddy://import?d=…, which no other app claims.
+[IntentFilter([Intent.ActionView], Categories = [Intent.CategoryDefault, Intent.CategoryBrowsable],
+    DataScheme = ShareLink.Scheme, DataHost = ShareLink.ImportHost)]
+// The share page's own address too. Android only opens it here by itself once the site proves the app is its own
+// (an assetlinks.json at the site's root), or the person allows it under the app's "Open by default" settings;
+// until then the link opens the page in the browser, whose button opens the app instead.
+[IntentFilter([Intent.ActionView], Categories = [Intent.CategoryDefault, Intent.CategoryBrowsable],
+    DataScheme = "https", DataHost = "cfbrute.github.io", DataPathPrefix = "/TagBuddy/s")]
 [MetaData(UsbManager.ActionUsbDeviceAttached, Resource = "@xml/proxmark_usb_filter")]
 public class MainActivity : MauiAppCompatActivity
 {
@@ -51,7 +60,7 @@ public class MainActivity : MauiAppCompatActivity
         base.OnDestroy();
     }
 
-    /// <summary>The app was already running (single top): a private tag or an attached Proxmark arrives here.</summary>
+    /// <summary>The app was already running (single top): a private tag, an attached Proxmark or a share link arrives here.</summary>
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
@@ -60,6 +69,7 @@ public class MainActivity : MauiAppCompatActivity
 
     private static void HandleIntent(Intent? intent)
     {
+        if (intent?.Action == Intent.ActionView && IncomingShare.Offer(intent.DataString)) return;
         NfcReader.Instance.HandleIntent(intent);
         if (intent?.Action == UsbManager.ActionUsbDeviceAttached) ProxmarkUsb.NoteAttached();
     }

@@ -341,6 +341,30 @@ public class SavedService
 
     private string ReadPath(SavedItem item) => Path.Combine(_readDir, item.ReadFile);
 
+    /// <summary>The read a dump was saved from, as the JSON stored for it; null when there is none.</summary>
+    public async Task<string?> ReadJsonAsync(SavedItem item)
+    {
+        if (!item.HasRead) return null;
+        try { return await File.ReadAllTextAsync(ReadPath(item)); }
+        catch { return null; }
+    }
+
+    /// <summary>Keeps a dump that arrived in a share link: its memory, and the read it came from when the link
+    /// carried one (already checked to parse, see <see cref="ShareLink"/>).</summary>
+    public async Task<SavedItem> AddSharedDumpAsync(string name, string serial, string chip, byte[] data, string? readJson, string group)
+    {
+        var item = await AddDumpAsync(name, serial, chip.Length > 0 ? chip : "Type2", data);
+        if (readJson is not null)
+        {
+            Directory.CreateDirectory(_readDir);
+            item.ReadFile = Path.ChangeExtension(item.DumpFile, ".json");
+            await File.WriteAllTextAsync(ReadPath(item), readJson);
+        }
+        if (group.Trim().Length > 0) item.Group = group.Trim();
+        await SaveAsync();
+        return item;
+    }
+
     /// <summary>The segments of a read that has no page image, laid end to end in segment order (a segment not read
     /// is left out), as the bytes behind the dump's size and readable-text line.</summary>
     private static byte[] ReadImage(NfcTagInfo tag) =>

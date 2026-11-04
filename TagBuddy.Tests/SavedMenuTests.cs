@@ -14,12 +14,12 @@ public class SavedMenuTests
         menu.SelectMany(e => e.Children is { } c ? AllActions(c) : [e.Action!.Value]);
 
     [Fact]
-    public void A_saved_QR_code_of_a_link_has_six_lines()
+    public void A_saved_QR_code_of_a_link_has_eight_lines()
     {
         var item = new SavedItem { Kind = SavedKind.Code, Format = "QrCode", Value = "https://youtube.com/shorts/abc" };
         var menu = SavedMenu.For(item, "YouTube");
 
-        Assert.Equal(["Open in YouTube", "View page in app", "QR code image…", "Copy text", "Use the text…", "Rename", "Move to a group"], Labels(menu));
+        Assert.Equal(["Open in YouTube", "View page in app", "QR code image…", "Copy text", "Use the text…", "Send to another Tag Buddy", "Rename", "Move to a group"], Labels(menu));
         Assert.Equal(["Share image", "Save to gallery"], Labels(Group(menu, "QR code image…").Children!));
         Assert.Equal(["In the QR generator", "In the Barcode generator", "Write it to an NFC tag"],
             Labels(Group(menu, "Use the text…").Children!));
@@ -30,7 +30,7 @@ public class SavedMenuTests
     {
         var menu = SavedMenu.For(new SavedItem { Kind = SavedKind.Code, Format = "Ean13", Value = "400638133393" });
 
-        Assert.Equal(["Barcode image…", "Copy text", "Use the text…", "Rename", "Move to a group"], Labels(menu));
+        Assert.Equal(["Barcode image…", "Copy text", "Use the text…", "Send to another Tag Buddy", "Rename", "Move to a group"], Labels(menu));
         Assert.Equal("In the Barcode generator", Group(menu, "Use the text…").Children![0].Label);
     }
 
@@ -39,7 +39,7 @@ public class SavedMenuTests
     {
         var menu = SavedMenu.For(new SavedItem { Kind = SavedKind.Text, Value = "Door code 4711" });
 
-        Assert.Equal(["Copy text", "Use the text…", "Edit text", "Rename", "Move to a group"], Labels(menu));
+        Assert.Equal(["Copy text", "Use the text…", "Edit text", "Send to another Tag Buddy", "Rename", "Move to a group"], Labels(menu));
         Assert.Contains(SavedAction.ToDump, AllActions(menu));
         Assert.DoesNotContain(SavedAction.ShareImage, AllActions(menu));   // a note has no image
     }
@@ -63,10 +63,10 @@ public class SavedMenuTests
     public void A_dump_offers_what_fits_a_dump()
     {
         var withText = new SavedItem { Kind = SavedKind.Dump, DumpChip = "NTAG215", DumpText = "Hello" };
-        Assert.Equal(["Write to a tag", "Share .bin file", "Copy readable text", "Rename", "Move to a group"], Labels(SavedMenu.For(withText)));
+        Assert.Equal(["Write to a tag", "Share .bin file", "Copy readable text", "Send to another Tag Buddy", "Rename", "Move to a group"], Labels(SavedMenu.For(withText)));
 
         var read = new SavedItem { Kind = SavedKind.Dump, DumpChip = "MIFARE Classic 1K", ReadFile = "x.json" };
-        Assert.Equal(["View as read", "Edit and write to the tag", "Share .bin file", "Rename", "Move to a group"], Labels(SavedMenu.For(read)));
+        Assert.Equal(["View as read", "Edit and write to the tag", "Share .bin file", "Send to another Tag Buddy", "Rename", "Move to a group"], Labels(SavedMenu.For(read)));
         var type2Read = new SavedItem { Kind = SavedKind.Dump, DumpChip = "NTAG215", ReadFile = "y.json" };
         Assert.Equal("Write to a tag", Labels(SavedMenu.For(type2Read))[2]);
 
@@ -81,7 +81,7 @@ public class SavedMenuTests
         Assert.DoesNotContain(SavedMenu.ViewPhotoLabel, Labels(SavedMenu.For(plain)));
 
         var withPicture = new SavedItem { Kind = SavedKind.Code, Format = "Ean13", Value = "400638133393", ScanPhoto = "a.jpg" };
-        Assert.Equal(["Barcode image…", SavedMenu.ViewPhotoLabel, "Copy text", "Use the text…", "Rename", "Move to a group"],
+        Assert.Equal(["Barcode image…", SavedMenu.ViewPhotoLabel, "Copy text", "Use the text…", "Send to another Tag Buddy", "Rename", "Move to a group"],
             Labels(SavedMenu.For(withPicture)));
 
         var text = new SavedItem { Kind = SavedKind.Text, Value = "a note", ScanPhoto = "b.jpg" };

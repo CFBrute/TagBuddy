@@ -5,7 +5,7 @@ namespace TagBuddy.Models;
 /// <summary>Everything the Saved menu can do with an item.</summary>
 public enum SavedAction
 {
-    Open, ViewPage, ShareImage, SaveImage, ViewPhoto, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
+    Open, ViewPage, ShareImage, SaveImage, ViewPhoto, SendToTagBuddy, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
     WriteDump, ShareDump, CopyDumpText, ViewRead, EditRead,
 }
 
@@ -22,6 +22,9 @@ public sealed record MenuEntry(string Label, SavedAction? Action = null, IReadOn
 public static class SavedMenu
 {
     public const string Delete = "Delete";
+
+    /// <summary>The line that sends an item to someone else's Tag Buddy as a share link.</summary>
+    public const string SendLabel = "Send to another Tag Buddy";
 
     /// <summary>The line that opens the picture an item was scanned from, only there when one was kept.</summary>
     public const string ViewPhotoLabel = "Picture it was scanned from";
@@ -43,6 +46,7 @@ public static class SavedMenu
             if (item.IsType2Dump) menu.Add(new("Write to a tag", SavedAction.WriteDump));
             menu.Add(new("Share .bin file", SavedAction.ShareDump));
             if (item.HasDumpText) menu.Add(new("Copy readable text", SavedAction.CopyDumpText));
+            menu.Add(new(SendLabel, SavedAction.SendToTagBuddy));
             menu.Add(new("Rename", SavedAction.Rename));
             menu.Add(new(GroupLabel(item), SavedAction.MoveToGroup));
             return menu;
@@ -71,6 +75,7 @@ public static class SavedMenu
         menu.Add(Group("Use the text…", [.. useText]));
 
         if (item.IsText) menu.Add(new("Edit text", SavedAction.EditText));
+        menu.Add(new(SendLabel, SavedAction.SendToTagBuddy));
         menu.Add(new("Rename", SavedAction.Rename));
         menu.Add(new(GroupLabel(item), SavedAction.MoveToGroup));
         return menu;
