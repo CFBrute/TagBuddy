@@ -11,7 +11,18 @@ namespace TagBuddy.Services;
 /// both are folded in the first time this runs.</summary>
 public class SavedService
 {
-    private readonly string _path = Path.Combine(FileSystem.AppDataDirectory, "saved.json");
+    private readonly string _path = FilePath;
+
+    /// <summary>The file everything saved is kept in.</summary>
+    public static string FilePath => Path.Combine(FileSystem.AppDataDirectory, "saved.json");
+
+    /// <summary>Whether the saved file at <paramref name="path"/> holds at least one item, without reading it: an
+    /// empty list is written as "[]", so anything longer has items. Cheap enough to decide the first tab at start.</summary>
+    public static bool HasItems(string path)
+    {
+        var file = new FileInfo(path);
+        return file.Exists && file.Length > "[]".Length + 4;   // room for a line break or BOM around an empty list
+    }
     private readonly string _legacyFavorites = Path.Combine(FileSystem.AppDataDirectory, "favorites.json");
     private readonly string _dumpDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-dumps");
     private readonly string _readDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-reads");

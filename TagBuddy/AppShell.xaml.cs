@@ -9,6 +9,20 @@ public partial class AppShell : Shell
     public AppShell()
     {
         InitializeComponent();
+
+        // Start on Saved when there is something in it: what people kept is what they come back for. Decided before
+        // the first frame, from the size of the saved file, so the app does not flash Generate first. A tag, share
+        // link or Proxmark that opened the app still goes to its own tab afterwards.
+        try
+        {
+            if (SavedService.HasItems(SavedService.FilePath) && SavedContent.Parent is ShellSection saved)
+                CurrentItem.CurrentItem = saved;
+        }
+        catch
+        {
+            // Storage not readable yet: start on Generate as before.
+        }
+
         Routing.RegisterRoute(ShowBarcodePage.Route, typeof(ShowBarcodePage));
         Routing.RegisterRoute(WebPage.Route, typeof(WebPage));
         Routing.RegisterRoute(DumpPage.Route, typeof(DumpPage));

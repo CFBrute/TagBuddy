@@ -65,3 +65,28 @@ public class SavedItemTests
         Assert.Equal("", item.ScanPhoto);
     }
 }
+
+/// <summary>Whether the app starts on Saved: only when the saved file holds items.</summary>
+public class SavedStartTests
+{
+    [Fact]
+    public void The_app_starts_on_Saved_only_when_something_is_saved()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"saved-{Guid.NewGuid():N}.json");
+        try
+        {
+            Assert.False(TagBuddy.Services.SavedService.HasItems(path));   // first start: no file
+
+            File.WriteAllText(path, "[]");
+            Assert.False(TagBuddy.Services.SavedService.HasItems(path));   // everything deleted
+
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(
+                new List<SavedItem> { new() { Kind = SavedKind.Text, Value = "x" } }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Assert.True(TagBuddy.Services.SavedService.HasItems(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

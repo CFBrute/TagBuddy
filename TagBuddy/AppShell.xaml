@@ -18,7 +18,9 @@
                           Route="barcode"
                           ContentTemplate="{DataTemplate pages:GeneratePage}" />
         </Tab>
-        <ShellContent Title="Saved"
+        <!-- The app starts here once something is saved (see AppShell's constructor), else on Generate -->
+        <ShellContent x:Name="SavedContent"
+                      Title="Saved"
                       Icon="tab_saved.png"
                       Route="saved"
                       ContentTemplate="{DataTemplate pages:SavedPage}" />
