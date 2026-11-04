@@ -5,7 +5,7 @@ namespace TagBuddy.Models;
 /// <summary>Everything the Saved menu can do with an item.</summary>
 public enum SavedAction
 {
-    Open, ViewPage, ShareImage, SaveImage, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
+    Open, ViewPage, ShareImage, SaveImage, ViewPhoto, ToQr, ToBarcode, ToNfc, ToDump, Copy, EditText, Rename, MoveToGroup,
     WriteDump, ShareDump, CopyDumpText, ViewRead, EditRead,
 }
 
@@ -22,6 +22,9 @@ public sealed record MenuEntry(string Label, SavedAction? Action = null, IReadOn
 public static class SavedMenu
 {
     public const string Delete = "Delete";
+
+    /// <summary>The line that opens the picture an item was scanned from, only there when one was kept.</summary>
+    public const string ViewPhotoLabel = "Picture it was scanned from";
 
     /// <param name="appName">The app the value opens in ("YouTube", an authenticator), when known, for the open
     /// line's label.</param>
@@ -55,6 +58,7 @@ public static class SavedMenu
             var image = item.IsQr ? "QR code image" : "Barcode image";
             menu.Add(Group($"{image}…", new("Share image", SavedAction.ShareImage), new("Save to gallery", SavedAction.SaveImage)));
         }
+        if (item.HasScanPhoto) menu.Add(new(ViewPhotoLabel, SavedAction.ViewPhoto));
 
         menu.Add(new("Copy text", SavedAction.Copy));
 

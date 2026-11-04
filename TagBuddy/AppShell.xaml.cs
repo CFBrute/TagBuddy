@@ -12,6 +12,7 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(ShowBarcodePage.Route, typeof(ShowBarcodePage));
         Routing.RegisterRoute(WebPage.Route, typeof(WebPage));
         Routing.RegisterRoute(DumpPage.Route, typeof(DumpPage));
+        Routing.RegisterRoute(ScanPhotoPage.Route, typeof(ScanPhotoPage));
         Routing.RegisterRoute(DiffPage.Route, typeof(DiffPage));
         Routing.RegisterRoute(HelpTopicPage.Route, typeof(HelpTopicPage));
 

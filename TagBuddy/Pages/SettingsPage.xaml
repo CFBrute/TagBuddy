@@ -42,6 +42,17 @@
             </Grid>
             <controls:InfoExpander Text="After you read a tag that you have already saved, if it has changed since, the app offers to update the saved copy. A saved copy that still matches is never asked about. Off, it never asks." />
 
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <Label Grid.Column="0" Text="Keep the picture a code was scanned from" VerticalOptions="Center" />
+                <Switch Grid.Column="1" x:Name="KeepPhotoSwitch" Toggled="OnKeepPhotoToggled"
+                        OnColor="{StaticResource Primary}" VerticalOptions="Center" />
+            </Grid>
+            <controls:InfoExpander Text="When you save a code (or its text) right after scanning it, the camera picture or the picture you picked is kept with it, so you can see later where the code came from: a ticket, a parcel, a poster. Open it from &quot;Picture it was scanned from&quot; in the item's menu in Saved. Pictures are shrunk, stay in the app's own storage on this phone, and go when the item is deleted. Off, nothing new is kept; pictures already stored stay until you delete them below." />
+            <Label x:Name="ScanPhotoInfo" FontSize="12" TextColor="Gray" />
+            <Button x:Name="DeletePhotosButton" Text="Delete stored scan pictures" Clicked="OnDeleteScanPhotos"
+                    BackgroundColor="#6B7280" TextColor="White" HorizontalOptions="Start"
+                    Padding="14,6" MinimumHeightRequest="36" FontSize="13" />
+
             <!-- NTAG/Ultralight passwords the app has seen open a tag, remembered by serial like the Classic keys -->
             <Label x:Name="PasswordStoreInfo" FontSize="12" TextColor="Gray" />
             <Button x:Name="ForgetPasswordsButton" Text="Forget remembered tag passwords" Clicked="OnForgetRememberedPasswords"

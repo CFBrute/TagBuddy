@@ -80,7 +80,8 @@ public static class CodeActions
         PickGroupAsync(page, saved, title: "Save in which group?");
 
     /// <summary>Asks for an optional name and keeps the code in Saved, unless the same code is there already.</summary>
-    public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage)
+    /// <param name="scanPhoto">The picture the code was just scanned from, when Settings says to keep it; null otherwise.</param>
+    public static async Task SaveCodeAsync(Page page, SavedService saved, SavedItem item, string alreadySavedMessage, byte[]? scanPhoto = null)
     {
         // The same code may be saved already, with the same picture (nothing to do) or a different one (text under
         // the image, QR options): then saving this one too is a choice, since both are worth keeping.
@@ -107,13 +108,17 @@ public static class CodeActions
         if (await GroupForNewAsync(page, saved) is not { } group) return;
         item.Name = name.Trim();
         item.Group = group;
-        await saved.AddAsync(item);
-        Notice.Show(group.Length > 0 ? $"Saved in {group}" : "Saved");
+        await saved.AddAsync(item, scanPhoto);
+        Notice.Show(SavedNotice("Saved", group, item.HasScanPhoto));
     }
+
+    /// <summary>"Saved", "Saved in Work", "Saved with the picture in Work": what was kept and where.</summary>
+    internal static string SavedNotice(string saved, string group, bool withPicture) =>
+        saved + (withPicture ? " with the picture" : "") + (group.Length > 0 ? $" in {group}" : "");
 
     /// <summary>Asks for an optional name and keeps the text in Saved as a text note, unless it is there already.
     /// From there it can become a QR code, a barcode, or be written to a tag.</summary>
-    public static async Task SaveTextAsync(Page page, SavedService saved, string text, string prompt = "Give it a name (optional):")
+    public static async Task SaveTextAsync(Page page, SavedService saved, string text, string prompt = "Give it a name (optional):", byte[]? scanPhoto = null)
     {
         if (saved.ContainsText(text))
         {
@@ -126,8 +131,8 @@ public static class CodeActions
         if (name is null) return;
 
         if (await GroupForNewAsync(page, saved) is not { } group) return;
-        await saved.AddTextAsync(name, text, group);
-        Notice.Show(group.Length > 0 ? $"Saved as text in {group}" : "Saved as text");
+        var item = await saved.AddTextAsync(name, text, group, scanPhoto);
+        Notice.Show(SavedNotice("Saved as text", group, item.HasScanPhoto));
     }
 
     /// <summary>Shares a tag dump as a .bin file through the Android share sheet.</summary>

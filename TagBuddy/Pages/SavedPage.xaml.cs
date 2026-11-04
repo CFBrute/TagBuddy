@@ -327,6 +327,10 @@ public partial class SavedPage : ContentPage
                 await CodeActions.SaveImageAsync(this, item);
                 break;
 
+            case SavedAction.ViewPhoto:
+                await ScanPhotoPage.ShowAsync(item);
+                break;
+
             case SavedAction.ToBarcode:
                 await AppNavigation.ToBarcodeGeneratorAsync(item.Value,
                     item.IsCode && !item.IsQr ? item.Format : BarcodeTypes.Linear[0].Key);

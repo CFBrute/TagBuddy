@@ -75,6 +75,29 @@ public class SavedMenuTests
     }
 
     [Fact]
+    public void The_scanned_picture_line_is_there_only_when_a_picture_was_kept()
+    {
+        var plain = new SavedItem { Kind = SavedKind.Code, Format = "Ean13", Value = "400638133393" };
+        Assert.DoesNotContain(SavedMenu.ViewPhotoLabel, Labels(SavedMenu.For(plain)));
+
+        var withPicture = new SavedItem { Kind = SavedKind.Code, Format = "Ean13", Value = "400638133393", ScanPhoto = "a.jpg" };
+        Assert.Equal(["Barcode image…", SavedMenu.ViewPhotoLabel, "Copy text", "Use the text…", "Rename", "Move to a group"],
+            Labels(SavedMenu.For(withPicture)));
+
+        var text = new SavedItem { Kind = SavedKind.Text, Value = "a note", ScanPhoto = "b.jpg" };
+        Assert.Contains(SavedAction.ViewPhoto, AllActions(SavedMenu.For(text)));
+    }
+
+    [Fact]
+    public void The_saved_notice_says_when_a_picture_was_kept()
+    {
+        Assert.Equal("Saved", TagBuddy.Services.CodeActions.SavedNotice("Saved", "", false));
+        Assert.Equal("Saved in Work", TagBuddy.Services.CodeActions.SavedNotice("Saved", "Work", false));
+        Assert.Equal("Saved with the picture", TagBuddy.Services.CodeActions.SavedNotice("Saved", "", true));
+        Assert.Equal("Saved as text with the picture in Work", TagBuddy.Services.CodeActions.SavedNotice("Saved as text", "Work", true));
+    }
+
+    [Fact]
     public void The_tap_action_is_not_repeated_in_the_menu()
     {
         // Tapping a code shows it full screen and tapping a dump shows its memory; the menu has the rest.

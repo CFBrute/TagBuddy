@@ -15,6 +15,7 @@ public class SavedService
     private readonly string _legacyFavorites = Path.Combine(FileSystem.AppDataDirectory, "favorites.json");
     private readonly string _dumpDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-dumps");
     private readonly string _readDir = Path.Combine(FileSystem.AppDataDirectory, "nfc-reads");
+    private readonly string _photoDir = Path.Combine(FileSystem.AppDataDirectory, "scan-photos");
     private string LegacyDumpIndex => Path.Combine(_dumpDir, "index.json");
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private bool _loaded;
@@ -70,6 +71,8 @@ public class SavedService
                     try { item.DumpText = DumpText.Describe(await File.ReadAllBytesAsync(DumpPath(item))); }
                     catch { /* keep what was stored */ }
                 }
+                // A scanned picture whose file is gone (deleted from Settings, or lost) is simply no picture.
+                if (item.HasScanPhoto && !File.Exists(ScanPhotoPath(item))) item.ScanPhoto = string.Empty;
                 Items.Add(item);
             }
 
@@ -173,19 +176,71 @@ public class SavedService
 
     // ---------------------------------------------------------------- add / remove
 
-    public async Task AddAsync(SavedItem item)
+    /// <param name="scanPhoto">The picture the code was just read from, as a JPEG, to keep with the item; null for
+    /// none. A picture that cannot be written is dropped rather than failing the save.</param>
+    public async Task AddAsync(SavedItem item, byte[]? scanPhoto = null)
     {
         await LoadAsync();
+        if (scanPhoto is { Length: > 0 })
+        {
+            try
+            {
+                Directory.CreateDirectory(_photoDir);
+                item.ScanPhoto = $"{item.Id:N}.jpg";
+                await File.WriteAllBytesAsync(ScanPhotoPath(item), scanPhoto);
+            }
+            catch { item.ScanPhoto = string.Empty; }
+        }
         Items.Insert(0, item);
         await SaveAsync();
         LinkPreviews.Prefetch(item.Value);   // Saved then shows the preview and icon without waiting
     }
 
-    public async Task<SavedItem> AddTextAsync(string name, string text, string group = "")
+    public async Task<SavedItem> AddTextAsync(string name, string text, string group = "", byte[]? scanPhoto = null)
     {
         var item = new SavedItem { Kind = SavedKind.Text, Name = name.Trim(), Value = text, Group = group.Trim() };
-        await AddAsync(item);
+        await AddAsync(item, scanPhoto);
         return item;
+    }
+
+    // ---------------------------------------------------------------- scanned pictures
+
+    public string ScanPhotoPath(SavedItem item) => Path.Combine(_photoDir, item.ScanPhoto);
+
+    /// <summary>Drops the picture an item was scanned from; the item stays.</summary>
+    public async Task RemoveScanPhotoAsync(SavedItem item)
+    {
+        await LoadAsync();
+        if (!item.HasScanPhoto) return;
+        try { File.Delete(ScanPhotoPath(item)); } catch { /* already gone */ }
+        item.ScanPhoto = string.Empty;
+        await SaveAsync();
+    }
+
+    /// <summary>How many scanned pictures are stored and how many bytes they take, for Settings.</summary>
+    public (int Count, long Bytes) ScanPhotoStats()
+    {
+        try
+        {
+            if (!Directory.Exists(_photoDir)) return (0, 0);
+            var files = new DirectoryInfo(_photoDir).GetFiles("*.jpg");
+            return (files.Length, files.Sum(f => f.Length));
+        }
+        catch { return (0, 0); }
+    }
+
+    /// <summary>Deletes every scanned picture; the items stay, without their pictures.</summary>
+    public async Task DeleteAllScanPhotosAsync()
+    {
+        await LoadAsync();
+        foreach (var item in Items.Where(i => i.HasScanPhoto)) item.ScanPhoto = string.Empty;
+        try
+        {
+            if (Directory.Exists(_photoDir))
+                foreach (var file in Directory.GetFiles(_photoDir)) File.Delete(file);
+        }
+        catch { /* whatever could not be deleted is dropped at the next load */ }
+        await SaveAsync();
     }
 
     /// <summary>Stores a tag's memory as a .bin file and lists it.</summary>
@@ -303,6 +358,7 @@ public class SavedService
 
     private void DeleteFiles(SavedItem item)
     {
+        if (item.HasScanPhoto) { try { File.Delete(ScanPhotoPath(item)); } catch { /* already gone */ } }
         if (!item.IsDump) return;
         try { File.Delete(DumpPath(item)); } catch { /* already gone */ }
         if (item.HasRead) { try { File.Delete(ReadPath(item)); } catch { /* already gone */ } }

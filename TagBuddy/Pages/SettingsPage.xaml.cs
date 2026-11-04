@@ -2,16 +2,20 @@ using TagBuddy.Services;
 
 namespace TagBuddy.Pages;
 
-/// <summary>The Settings tab under More: scanning and NFC feedback, full-screen brightness and link previews.</summary>
+/// <summary>The Settings tab under More: scanning and NFC feedback, scanned pictures, full-screen brightness and
+/// link previews.</summary>
 public partial class SettingsPage : ContentPage
 {
+    private readonly SavedService _saved;
     private bool _loading;
 
-    public SettingsPage()
+    public SettingsPage(SavedService saved)
     {
         InitializeComponent();
+        _saved = saved;
 
         _loading = true;
+        KeepPhotoSwitch.IsToggled = AppSettings.KeepScanPhotos;
         VibrateSwitch.IsToggled = AppSettings.Vibrate;
         SoundSwitch.IsToggled = AppSettings.Sound;
         NfcSoundSwitch.IsToggled = AppSettings.NfcSound;
@@ -27,6 +31,38 @@ public partial class SettingsPage : ContentPage
         HardwareSection.IsVisible = Features.ProxmarkUsb;
         ShowKeyStoreInfo();
         ShowPasswordStoreInfo();
+        ShowScanPhotoInfo();
+    }
+
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        ShowScanPhotoInfo();   // items may have been deleted, or saved with pictures, since the last visit
+    }
+
+    private void OnKeepPhotoToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_loading) return;
+        AppSettings.KeepScanPhotos = e.Value;
+    }
+
+    private void ShowScanPhotoInfo()
+    {
+        var (count, bytes) = _saved.ScanPhotoStats();
+        ScanPhotoInfo.Text = count == 0
+            ? "No scanned pictures are stored."
+            : $"{count} scanned {(count == 1 ? "picture" : "pictures")} stored, {bytes / 1024.0 / 1024.0:0.#} MB. Deleting a saved item deletes its picture too.";
+        DeletePhotosButton.IsEnabled = count > 0;
+    }
+
+    private async void OnDeleteScanPhotos(object? sender, EventArgs e)
+    {
+        var (count, _) = _saved.ScanPhotoStats();
+        if (!await DisplayAlertAsync("Delete scan pictures", $"Delete the {count} stored {(count == 1 ? "picture" : "pictures")}? The saved items stay, without their pictures.", "Delete", "Cancel"))
+            return;
+        await _saved.DeleteAllScanPhotosAsync();
+        ShowScanPhotoInfo();
+        Notice.Show("Scan pictures deleted");
     }
 
     private readonly MifareKeyStore _keyStore = new();
